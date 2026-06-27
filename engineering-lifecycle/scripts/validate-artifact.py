@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 from eng_common import REQUIRED_FRONT_MATTER, parse_front_matter, repo_root
@@ -28,6 +29,11 @@ REQUIRED_SECTIONS = {
     "synthesis": ["Question", "Council Status", "Evidence", "Advisor Positions", "Blind Peer Review Summary", "Recommendation", "Dissent Log", "Decision", "Confidence"],
 }
 
+PLACEHOLDER_RE = re.compile(
+    r"\b(?:TODO|TBD|FIXME|PLACEHOLDER)\b|<[^>\n]*(?:replace|todo|placeholder|example)[^>\n]*>",
+    re.IGNORECASE,
+)
+
 
 def validate_markdown(path: Path, root: Path | None = None) -> list[str]:
     errors: list[str] = []
@@ -38,6 +44,8 @@ def validate_markdown(path: Path, root: Path | None = None) -> list[str]:
         errors.append(f"{path}: missing front matter keys: {', '.join(missing)}")
     if not body.strip():
         errors.append(f"{path}: artifact body is empty")
+    if PLACEHOLDER_RE.search(body):
+        errors.append(f"{path}: unresolved placeholder")
     normalized = path.name.lower()
     for marker, sections in REQUIRED_SECTIONS.items():
         if marker in normalized:

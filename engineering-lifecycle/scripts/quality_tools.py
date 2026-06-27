@@ -157,7 +157,8 @@ def file_from_payload(payload: dict[str, Any]) -> str:
 def text_from_payload(payload: dict[str, Any]) -> str:
     tool_input = payload.get("tool_input") or payload.get("input") or payload.get("toolInput") or {}
     if isinstance(tool_input, dict):
-        return "\n".join(str(tool_input.get(key, "")) for key in ("content", "new_string", "old_string", "text"))
+        values = [str(tool_input.get(key, "")) for key in ("content", "new_string", "old_string", "text") if tool_input.get(key)]
+        return "\n".join(values)
     return ""
 
 

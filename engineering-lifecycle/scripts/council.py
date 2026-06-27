@@ -464,6 +464,8 @@ def ask(
     fallback_on_error: bool = False,
     max_context_chars: int = 24000,
     timeout: int = 120,
+    selected_roles: list[str] | None = None,
+    quorum_min: int = 3,
 ) -> Path:
     run_id = run_id or slugify(question)[:48]
     base = engineering_root(root) / "council" / run_id
@@ -485,11 +487,12 @@ def ask(
     advisor_dir = base / "advisor-drafts"
     anonymized_dir = base / "anonymized-drafts"
     peer_dir = base / "peer-reviews"
-    roles = [role for role, _ in ROLES]
+    role_defs = [(role, purpose) for role, purpose in ROLES if selected_roles is None or role in selected_roles]
+    roles = [role for role, _ in role_defs]
     advisor_texts: list[str] = []
     anonymous_ids: list[str] = []
 
-    for idx, (role, purpose) in enumerate(ROLES, 1):
+    for idx, (role, purpose) in enumerate(role_defs, 1):
         fallback = make_deterministic_advisor(role, purpose, question, files, run_id)
         prompt = render_advisor_prompt(role, purpose, question, snippets)
         draft = render_live_or_deterministic(
@@ -516,7 +519,7 @@ def ask(
         write_text(anonymized_dir / f"{anonymous_id}.md", make_anonymized(anonymous_id, str(advisor_path.relative_to(base)).replace("\\", "/"), draft))
         event(events, "advisor_draft_written", {"role": role, "mode": mode})
 
-    quorum = len(list(advisor_dir.glob("*.md"))) >= 3
+    quorum = len(list(advisor_dir.glob("*.md"))) >= quorum_min
     anonymous_texts = [(anonymized_dir / f"{anonymous_id}.md").read_text(encoding="utf-8") for anonymous_id in anonymous_ids]
     peer_texts: list[str] = []
     for role in roles:
@@ -568,6 +571,7 @@ def ask(
             "question": question,
             "status": "quorum-met" if quorum else "quorum-failed",
             "advisor_count": len(roles),
+            "quorum_min": quorum_min,
             "context": files,
             "synthesis": str((base / "synthesis.md").relative_to(root)).replace("\\", "/"),
             "mode": mode,
@@ -591,6 +595,8 @@ def main() -> int:
     ask_parser.add_argument("--fallback-on-error", action="store_true", help="Use deterministic output when a live adapter fails")
     ask_parser.add_argument("--max-context-chars", type=int, default=int(os.environ.get("ENGINEERING_COUNCIL_MAX_CONTEXT_CHARS", "24000")))
     ask_parser.add_argument("--timeout", type=int, default=int(os.environ.get("ENGINEERING_COUNCIL_TIMEOUT_SECONDS", "120")))
+    ask_parser.add_argument("--role", action="append", choices=[role for role, _ in ROLES], dest="roles")
+    ask_parser.add_argument("--quorum-min", type=int, default=int(os.environ.get("ENGINEERING_COUNCIL_QUORUM_MIN", "3")))
     args = parser.parse_args()
     root = repo_root(Path(args.root))
     if args.command == "ask":
@@ -604,6 +610,8 @@ def main() -> int:
             args.fallback_on_error,
             args.max_context_chars,
             args.timeout,
+            args.roles,
+            args.quorum_min,
         )
         print(str(path))
     return 0

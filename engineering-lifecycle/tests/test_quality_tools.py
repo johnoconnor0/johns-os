@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,81 @@ class QualityToolTests(unittest.TestCase):
             check=True,
         )
         return json.loads(proc.stdout)
+
+    def run_hook(self, script: str, payload: dict, root: Path | None = None, check: bool = True) -> dict:
+        cmd = [sys.executable, str(ROOT / script), "--hook"]
+        if root is not None:
+            cmd.extend(["--root", str(root)])
+        proc = subprocess.run(
+            cmd,
+            input=json.dumps(payload),
+            text=True,
+            capture_output=True,
+            check=check,
+        )
+        return json.loads(proc.stdout)
+
+    def run_artifact_validator(self, root: Path, path: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "validate-artifact.py"), "--root", str(root), str(path.relative_to(root))],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def write_prd_artifact(
+        self,
+        root: Path,
+        name: str,
+        body: str,
+        source_artifacts: list[str] | None = None,
+        include_frontmatter: bool = True,
+    ) -> Path:
+        path = root / name
+        source_lines = "\n".join(f"  - {item}" for item in (source_artifacts or ["none"]))
+        frontmatter = (
+            "---\n"
+            "initiative_id: test-prd\n"
+            "skill: create-prd\n"
+            "created_at: 2026-06-27T00:00:00+00:00\n"
+            "status: draft\n"
+            "confidence: medium\n"
+            "source_artifacts:\n"
+            f"{source_lines}\n"
+            "---\n\n"
+        )
+        path.write_text((frontmatter if include_frontmatter else "") + body, encoding="utf-8")
+        return path
+
+    def valid_prd_body(self, extra: str = "") -> str:
+        return (
+            "# Product Requirements Document\n\n"
+            "## Problem\n\nCheckout lacks reliable audit exports.\n\n"
+            "## Goals\n\nProvide exportable audit events.\n\n"
+            "## Functional Requirements\n\n- Export filtered audit events.\n\n"
+            "## Non-Functional Requirements\n\n- Preserve tenant boundaries.\n\n"
+            "## Acceptance Criteria\n\n- Given a tenant admin, export contains only tenant events.\n\n"
+            "## Out Of Scope\n\n- Cross-tenant reporting.\n\n"
+            "## Open Questions\n\n- Confirm retention period.\n\n"
+            f"{extra}"
+        )
+
+    def assert_schema_rejects(self, schema_name: str, artifact_rel: str, data: dict, expected: str) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            (target / "schemas").mkdir()
+            shutil.copy2(ROOT / "schemas" / schema_name, target / "schemas" / schema_name)
+            artifact = target / artifact_rel
+            artifact.parent.mkdir(parents=True, exist_ok=True)
+            artifact.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "validate-schemas.py"), "--root", str(target)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn(expected, proc.stdout + proc.stderr)
 
     def test_every_new_script_has_help(self) -> None:
         for path in sorted(SCRIPTS.glob("*.py")):
@@ -113,16 +189,75 @@ class QualityToolTests(unittest.TestCase):
         self.assertTrue(completion["complete_enough"])
 
     def test_hook_wrappers_emit_hook_output(self) -> None:
-        proc = subprocess.run(
-            [sys.executable, str(ROOT / "hooks" / "scripts" / "user-prompt-intake.py"), "--root", str(ROOT)],
-            input=json.dumps({"prompt": "review checkout code"}),
-            text=True,
-            capture_output=True,
-            check=True,
-        )
-        data = json.loads(proc.stdout)
-        self.assertIn("hookSpecificOutput", data)
-        self.assertEqual(data["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit")
+        with tempfile.TemporaryDirectory() as tmp:
+            data = self.run_hook(
+                "hooks/scripts/user-prompt-intake.py",
+                {"prompt": "review checkout code"},
+                Path(tmp),
+            )
+            self.assertIn("hookSpecificOutput", data)
+            self.assertEqual(data["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit")
+
+    def test_pretooluse_bash_hook_deny_ask_and_allow_cases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            deny = self.run_hook(
+                "scripts/dangerous-command-guard.py",
+                {"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}},
+                root,
+            )
+            self.assertEqual(deny["hookSpecificOutput"]["hookEventName"], "PreToolUse")
+            self.assertEqual(deny["hookSpecificOutput"]["permissionDecision"], "deny")
+
+            ask = self.run_hook(
+                "scripts/production-environment-guard.py",
+                {"tool_name": "Bash", "tool_input": {"command": "terraform apply"}},
+                root,
+            )
+            self.assertEqual(ask["hookSpecificOutput"]["permissionDecision"], "ask")
+
+            allow = self.run_hook(
+                "scripts/dangerous-command-guard.py",
+                {"tool_name": "Bash", "tool_input": {"command": "python -m unittest discover -s tests"}},
+                root,
+            )
+            self.assertFalse(allow["blocked"])
+            self.assertNotIn("hookSpecificOutput", allow)
+
+    def test_edit_write_hooks_for_generated_and_sensitive_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for tool_name in ["Edit", "Write"]:
+                generated = self.run_hook(
+                    "scripts/generated-file-guard.py",
+                    {"tool_name": tool_name, "tool_input": {"file_path": "src/generated/client.ts"}},
+                    root,
+                )
+                self.assertIn("Edit the source schema/template", generated["hookSpecificOutput"]["additionalContext"])
+
+                sensitive = self.run_hook(
+                    "scripts/sensitive-file-policy.py",
+                    {"tool_name": tool_name, "tool_input": {"file_path": ".env.local"}},
+                    root,
+                )
+                self.assertEqual(sensitive["hookSpecificOutput"]["permissionDecision"], "ask")
+
+    def test_stop_hook_completion_feedback_cases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            needs_feedback = self.run_hook(
+                "hooks/scripts/stop-completion-check.py",
+                {"prompt": "Implemented the export feature."},
+                root,
+            )
+            self.assertIn("Before finishing:", needs_feedback["hookSpecificOutput"]["additionalContext"])
+
+            passed = self.run_hook(
+                "hooks/scripts/stop-completion-check.py",
+                {"prompt": "Implemented the export feature. Tests passed with python -m unittest discover -s tests."},
+                root,
+            )
+            self.assertIn("Completion quality checks passed.", passed["hookSpecificOutput"]["additionalContext"])
 
     def test_prompt_trigger_evals_route_expected_skills(self) -> None:
         audit = quality_tools.skill_trigger_audit(ROOT)
@@ -141,6 +276,61 @@ class QualityToolTests(unittest.TestCase):
             self.assertIn(".project", proc.stdout)
             self.assertTrue((target / ".project" / ".engineering" / "workspace.json").exists())
             self.assertFalse((ROOT / ".project" / ".engineering" / "workspace.json").read_text(encoding="utf-8").find(str(target)) >= 0)
+
+    def test_bin_commands_validate_sync_hygiene_and_council(self) -> None:
+        validate = subprocess.run(
+            [sys.executable, str(ROOT / "bin" / "eng-life"), "validate"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        self.assertIn("plugin scaffold is valid", validate.stdout)
+        self.assertIn("schemas and JSON artifacts are valid", validate.stdout)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            (target / "app.py").write_text("import os\nTOKEN=os.getenv('STRIPE_SECRET_KEY')\n", encoding="utf-8")
+            sync = subprocess.run(
+                [sys.executable, str(ROOT / "bin" / "eng-life"), "--root", str(target), "sync-ledger"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertIn("synced ledger", sync.stdout)
+            self.assertTrue((target / ".project" / ".engineering" / "ledger" / "ledger.json").exists())
+
+            hygiene = subprocess.run(
+                [sys.executable, str(ROOT / "bin" / "eng-hygiene"), "--root", str(target), "detect"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertIn("env var hygiene:", hygiene.stdout)
+            hygiene_report = json.loads((target / ".project" / ".engineering" / "hygiene" / "hygiene-report.json").read_text(encoding="utf-8"))
+            self.assertEqual(hygiene_report["new_env_vars"][0]["name"], "STRIPE_SECRET_KEY")
+
+            context = target / "context.md"
+            context.write_text("# Context\n\nPrefer a reversible implementation slice.\n", encoding="utf-8")
+            council = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "bin" / "eng-council"),
+                    "ask",
+                    "--question",
+                    "Should we ship the reversible implementation?",
+                    "--context",
+                    str(context),
+                    "--run-id",
+                    "cli-council",
+                ],
+                cwd=target,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            run_dir = Path(council.stdout.strip())
+            self.assertTrue((run_dir / "synthesis.md").exists())
 
     def test_agents_have_full_role_contracts(self) -> None:
         required = [
@@ -210,6 +400,182 @@ class QualityToolTests(unittest.TestCase):
             report = json.loads((run_dir / "council-report.json").read_text(encoding="utf-8"))
             self.assertEqual(report["mode"], "live-model")
             self.assertEqual(report["adapter"], "command")
+
+    def test_council_live_adapter_missing_env_vars_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            env = os.environ.copy()
+            for key in ["ANTHROPIC_API_KEY", "ENGINEERING_COUNCIL_MODEL"]:
+                env.pop(key, None)
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "council.py"),
+                    "ask",
+                    "--root",
+                    str(target),
+                    "--mode",
+                    "live-model",
+                    "--adapter",
+                    "anthropic",
+                    "--question",
+                    "Should we use a live adapter?",
+                    "--run-id",
+                    "missing-env",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=env,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("ANTHROPIC_API_KEY and ENGINEERING_COUNCIL_MODEL are required", proc.stderr)
+
+    def test_council_live_adapter_timeout_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            adapter = target / "slow_adapter.py"
+            adapter.write_text("import time\ntime.sleep(3)\nprint('{\"content\":\"late\"}')\n", encoding="utf-8")
+            env = {**os.environ, "ENGINEERING_COUNCIL_ADAPTER_COMMAND": f"{sys.executable} {adapter}"}
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "council.py"),
+                    "ask",
+                    "--root",
+                    str(target),
+                    "--mode",
+                    "live-model",
+                    "--adapter",
+                    "command",
+                    "--timeout",
+                    "1",
+                    "--question",
+                    "Should we wait?",
+                    "--run-id",
+                    "timeout",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=env,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("timed out", proc.stderr)
+
+    def test_council_fallback_on_error_uses_deterministic_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            adapter = target / "failing_adapter.py"
+            adapter.write_text("import sys\nprint('adapter failed', file=sys.stderr)\nsys.exit(2)\n", encoding="utf-8")
+            env = {**os.environ, "ENGINEERING_COUNCIL_ADAPTER_COMMAND": f"{sys.executable} {adapter}"}
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "council.py"),
+                    "ask",
+                    "--root",
+                    str(target),
+                    "--mode",
+                    "live-model",
+                    "--adapter",
+                    "command",
+                    "--fallback-on-error",
+                    "--question",
+                    "Should fallback produce artifacts?",
+                    "--run-id",
+                    "fallback",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+                env=env,
+            )
+            run_dir = Path(proc.stdout.strip())
+            events = (run_dir / "events.jsonl").read_text(encoding="utf-8")
+            synthesis = (run_dir / "synthesis.md").read_text(encoding="utf-8")
+            self.assertIn("live_adapter_failed", events)
+            self.assertIn("Deterministic peer review", synthesis)
+
+    def test_council_quorum_failure_behavior(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "council.py"),
+                    "ask",
+                    "--root",
+                    str(target),
+                    "--question",
+                    "Should quorum fail with too few advisors?",
+                    "--run-id",
+                    "quorum-failure",
+                    "--role",
+                    "contrarian",
+                    "--role",
+                    "executor",
+                    "--quorum-min",
+                    "3",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            run_dir = Path(proc.stdout.strip())
+            report = json.loads((run_dir / "council-report.json").read_text(encoding="utf-8"))
+            self.assertEqual(report["status"], "quorum-failed")
+            self.assertEqual(report["advisor_count"], 2)
+            self.assertEqual(report["quorum_min"], 3)
+
+    def test_schema_negative_cases_reject_invalid_artifacts(self) -> None:
+        self.assert_schema_rejects(
+            "dashboard-data.schema.json",
+            ".project/.engineering/dashboards/dashboard-data.json",
+            {"generated_at": "2026-06-27T00:00:00+00:00", "summary": {}},
+            "missing required key missing_artifact_groups",
+        )
+        self.assert_schema_rejects(
+            "council-report.schema.json",
+            ".project/.engineering/council/run/council-report.json",
+            {"run_id": "run", "question": "?", "status": "bad", "advisor_count": "five", "context": [], "synthesis": "synthesis.md"},
+            "value 'bad' is not one of",
+        )
+        self.assert_schema_rejects(
+            "action-items.schema.json",
+            ".project/.engineering/ledger/action-items.json",
+            {"generated_at": "2026-06-27T00:00:00+00:00", "action_items": [{"id": "", "title": "Fix", "status": "unknown", "source": "test"}]},
+            "string is shorter than minLength 1",
+        )
+        self.assert_schema_rejects(
+            "action-items.schema.json",
+            ".project/.engineering/ledger/action-items.json",
+            {"action_items": []},
+            "missing required key generated_at",
+        )
+
+    def test_artifact_validator_negative_cases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            missing_frontmatter = self.write_prd_artifact(target, "missing-frontmatter-prd.md", self.valid_prd_body(), include_frontmatter=False)
+            proc = self.run_artifact_validator(target, missing_frontmatter)
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("missing front matter keys", proc.stdout)
+
+            missing_sections = self.write_prd_artifact(target, "missing-sections-prd.md", "# Product Requirements Document\n\n## Problem\n\nOnly one section.\n")
+            proc = self.run_artifact_validator(target, missing_sections)
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("missing section 'Goals'", proc.stdout)
+
+            missing_source = self.write_prd_artifact(target, "missing-source-prd.md", self.valid_prd_body(), ["docs/source.md"])
+            proc = self.run_artifact_validator(target, missing_source)
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("source artifact does not exist: docs/source.md", proc.stdout)
+
+            unresolved = self.write_prd_artifact(target, "unresolved-placeholder-prd.md", self.valid_prd_body("\nTODO: replace this placeholder.\n"))
+            proc = self.run_artifact_validator(target, unresolved)
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("unresolved placeholder", proc.stdout)
 
 
 if __name__ == "__main__":
