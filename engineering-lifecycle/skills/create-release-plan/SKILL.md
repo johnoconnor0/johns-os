@@ -20,9 +20,29 @@ Use when the user asks how to ship, roll out, migrate, monitor, rollback, or pre
 - Reviewed change, implementation plan, test strategy, deployment model, and operational constraints.
 - Existing changelog, runbooks, and release docs.
 
+## Workflow
+
+1. Inspect implementation plan, review findings, test strategy, deployment docs, changelog, runbooks, feature flags, and migration notes.
+2. Define release scope, prerequisites, approvals, rollout sequence, monitoring, support handoff, and post-release validation.
+3. Identify migration, data, config, dependency, and customer-impact risks.
+4. Define rollback or disablement steps that are specific enough to execute.
+5. Separate required release gates from optional hardening follow-ups.
+6. Validate the artifact with `python scripts/validate-artifact.py .project/.engineering/initiatives/<initiative-id>/release/release-plan.md`.
+
 ## Outputs
 
 - `.project/.engineering/initiatives/<initiative-id>/release/release-plan.md`
+
+## Required Sections
+
+- Scope
+- Preconditions
+- Rollout
+- Monitoring
+- Rollback
+- Support
+- Post-Release Validation
+- Open Questions
 
 ## Safety Constraints
 

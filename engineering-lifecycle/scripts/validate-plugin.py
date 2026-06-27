@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 from eng_common import parse_front_matter, plugin_root
@@ -53,7 +54,14 @@ def validate_hooks(root: Path) -> list[str]:
         for entry in entries:
             for hook in entry.get("hooks", []):
                 command = hook.get("command")
-                if command and not (root / command).exists():
+                if not command:
+                    continue
+                plugin_root_match = re.search(r"\$\{CLAUDE_PLUGIN_ROOT\}/([^\"'\s]+)", command)
+                if plugin_root_match:
+                    target = root / plugin_root_match.group(1)
+                else:
+                    target = root / command
+                if not target.exists():
                     errors.append(f"{path}: hook command missing: {command}")
     return errors
 

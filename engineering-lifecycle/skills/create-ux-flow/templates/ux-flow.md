@@ -12,14 +12,40 @@ source_artifacts:
 
 ## Users
 
+| User / Role | Goal | Entry Point |
+| --- | --- | --- |
+| Primary user | Desired outcome | Screen, link, or trigger |
+
 ## Journeys
+
+| Journey | Steps | Success Outcome |
+| --- | --- | --- |
+| Main path | Ordered steps | Observable completion |
 
 ## Screens
 
+| Screen | Purpose | Primary Action | Exit |
+| --- | --- | --- | --- |
+| Screen name | Why it exists | Main action | Next screen/state |
+
 ## States
+
+| State | Trigger | UI Behavior | Recovery |
+| --- | --- | --- | --- |
+| Loading / empty / error / permission / success | Condition | What user sees | Next action |
 
 ## Edge Cases
 
+- Edge case:
+- Expected behavior:
+
+## Accessibility
+
+- Keyboard:
+- Screen reader:
+- Color/contrast:
+- Motion:
+
 ## Open Questions
 
-- [ ] Confirm unresolved UX behavior.
+- [ ] Question that changes screen flow, copy, permission, or implementation risk.

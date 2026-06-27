@@ -12,19 +12,27 @@ source_artifacts:
 
 ## Environment Variables
 
-List missing `.env.example` placeholders. Never include secret values.
+| Variable | Seen In | In `.env.example` | Recommended Placeholder |
+| --- | --- | --- | --- |
+| NAME | file | yes/no | NAME=example |
 
 ## Gitignore Candidates
 
-List generated or local-only patterns that are safe to add.
+| Pattern | Reason | Safe To Add |
+| --- | --- | --- |
+| pattern | generated/local-only reason | yes/no |
 
 ## Support File Updates
 
-List suggested README, CHANGELOG, CLAUDE.md, Docker, or config documentation updates.
+| File | Reason | Auto-Edit Safe? |
+| --- | --- | --- |
+| README.md / CHANGELOG.md / CLAUDE.md / config | Drift or missing doc | yes/no |
 
 ## Risks
 
-List hygiene risks that need user review.
+| Risk | Impact | Manual Decision |
+| --- | --- | --- |
+| Risk | Impact | Decision needed |
 
 ## Applied Changes
 

@@ -12,7 +12,9 @@ source_artifacts:
 
 ## Question
 
-State the decision question.
+- Decision question:
+- Decision owner:
+- Deadline / urgency:
 
 ## Council Status
 
@@ -20,15 +22,42 @@ quorum-met
 
 ## Evidence
 
-List context files and constraints reviewed.
+| Source | Relevance | Confidence |
+| --- | --- | --- |
+| Context file or supplied fact | Why it matters | high/medium/low |
+
+## Advisor Positions
+
+Summarize each advisor position without erasing role-specific concerns.
+
+## Blind Peer Review Summary
+
+Summarize review of anonymized drafts and note any contradictions.
 
 ## Recommendation
 
-State the synthesized recommendation and conditions.
+- Recommended direction:
+- Conditions:
+- Reversibility:
 
-## Dissent
+## Dissent Log
 
 Preserve meaningful disagreement and unresolved risks.
+
+## Decision
+
+Record the accepted, rejected, or deferred decision.
+
+## Confidence
+
+- Confidence: low / medium / high
+- Rationale:
+
+## Follow-up Artifacts
+
+- ADR:
+- Implementation plan:
+- Validation artifact:
 
 ## Next Actions
 

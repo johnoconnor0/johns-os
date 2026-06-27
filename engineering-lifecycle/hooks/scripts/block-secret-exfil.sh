@@ -1,14 +1,13 @@
 #!/usr/bin/env sh
 set -eu
 
-payload="$(cat || true)"
-command="$(printf "%s" "$payload" | sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PLUGIN_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 
-case "$command" in
-  *".env"*curl*|*".env"*Invoke-WebRequest*|*".env"*wget*|*"cat .env"*|*"Get-Content .env"*)
-    echo "Blocked possible secret exfiltration command by Engineering Lifecycle hook." >&2
-    exit 2
-    ;;
-esac
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN=python3
+else
+  PYTHON_BIN=python
+fi
 
-exit 0
+exec "$PYTHON_BIN" "$PLUGIN_ROOT/scripts/secret-exfiltration-guard.py" --hook

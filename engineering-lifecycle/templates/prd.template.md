@@ -12,24 +12,39 @@ source_artifacts:
 
 ## Problem
 
-Describe the user or business problem.
+- User/business problem:
+- Current workaround:
+- Evidence source:
 
 ## Users
 
-List users and affected roles.
+| User / Role | Need | Constraint |
+| --- | --- | --- |
+| Primary user | Outcome needed | Known limitation |
 
-## Requirements
+## Functional Requirements
 
-List functional and non-functional requirements.
+| ID | Requirement | Priority | Acceptance Link |
+| --- | --- | --- | --- |
+| FR-001 | Required behavior | Must | AC-001 |
+
+## Non-Functional Requirements
+
+| ID | Requirement | Rationale |
+| --- | --- | --- |
+| NFR-001 | Performance, privacy, reliability, or accessibility need | Why it matters |
 
 ## Acceptance Criteria
 
-List testable outcomes.
+| ID | Scenario | Expected Outcome |
+| --- | --- | --- |
+| AC-001 | Given / when condition | Then observable result |
 
 ## Out Of Scope
 
-List explicit exclusions.
+- Explicit exclusion:
+- Reason:
 
 ## Open Questions
 
-- [ ] Confirm unresolved requirements.
+- [ ] Question that changes scope, acceptance, release, or implementation risk.

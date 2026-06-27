@@ -1,6 +1,7 @@
 # Prompt Optimization Report
 
-Generated: 2026-06-27T06:45:09+00:00
+Generated: 2026-06-27T08:14:35+00:00
 
 ## Findings
-- Some skills are not represented in trigger eval fixtures.
+- Trigger fixtures mention the available skills.
+- Prompt trigger cases route as expected under the deterministic router.

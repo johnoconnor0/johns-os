@@ -7,15 +7,15 @@
         "hooks": [
           {
             "type": "command",
-            "command": "hooks/scripts/session-start-context.sh"
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-start-context.sh\""
           },
           {
             "type": "command",
-            "command": "scripts/init-workspace.py"
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/scripts/init-workspace.py\""
           },
           {
             "type": "command",
-            "command": "scripts/detect-stack.py"
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/scripts/detect-stack.py\""
           }
         ]
       }
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "hooks/scripts/user-prompt-intake.py"
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/user-prompt-intake.py\""
           }
         ]
       }
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "hooks/scripts/ask-user-question-bridge.py"
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ask-user-question-bridge.py\""
           }
         ]
       },
@@ -46,15 +46,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "hooks/scripts/block-dangerous-bash.sh"
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/block-dangerous-bash.sh\""
           },
           {
             "type": "command",
-            "command": "hooks/scripts/block-secret-exfil.sh"
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/block-secret-exfil.sh\""
           },
           {
             "type": "command",
-            "command": "hooks/scripts/secret-exfiltration-guard.py"
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/secret-exfiltration-guard.py\""
+          },
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/scripts/production-environment-guard.py\" --hook"
           }
         ]
       },
@@ -63,7 +67,15 @@
         "hooks": [
           {
             "type": "command",
-            "command": "hooks/scripts/edit-scope-guard.py"
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/edit-scope-guard.py\""
+          },
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/scripts/generated-file-guard.py\" --hook"
+          },
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/scripts/sensitive-file-policy.py\" --hook"
           }
         ]
       }
@@ -74,19 +86,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "hooks/scripts/detect-new-env-vars.py"
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/detect-new-env-vars.py\""
           },
           {
             "type": "command",
-            "command": "hooks/scripts/suggest-gitignore-updates.py"
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/suggest-gitignore-updates.py\""
           },
           {
             "type": "command",
-            "command": "hooks/scripts/validate-generated-artifacts.py"
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/validate-generated-artifacts.py\""
           },
           {
             "type": "command",
-            "command": "hooks/scripts/sync-ledger.py"
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/sync-ledger.py\""
           }
         ]
       }
@@ -97,7 +109,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "hooks/scripts/post-edit-hygiene.py"
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/post-edit-hygiene.py\""
           }
         ]
       }
@@ -108,15 +120,15 @@
         "hooks": [
           {
             "type": "command",
-            "command": "hooks/scripts/hygiene-stop-check.py"
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/hygiene-stop-check.py\""
           },
           {
             "type": "command",
-            "command": "hooks/scripts/capture-session-summary.py"
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/capture-session-summary.py\""
           },
           {
             "type": "command",
-            "command": "hooks/scripts/stop-completion-check.py"
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/stop-completion-check.py\""
           }
         ]
       }

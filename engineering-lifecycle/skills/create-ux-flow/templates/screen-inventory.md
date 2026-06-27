@@ -14,4 +14,4 @@ source_artifacts:
 
 | Screen | Purpose | Entry | Exit | States |
 | --- | --- | --- | --- | --- |
-| Example | Describe purpose | Link or action | Link or action | Empty, loading, error, success |
+| Screen name | User job supported by the screen | Route, link, or event | Next route, modal, or completion | Empty, loading, error, permission, success |

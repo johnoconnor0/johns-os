@@ -16,16 +16,25 @@ Proposed
 
 ## Context
 
-Describe evidence and constraints.
+- Evidence reviewed:
+- Forces:
+- Constraints:
+- Decision owner:
 
 ## Decision
 
-State the chosen option.
+- Chosen option:
+- Effective date:
+- Scope:
 
 ## Consequences
 
-Describe tradeoffs.
+| Positive | Negative | Neutral / Operational |
+| --- | --- | --- |
+| Benefit | Cost or risk | Ongoing implication |
 
 ## Alternatives Considered
 
-List rejected options.
+| Option | Why Rejected | Revisit Trigger |
+| --- | --- | --- |
+| Alternative | Rejection reason | Condition that would change the decision |

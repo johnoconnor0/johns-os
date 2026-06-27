@@ -12,31 +12,46 @@ source_artifacts:
 
 ## Decision Summary
 
-State the recommended architecture and the decision owner.
+- Recommended direction:
+- Decision owner:
+- Scope:
+- Status:
 
 ## Constraints
 
-List technical, operational, product, compliance, and delivery constraints.
+| Constraint | Type | Evidence | Impact |
+| --- | --- | --- | --- |
+| Constraint | technical / operational / product / compliance / delivery | Source | Design impact |
 
 ## Recommended Architecture
 
-Describe components, responsibilities, runtime shape, and implementation boundaries.
+| Component / Boundary | Responsibility | Interface | Notes |
+| --- | --- | --- | --- |
+| Component | Ownership | API/event/module/contract | Migration or runtime note |
 
 ## Interfaces And Boundaries
 
-Define public interfaces, internal contracts, ownership boundaries, and compatibility expectations.
+| Boundary | Contract | Compatibility Expectation | Owner |
+| --- | --- | --- | --- |
+| UI/API/service/data boundary | Shape or behavior | Versioning or migration rule | Owner/unknown |
 
 ## Alternatives Considered
 
-List viable alternatives and why each was not selected.
+| Alternative | Strength | Weakness | Rejection Reason |
+| --- | --- | --- | --- |
+| Option | Benefit | Cost/risk | Why not now |
 
 ## Risks
 
-List risks, mitigations, and unresolved assumptions.
+| Risk | Impact | Mitigation | Owner |
+| --- | --- | --- | --- |
+| Risk | Technical/product/release impact | Reduction step | Owner/unknown |
 
 ## Migration And Rollback
 
-Describe migration sequence, feature flags, fallback behavior, and rollback steps.
+| Step | Forward Action | Validation | Rollback |
+| --- | --- | --- | --- |
+| 1 | Change | Check | Revert/disable/fallback |
 
 ## ADR Candidates
 

@@ -1,14 +1,13 @@
 #!/usr/bin/env sh
 set -eu
 
-payload="$(cat || true)"
-command="$(printf "%s" "$payload" | sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PLUGIN_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 
-case "$command" in
-  *"rm -rf /"*|*"git reset --hard"*|*"git clean -fdx"*|*"Remove-Item -Recurse -Force C:\\"*|*"format c:"*)
-    echo "Blocked dangerous shell command by Engineering Lifecycle hook." >&2
-    exit 2
-    ;;
-esac
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN=python3
+else
+  PYTHON_BIN=python
+fi
 
-exit 0
+exec "$PYTHON_BIN" "$PLUGIN_ROOT/scripts/dangerous-command-guard.py" --hook

@@ -1,17 +1,29 @@
 {
   "generated_at": "2026-01-01T00:00:00+00:00",
-  "initiatives": [
+  "missing_artifact_groups": [
+    "release"
+  ],
+  "open_action_items": [
     {
-      "id": "example-checkout",
-      "status": "implementation",
-      "open_actions": 3,
-      "latest_artifact": ".project/.engineering/initiatives/example-checkout/implementation/plan.md"
+      "id": "checkout-release-001",
+      "source": ".project/.engineering/initiatives/example-checkout/release/release-plan.md",
+      "status": "open",
+      "title": "Confirm webhook monitoring before widening rollout."
+    }
+  ],
+  "recent_artifacts": [
+    {
+      "kind": "md",
+      "path": ".project/.engineering/initiatives/example-checkout/implementation/implementation-plan.md",
+      "status": "draft"
     }
   ],
   "risks": [
-    {
-      "severity": "medium",
-      "summary": "Release checklist is not complete."
-    }
-  ]
+    "Release checklist is not complete."
+  ],
+  "summary": {
+    "artifact_count": 7,
+    "council_run_count": 0,
+    "open_action_item_count": 1
+  }
 }

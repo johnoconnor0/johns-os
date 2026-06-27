@@ -102,7 +102,7 @@ See `references/lifecycle-model.md` for stage definitions, inputs, artifacts, ex
 
 ## Skills
 
-Phase 1 defines the product shape and minimum skill contracts. Runtime implementation depth is intentionally limited.
+The skills define production-oriented lifecycle contracts with repeatable workflows, evidence rules, templates, examples, and validation hooks.
 
 - `profile-product-system`: inspect product, users, stack, repo shape, integrations, risks, and constraints.
 - `map-product-lifecycle`: identify lifecycle state and missing artifacts.
@@ -153,10 +153,10 @@ Agents are specialists, not duplicates of skills. Delegate when isolated expert 
 
 ## Hooks
 
-Phase 1 hook behavior is conservative.
+Hook behavior is conservative, deterministic, and rooted through `CLAUDE_PLUGIN_ROOT` so installed plugin hooks can run from a target project.
 
 - `SessionStart`: fast repo and context detection only.
-- `PreToolUse`: dangerous command and secret-exfiltration guards.
+- `PreToolUse`: dangerous command, production command, generated-file, sensitive-file, edit-scope, and secret-exfiltration guards.
 - `PostToolUse`: hygiene drift detection after edits.
 - `Stop`: completion and hygiene reminders.
 
@@ -174,11 +174,31 @@ Canonical hook scripts:
 
 Hooks may detect and report. Broad automatic edits remain out of scope; controlled hygiene updates are available only through explicit commands.
 
+## Engineering Council Live Adapters
+
+The council is deterministic by default. Live model execution is opt-in and uses the same artifact boundary:
+
+```bash
+python scripts/council.py ask \
+  --mode live-model \
+  --adapter command \
+  --question "Should we keep this as a modular monolith?" \
+  --context .project/.engineering/initiatives/example/architecture/
+```
+
+Live adapter options:
+
+- `command`: requires `ENGINEERING_COUNCIL_ADAPTER_COMMAND`; JSON is sent on stdin and Markdown or JSON content is read from stdout.
+- `anthropic`: requires `ANTHROPIC_API_KEY` and `ENGINEERING_COUNCIL_MODEL`.
+- `openai`: requires `OPENAI_API_KEY` and `ENGINEERING_COUNCIL_MODEL`.
+
+Use `--fallback-on-error` when live model failure should fall back to deterministic local output.
+
 ## Runtime Boundaries
 
 - No bundled live MCP integrations.
 - No custom LSP behavior beyond static plugin metadata.
 - Hook scripts detect, report, validate, and sync generated lifecycle state.
 - Controlled support-file edits are limited to `.env.example`, `.gitignore`, `.dockerignore`, `README.md`, `CHANGELOG.md`, and `CLAUDE.md`.
-- The council is optional, deterministic by default, and should be manually invoked for high-stakes tradeoffs.
+- The council is optional, deterministic by default, supports explicit live adapters, and should be manually invoked for high-stakes tradeoffs.
 - Dashboard output is `.project/.engineering/dashboards/project-dashboard.html` plus `dashboard-data.json`.

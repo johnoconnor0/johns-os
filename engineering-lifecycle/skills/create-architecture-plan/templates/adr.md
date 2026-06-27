@@ -16,16 +16,25 @@ Proposed
 
 ## Context
 
-Describe the forces and evidence behind the decision.
+- Evidence reviewed:
+- Forces:
+- Constraints:
+- Decision owner:
 
 ## Decision
 
-State the chosen direction.
+- Chosen direction:
+- Scope:
+- Effective date:
 
 ## Consequences
 
-Describe positive, negative, and neutral consequences.
+| Positive | Negative | Neutral / Operational |
+| --- | --- | --- |
+| Benefit | Cost/risk | Ongoing implication |
 
 ## Alternatives Considered
 
-List alternatives and rejection reasons.
+| Alternative | Strength | Rejection Reason | Revisit Trigger |
+| --- | --- | --- | --- |
+| Option | Benefit | Why not selected | Condition |

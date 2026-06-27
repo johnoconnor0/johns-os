@@ -35,9 +35,48 @@
     },
     {
       "id": "quality-control-scripts",
-      "description": "Runs regression tests for prompt intake, guardrails, validation, and completion quality scripts.",
+      "description": "Runs regression tests for prompt intake, guardrails, validation, completion quality, agent contracts, live council command adapters, template quality, and repo hygiene.",
       "fixtures": [],
       "command": "python -m unittest discover -s tests"
+    },
+    {
+      "id": "agent-contracts",
+      "description": "Verifies every specialist and council agent declares a mandate, operating rules, read-only tools, and output contract.",
+      "fixtures": [
+        "../agents/*.md"
+      ],
+      "command": "python -m unittest tests.test_quality_tools.QualityToolTests.test_agents_have_full_role_contracts"
+    },
+    {
+      "id": "template-quality",
+      "description": "Verifies templates avoid weak placeholder copy and expose structured fields for repeatable artifacts.",
+      "fixtures": [
+        "../templates/*",
+        "../skills/*/templates/*"
+      ],
+      "command": "python -m unittest tests.test_quality_tools.QualityToolTests.test_templates_do_not_use_weak_placeholder_copy"
+    },
+    {
+      "id": "full-lifecycle-examples",
+      "description": "Validates the realistic end-to-end lifecycle example artifacts.",
+      "fixtures": [
+        "../examples/full-lifecycle-example/*.md"
+      ],
+      "command": "python -m unittest tests.test_quality_tools.QualityToolTests.test_full_lifecycle_examples_validate"
+    },
+    {
+      "id": "live-council-command-adapter",
+      "description": "Runs council live-model mode through the command adapter and verifies advisor, anonymized, peer-review, synthesis, and report artifacts.",
+      "fixtures": [],
+      "command": "python -m unittest tests.test_quality_tools.QualityToolTests.test_council_command_adapter_writes_live_artifacts"
+    },
+    {
+      "id": "gitignore-hygiene",
+      "description": "Verifies repository ignore rules cover generated Python, local secrets, and plugin runtime report noise.",
+      "fixtures": [
+        "../.gitignore"
+      ],
+      "command": "python -m unittest tests.test_quality_tools.QualityToolTests.test_gitignore_covers_generated_and_secret_noise"
     },
     {
       "id": "prompt-optimization",

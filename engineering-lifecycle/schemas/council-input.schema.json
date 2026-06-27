@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/engineering-lifecycle/council-input.schema.json",
+  "title": "Engineering Council Input",
+  "type": "object",
+  "required": ["run_id", "question", "context", "created_at", "mode"],
+  "properties": {
+    "run_id": { "type": "string", "minLength": 1 },
+    "question": { "type": "string", "minLength": 1 },
+    "context": { "type": "array", "items": { "type": "string" } },
+    "created_at": { "type": "string", "minLength": 1 },
+    "mode": { "type": "string", "enum": ["deterministic-local", "fixture-replay", "live-model"] },
+    "success_criteria": { "type": "array", "items": { "type": "string" } },
+    "risk_tolerance": { "type": "string" }
+  },
+  "additionalProperties": true
+}

@@ -1,5 +1,5 @@
 {
-  "triggers": [
+  "change_triggers": [
     {
       "id": "skills-changed",
       "paths": [
@@ -26,6 +26,111 @@
         "prompt-optimization",
         "schema-validator"
       ]
+    }
+  ],
+  "prompt_cases": [
+    {
+      "id": "profile-product-system-positive",
+      "query": "Profile this product system and summarize the current stack, users, integrations, and engineering maturity.",
+      "should_trigger": "profile-product-system"
+    },
+    {
+      "id": "map-product-lifecycle-positive",
+      "query": "What lifecycle stage is this initiative in and which planning artifacts are missing?",
+      "should_trigger": "map-product-lifecycle"
+    },
+    {
+      "id": "create-discovery-brief-positive",
+      "query": "Turn this vague product idea into a discovery brief with users, goals, risks, and MVP boundary.",
+      "should_trigger": "create-discovery-brief"
+    },
+    {
+      "id": "create-prd-positive",
+      "query": "Create a PRD with requirements, user stories, acceptance criteria, permissions, and out-of-scope items.",
+      "should_trigger": "create-prd"
+    },
+    {
+      "id": "create-ux-flow-positive",
+      "query": "Map the UX flow, screens, user journey, empty states, loading states, and accessibility concerns.",
+      "should_trigger": "create-ux-flow"
+    },
+    {
+      "id": "create-system-map-positive",
+      "query": "Create a system map that shows external systems, component boundaries, data flow, and failure points.",
+      "should_trigger": "create-system-map"
+    },
+    {
+      "id": "create-architecture-plan-positive",
+      "query": "Create an architecture plan with module boundaries, technical tradeoffs, ADR candidates, and rollout risks.",
+      "should_trigger": "create-architecture-plan"
+    },
+    {
+      "id": "create-data-model-positive",
+      "query": "Design the data model with entities, relationships, ownership, retention, and migration risks.",
+      "should_trigger": "create-data-model"
+    },
+    {
+      "id": "create-api-contract-positive",
+      "query": "Define the API contract including request shape, response shape, auth, pagination, errors, and webhook events.",
+      "should_trigger": "create-api-contract"
+    },
+    {
+      "id": "create-implementation-plan-positive",
+      "query": "Break this approved design into a safe implementation plan with slices, dependencies, tests, and rollback.",
+      "should_trigger": "create-implementation-plan"
+    },
+    {
+      "id": "implement-feature-safely-positive",
+      "query": "Implement the checkout feature safely in small verified slices and run the relevant tests.",
+      "should_trigger": "implement-feature-safely"
+    },
+    {
+      "id": "review-change-positive",
+      "query": "Review this PR for correctness, security, architecture drift, migration risk, and missing tests.",
+      "should_trigger": "review-change"
+    },
+    {
+      "id": "create-test-strategy-positive",
+      "query": "Create a test strategy covering unit, integration, contract, E2E, regression, security, and manual QA.",
+      "should_trigger": "create-test-strategy"
+    },
+    {
+      "id": "create-release-plan-positive",
+      "query": "Plan the release with rollout steps, feature flags, monitoring, rollback, support notes, and post-release validation.",
+      "should_trigger": "create-release-plan"
+    },
+    {
+      "id": "run-engineering-council-positive",
+      "query": "Run the engineering council for this high-stakes build vs buy tradeoff and preserve dissent.",
+      "should_trigger": "run-engineering-council"
+    },
+    {
+      "id": "update-repo-hygiene-positive",
+      "query": "Update repo hygiene by checking .env.example, .gitignore, generated files, docs drift, and changelog needs.",
+      "should_trigger": "update-repo-hygiene"
+    },
+    {
+      "id": "build-project-dashboard-positive",
+      "query": "Build a project dashboard showing lifecycle status, risks, action items, recent artifacts, and release readiness.",
+      "should_trigger": "build-project-dashboard"
+    },
+    {
+      "id": "system-map-not-architecture-plan",
+      "query": "Map external systems, workflows, data flow, and failure points for this repo.",
+      "should_trigger": "create-system-map",
+      "should_not_trigger": "create-architecture-plan"
+    },
+    {
+      "id": "discovery-not-prd",
+      "query": "Clarify this product idea before requirements by listing users, assumptions, open questions, and MVP boundary.",
+      "should_trigger": "create-discovery-brief",
+      "should_not_trigger": "create-prd"
+    },
+    {
+      "id": "review-not-test-strategy",
+      "query": "Review the changed files and report bugs, security issues, and missing tests with file references.",
+      "should_trigger": "review-change",
+      "should_not_trigger": "create-test-strategy"
     }
   ]
 }

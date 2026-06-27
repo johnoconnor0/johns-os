@@ -39,9 +39,15 @@ from eng_common import (
 
 
 INTENT_KEYWORDS = {
+    "profile": ["profile", "understand this repo", "product system", "repo profile", "current stack", "engineering maturity"],
+    "lifecycle": ["lifecycle", "what should happen next", "missing artifacts", "current stage", "next skill"],
+    "system-map": ["system map", "map the system", "external systems", "data flow", "failure points", "component map"],
+    "api-contract": ["api contract", "request shape", "response shape", "webhook", "event contract", "pagination", "rate limit"],
+    "dashboard": ["dashboard", "status view", "project status", "initiative summary", "engineering state", "action items", "recent artifacts", "release readiness"],
     "review": ["review", "audit", "find bugs", "security scan"],
     "testing": ["test", "failing", "coverage", "qa", "regression"],
-    "implementation": ["implement", "fix", "build", "add", "change", "refactor"],
+    "implementation-plan": ["implementation plan", "break this", "approved design", "sequence", "sequenced", "slices", "dependencies", "rollback"],
+    "implementation": ["implement", "safe implementation", "verified slices", "fix", "build", "add", "change", "refactor"],
     "architecture": ["architecture", "system map", "boundary", "adr", "design"],
     "data-model": ["schema", "database", "entity", "migration", "model"],
     "ux-design": ["ux", "screen", "flow", "wireframe", "user journey"],
@@ -49,12 +55,18 @@ INTENT_KEYWORDS = {
     "release": ["release", "deploy", "rollback", "launch"],
     "repo-hygiene": ["hygiene", "gitignore", "env.example", "cleanup"],
     "council-decision": ["council", "tradeoff", "build vs buy", "high-stakes"],
-    "discovery": ["discover", "explore", "research", "brief"],
+    "discovery": ["discover", "discovery", "clarify", "product idea", "assumptions", "open questions", "mvp boundary", "explore", "research", "brief"],
 }
 
 SKILL_BY_INTENT = {
+    "profile": "profile-product-system",
+    "lifecycle": "map-product-lifecycle",
+    "system-map": "create-system-map",
+    "api-contract": "create-api-contract",
+    "dashboard": "build-project-dashboard",
     "review": "review-change",
     "testing": "create-test-strategy",
+    "implementation-plan": "create-implementation-plan",
     "implementation": "implement-feature-safely",
     "architecture": "create-architecture-plan",
     "data-model": "create-data-model",
@@ -548,7 +560,30 @@ def skill_trigger_audit(root: Path) -> dict[str, Any]:
     trigger_data = json.loads((root / "evals" / "trigger-evals.json").read_text(encoding="utf-8")) if (root / "evals" / "trigger-evals.json").exists() else {}
     text = json.dumps(trigger_data)
     unused = [skill for skill in skills if skill not in text]
-    return {"unused_skills": unused, "overlapping_skills": [], "poor_trigger_descriptions": []}
+    prompt_cases = trigger_data.get("prompt_cases", []) if isinstance(trigger_data, dict) else []
+    failures = []
+    for case in prompt_cases:
+        if not isinstance(case, dict) or not case.get("should_trigger"):
+            continue
+        routed = skill_router(case.get("query", "")).get("recommended_skill")
+        if routed != case["should_trigger"]:
+            failures.append({"id": case.get("id"), "expected": case["should_trigger"], "actual": routed})
+    negative_failures = []
+    for case in prompt_cases:
+        if not isinstance(case, dict) or not case.get("should_not_trigger"):
+            continue
+        routed = skill_router(case.get("query", "")).get("recommended_skill")
+        if routed == case["should_not_trigger"]:
+            negative_failures.append({"id": case.get("id"), "forbidden": case["should_not_trigger"], "actual": routed})
+    return {
+        "unused_skills": unused,
+        "overlapping_skills": [],
+        "poor_trigger_descriptions": [],
+        "prompt_case_count": len(prompt_cases),
+        "trigger_failures": failures,
+        "negative_trigger_failures": negative_failures,
+        "valid": not unused and not failures and not negative_failures,
+    }
 
 
 def prompt_optimization_evaluator(root: Path) -> dict[str, Any]:
@@ -558,6 +593,12 @@ def prompt_optimization_evaluator(root: Path) -> dict[str, Any]:
         report.append("- Some skills are not represented in trigger eval fixtures.")
     else:
         report.append("- Trigger fixtures mention the available skills.")
+    if audit["trigger_failures"]:
+        report.append(f"- {len(audit['trigger_failures'])} positive trigger case(s) route to the wrong skill.")
+    if audit["negative_trigger_failures"]:
+        report.append(f"- {len(audit['negative_trigger_failures'])} negative trigger case(s) route to a forbidden skill.")
+    if not audit["trigger_failures"] and not audit["negative_trigger_failures"]:
+        report.append("- Prompt trigger cases route as expected under the deterministic router.")
     out = root / "evals" / "reports" / "prompt-optimization-report.md"
     write_text(out, "\n".join(report) + "\n")
     return {"report": relpath(out, root), **audit}
@@ -596,7 +637,8 @@ def secret_exfiltration_guard(command: str = "", text: str = "", path: str = "")
 def sensitive_file_policy(path: str, action: str = "read") -> dict[str, Any]:
     category = classify_file_path(Path(path))
     sensitive = category == "secret-risk"
-    return {"sensitive": sensitive, "category": category, "action": "block" if sensitive and action in {"print", "copy"} else "warn" if sensitive else "allow"}
+    decision = "block" if sensitive and action in {"print", "copy"} else "ask" if sensitive and action in {"edit", "write"} else "warn" if sensitive else "allow"
+    return {"sensitive": sensitive, "category": category, "action": decision, "path": path}
 
 
 def generated_file_guard(path: str) -> dict[str, Any]:
@@ -708,6 +750,7 @@ def run_tool(name: str, args: argparse.Namespace) -> dict[str, Any]:
     command = args.command or command_from_payload(payload)
     path = args.path or file_from_payload(payload)
     files = args.file or []
+    hook_tool_name = str(payload.get("tool_name") or payload.get("toolName") or "")
 
     if name == "detect-stack":
         return detect_stack(root)
@@ -744,7 +787,12 @@ def run_tool(name: str, args: argparse.Namespace) -> dict[str, Any]:
     if name in {"secret-exfiltration-guard", "block-secret-exfil"}:
         return secret_exfiltration_guard(command, text, path)
     if name == "sensitive-file-policy":
-        return sensitive_file_policy(path, args.action)
+        action = args.action
+        if args.hook and hook_tool_name in {"Edit", "MultiEdit"}:
+            action = "edit"
+        elif args.hook and hook_tool_name == "Write":
+            action = "write"
+        return sensitive_file_policy(path, action)
     if name == "generated-file-guard":
         return generated_file_guard(path)
     if name == "edit-scope-guard":
@@ -852,6 +900,13 @@ def render_hook(tool_name: str, result: dict[str, Any]) -> dict[str, Any] | None
         return permission_output("PreToolUse", "ask", "This file is outside the approved implementation scope.")
     if tool_name == "generated-file-guard" and result.get("generated"):
         return hook_additional_context("PreToolUse", result["message"])
+    if tool_name == "sensitive-file-policy" and result.get("sensitive"):
+        action = result.get("action")
+        if action == "block":
+            return permission_output("PreToolUse", "deny", "Sensitive file contents must not be printed or copied.")
+        if action == "ask":
+            return permission_output("PreToolUse", "ask", "This edit targets a sensitive file. Confirm the change is intentional and does not expose secrets.")
+        return hook_additional_context("PreToolUse", "Sensitive file detected. Do not expose secret values in outputs or generated artifacts.")
     if tool_name == "user-prompt-intake":
         quality = result["quality"]
         clarification = result["clarification"]

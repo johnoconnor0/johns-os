@@ -27,11 +27,22 @@ Council runs write:
 
 - `input.json`
 - `advisor-drafts/`
+- `anonymized-drafts/`
 - `peer-reviews/`
 - `synthesis.md`
 - `events.jsonl`
 
-The local implementation is deterministic and fixture-friendly. Live LLM orchestration can be added behind the same artifact boundary later.
+The local implementation is deterministic and fixture-friendly. Live model orchestration uses the same artifact boundary and is explicitly opt-in.
+
+## Live Adapters
+
+Supported adapter modes:
+
+- `command`: runs `ENGINEERING_COUNCIL_ADAPTER_COMMAND`, sends JSON on stdin, and accepts Markdown or JSON content on stdout.
+- `anthropic`: calls Anthropic Messages API using `ANTHROPIC_API_KEY` and `ENGINEERING_COUNCIL_MODEL`.
+- `openai`: calls OpenAI-compatible chat completions using `OPENAI_API_KEY` and `ENGINEERING_COUNCIL_MODEL`.
+
+Live mode should be used only when the supplied context is safe to send to the configured model or command. Use deterministic mode for private, offline, fixture, or CI workflows.
 
 ## Quorum
 

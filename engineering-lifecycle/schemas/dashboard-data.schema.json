@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/engineering-lifecycle/dashboard-data.schema.json",
+  "title": "Engineering Lifecycle Dashboard Data",
+  "type": "object",
+  "required": ["generated_at", "summary", "missing_artifact_groups", "open_action_items", "recent_artifacts", "risks"],
+  "properties": {
+    "generated_at": { "type": "string", "minLength": 1 },
+    "summary": {
+      "type": "object",
+      "required": ["artifact_count", "open_action_item_count", "council_run_count"],
+      "properties": {
+        "artifact_count": { "type": "integer", "minimum": 0 },
+        "open_action_item_count": { "type": "integer", "minimum": 0 },
+        "council_run_count": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "missing_artifact_groups": { "type": "array", "items": { "type": "string" } },
+    "open_action_items": { "type": "array", "items": { "type": "object" } },
+    "recent_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string" },
+          "status": { "type": "string" },
+          "skill": { "type": ["string", "null"] },
+          "initiative_id": { "type": ["string", "null"] }
+        },
+        "additionalProperties": true
+      }
+    },
+    "risks": { "type": "array" }
+  },
+  "additionalProperties": true
+}

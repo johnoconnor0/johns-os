@@ -11,11 +11,21 @@ from eng_common import REQUIRED_FRONT_MATTER, parse_front_matter, repo_root
 
 
 REQUIRED_SECTIONS = {
+    "discovery-brief": ["Problem", "Users", "Evidence", "Goals And Success Signals", "Assumptions", "Risks", "MVP Boundary", "Open Questions"],
+    "prd": ["Problem", "Goals", "Functional Requirements", "Non-Functional Requirements", "Acceptance Criteria", "Out Of Scope", "Open Questions"],
+    "ux-flow": ["Users", "Journeys", "Screens", "States", "Edge Cases", "Accessibility", "Open Questions"],
     "system-map": ["Product Context", "Components", "Data Flow", "Missing Information"],
     "architecture-plan": ["Decision Summary", "Alternatives Considered", "Risks"],
+    "entity-model": ["Entities", "Relationships", "Ownership", "Sensitivity", "Retention", "Migration Risk"],
+    "api-contract": ["Purpose", "Consumers", "Endpoints Or Messages", "Request Shape", "Response Shape", "Errors", "Compatibility", "Open Questions"],
     "implementation-plan": ["Implementation Slices", "Test Plan", "Rollback"],
+    "implementation-log": ["Plan Followed", "Changes Made", "Tests Run", "Hygiene Updates", "Residual Risk"],
     "change-review": ["Findings", "Tests", "Residual Risk"],
     "test-strategy": ["Coverage", "Scenarios", "Manual QA"],
+    "release-plan": ["Scope", "Preconditions", "Rollout", "Monitoring", "Rollback", "Support"],
+    "repo-hygiene-report": ["Environment Variables", "Gitignore Candidates", "Support File Updates", "Risks", "Applied Changes"],
+    "council-report": ["Question", "Evidence", "Advisor Positions", "Recommendation", "Dissent Log", "Decision", "Confidence"],
+    "synthesis": ["Question", "Council Status", "Evidence", "Advisor Positions", "Blind Peer Review Summary", "Recommendation", "Dissent Log", "Decision", "Confidence"],
 }
 
 

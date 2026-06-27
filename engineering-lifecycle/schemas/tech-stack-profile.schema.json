@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/engineering-lifecycle/tech-stack-profile.schema.json",
+  "title": "Engineering Lifecycle Tech Stack Profile",
+  "type": "object",
+  "required": ["package_manager", "frameworks", "backend", "database", "test_commands"],
+  "properties": {
+    "package_manager": { "type": ["string", "null"] },
+    "frameworks": { "type": "array", "items": { "type": "string" } },
+    "backend": { "type": "array", "items": { "type": "string" } },
+    "database": { "type": "array", "items": { "type": "string" } },
+    "test_commands": { "type": "object" }
+  },
+  "additionalProperties": true
+}

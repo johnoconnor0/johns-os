@@ -16,35 +16,49 @@ Summarize the product, users, and business context confirmed from inspected sour
 
 ## Actors And External Systems
 
-List users, services, vendors, APIs, identity providers, data stores, and operational systems.
+| Actor/System | Type | Responsibility | Evidence |
+| --- | --- | --- | --- |
+| User, service, vendor, API, IdP, datastore, or ops system | actor / external / internal | Role in workflow | File or source |
 
 ## Workflows
 
-Describe the major user and system workflows.
+| Workflow | Trigger | Components | Data Touched | Failure Point |
+| --- | --- | --- | --- | --- |
+| Workflow name | Event or user action | Components involved | Entities/events/files | Likely failure |
 
 ## Components
 
-Describe application, service, package, module, worker, and infrastructure boundaries.
+| Component | Responsibility | Boundary | Owner / Unknown | Evidence |
+| --- | --- | --- | --- | --- |
+| Component name | What it owns | Public/internal interface | Owner or unknown | File/source |
 
 ## Data Flow
 
-Describe key entities, reads, writes, events, queues, files, and trust boundaries.
+| Data | Source | Destination | Operation | Trust Boundary |
+| --- | --- | --- | --- | --- |
+| Entity/event/file | Producer | Consumer | read/write/send | Boundary crossed |
 
 ## Security And Permissions
 
-Describe auth, authorization, sensitive data, secrets, and privileged operations.
+| Surface | Auth / Permission | Sensitive Data | Risk |
+| --- | --- | --- | --- |
+| Route/job/system | Required control | Data class | Failure impact |
 
 ## Deployment
 
-Describe runtime environments, deploy targets, CI/CD, and operational dependencies.
+| Runtime | Deploy Target | Dependency | Evidence |
+| --- | --- | --- | --- |
+| App/job/service | Platform/environment | External or internal dependency | File/source |
 
 ## Failure Modes
 
-List important failure points and degraded behavior.
+| Failure | Impact | Detection | Mitigation |
+| --- | --- | --- | --- |
+| Failure point | User/system impact | Log/metric/check | Recovery |
 
 ## Missing Information
 
-- [ ] Replace unknown architecture claims with evidence.
+- [ ] Unknown component, owner, permission, deployment, or integration fact that affects architecture confidence.
 
 ## Recommended Next Artifacts
 

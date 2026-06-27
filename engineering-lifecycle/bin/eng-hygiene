@@ -11,22 +11,24 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(script: str, *args: str) -> int:
-    return subprocess.call([sys.executable, str(ROOT / script), *args])
+def run(script: str, root: Path, *args: str) -> int:
+    return subprocess.call([sys.executable, str(ROOT / script), *args], cwd=root)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", default=None, help="Target project root. Defaults to the current working directory.")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("detect")
     sub.add_parser("apply-env")
     args = parser.parse_args()
+    root = Path(args.root).resolve() if args.root else Path.cwd().resolve()
     if args.command == "detect":
-        code = run("hooks/scripts/detect-new-env-vars.py")
-        code = run("hooks/scripts/suggest-gitignore-updates.py") or code
+        code = run("hooks/scripts/detect-new-env-vars.py", root)
+        code = run("hooks/scripts/suggest-gitignore-updates.py", root) or code
         return code
     if args.command == "apply-env":
-        return run("hooks/scripts/update-env-example.py", "--apply")
+        return run("hooks/scripts/update-env-example.py", root, "--apply")
     return 1
 
 

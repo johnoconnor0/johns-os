@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Node and frontend build outputs
+node_modules/
+.next/
+.nuxt/
+.svelte-kit/
+.turbo/
+.vite/
+dist/
+build/
+coverage/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+service-account.json
+credentials.json
+
+# Logs and local databases
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Generated plugin runtime workspace
+.project/.engineering/reports/intake/*.json
+.project/.engineering/reports/session-events.jsonl
+.project/.engineering/ledger/ledger-log.jsonl
+
+
+../NOTES.md

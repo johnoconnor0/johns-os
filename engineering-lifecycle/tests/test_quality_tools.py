@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -72,6 +73,39 @@ class QualityToolTests(unittest.TestCase):
         examples = quality_tools.example_output_validator(ROOT)
         self.assertTrue(examples["valid"], examples)
 
+    def test_templates_do_not_use_weak_placeholder_copy(self) -> None:
+        weak_patterns = [
+            "Example problem",
+            "Example users",
+            "No findings recorded yet",
+            "Confirm unresolved",
+            "Describe ",
+            "List ",
+            "State the",
+        ]
+        targets = list((ROOT / "templates").glob("*")) + list((ROOT / "skills").glob("*/templates/*"))
+        for path in targets:
+            if not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8")
+            for pattern in weak_patterns:
+                self.assertNotIn(pattern, text, f"{path.relative_to(ROOT)} contains weak template copy: {pattern}")
+
+    def test_full_lifecycle_examples_validate(self) -> None:
+        for path in sorted((ROOT / "examples" / "full-lifecycle-example").glob("*.md")):
+            proc = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "validate-artifact.py"), "--root", str(ROOT), str(path.relative_to(ROOT))],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 0, f"{path.name}: {proc.stdout}{proc.stderr}")
+
+    def test_gitignore_covers_generated_and_secret_noise(self) -> None:
+        text = (ROOT / ".gitignore").read_text(encoding="utf-8")
+        for pattern in ["__pycache__/", "*.py[cod]", ".env", "!.env.example", ".project/.engineering/reports/intake/*.json"]:
+            self.assertIn(pattern, text)
+
     def test_test_parser_and_completion_contract(self) -> None:
         parsed = quality_tools.test_result_parser("FAILED test_auth.py::test_login\nAssertionError", "pytest")
         self.assertEqual(parsed["status"], "failed")
@@ -89,6 +123,93 @@ class QualityToolTests(unittest.TestCase):
         data = json.loads(proc.stdout)
         self.assertIn("hookSpecificOutput", data)
         self.assertEqual(data["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit")
+
+    def test_prompt_trigger_evals_route_expected_skills(self) -> None:
+        audit = quality_tools.skill_trigger_audit(ROOT)
+        self.assertTrue(audit["valid"], audit)
+        self.assertGreaterEqual(audit["prompt_case_count"], 17)
+
+    def test_cli_uses_target_root_for_workspace_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            proc = subprocess.run(
+                [sys.executable, str(ROOT / "bin" / "eng-life"), "--root", str(target), "init"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertIn(".project", proc.stdout)
+            self.assertTrue((target / ".project" / ".engineering" / "workspace.json").exists())
+            self.assertFalse((ROOT / ".project" / ".engineering" / "workspace.json").read_text(encoding="utf-8").find(str(target)) >= 0)
+
+    def test_agents_have_full_role_contracts(self) -> None:
+        required = [
+            "## Mandate",
+            "## Operating Rules",
+            "## Output Contract",
+        ]
+        for path in sorted((ROOT / "agents").glob("*.md")):
+            text = path.read_text(encoding="utf-8")
+            for marker in required:
+                self.assertIn(marker, text, path.name)
+            self.assertIn("tools: Read, Glob, Grep", text, path.name)
+
+    def test_council_command_adapter_writes_live_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            context = target / "context.md"
+            context.write_text("# Context\n\nUse a reversible architecture decision.\n", encoding="utf-8")
+            adapter = target / "adapter.py"
+            adapter.write_text(
+                "\n".join(
+                    [
+                        "import json, sys",
+                        "payload=json.load(sys.stdin)",
+                        "kind=payload.get('kind','unknown')",
+                        "role=payload.get('role','advisor')",
+                        "if kind == 'synthesis':",
+                        "    content='# Engineering Council Synthesis\\n\\n## Question\\n\\nLive question.\\n\\n## Council Status\\n\\nquorum-met\\n\\n## Evidence\\n\\nContext reviewed.\\n\\n## Advisor Positions\\n\\nPositions reviewed.\\n\\n## Blind Peer Review Summary\\n\\nReviews considered.\\n\\n## Recommendation\\n\\nUse the reversible path.\\n\\n## Dissent Log\\n\\nNone blocking.\\n\\n## Decision\\n\\nOwner decision required.\\n\\n## Confidence\\n\\nMedium.\\n\\n## Follow-up Artifacts\\n\\nADR.\\n\\n## Next Actions\\n\\n- [ ] Record ADR.'",
+                        "elif kind == 'peer-review':",
+                        "    content=f'# {role.title()} Peer Review\\n\\n## Peer Drafts Reviewed\\n\\nadvisor-1\\n\\n## Strongest Arguments\\n\\nReversibility.\\n\\n## Weak Assumptions\\n\\nUnknowns.\\n\\n## Missing Evidence\\n\\nCurrent code.\\n\\n## Findings\\n\\nNo blocker.'",
+                        "else:",
+                        "    content=f'# {role.title()} Advisor Draft\\n\\n## Position\\n\\nUse a reversible path.\\n\\n## Evidence Reviewed\\n\\nContext.\\n\\n## Analysis\\n\\nLive adapter response.\\n\\n## Evidence Gaps\\n\\nCurrent code.\\n\\n## Recommendation\\n\\nProceed carefully.'",
+                        "print(json.dumps({'content': content}))",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            env = {**os.environ, "ENGINEERING_COUNCIL_ADAPTER_COMMAND": f"{sys.executable} {adapter}"}
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "council.py"),
+                    "ask",
+                    "--root",
+                    str(target),
+                    "--mode",
+                    "live-model",
+                    "--adapter",
+                    "command",
+                    "--question",
+                    "Should we use the reversible path?",
+                    "--context",
+                    str(context),
+                    "--run-id",
+                    "live-command-test",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+                env=env,
+            )
+            run_dir = Path(proc.stdout.strip())
+            self.assertTrue((run_dir / "advisor-drafts" / "contrarian.md").exists())
+            self.assertTrue((run_dir / "anonymized-drafts" / "advisor-1.md").exists())
+            self.assertTrue((run_dir / "peer-reviews" / "executor.md").exists())
+            self.assertIn("Live adapter response", (run_dir / "advisor-drafts" / "executor.md").read_text(encoding="utf-8"))
+            report = json.loads((run_dir / "council-report.json").read_text(encoding="utf-8"))
+            self.assertEqual(report["mode"], "live-model")
+            self.assertEqual(report["adapter"], "command")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 ---
-initiative_id: full-lifecycle-example
+initiative_id: checkout-recovery
 skill: create-test-strategy
 created_at: 2026-01-01T00:00:00Z
 status: draft
@@ -12,20 +12,31 @@ source_artifacts:
 
 ## Coverage
 
-Example coverage.
+- Unit: status transitions, timeout classification, idempotency keys.
+- Integration: checkout-state endpoint, checkout-session endpoint, webhook handler.
+- Contract: provider webhook payload handling and API response actions.
+- E2E: cart recovery happy path and expired session replacement.
+- Security: customers cannot read another cart; support sees redacted metadata only.
+- Manual: provider redirect and cancellation behavior in a staging environment.
 
 ## Scenarios
 
-Example scenario.
+- Pending session resumes when still valid.
+- Expired session creates one replacement.
+- Provider timeout does not create duplicate active sessions.
+- Webhook replay does not regress completed state.
 
 ## Manual QA
 
-Example manual QA.
+Validate copy, redirect behavior, browser back button behavior, and support timeline readability.
 
 ## Required Commands
 
-Example command.
+- `pnpm test checkout`
+- `pnpm test webhook`
+- `pnpm lint`
+- `pnpm typecheck`
 
 ## Release Gates
 
-Example gate.
+All automated checks pass, staging provider webhook is verified, and support can interpret the redacted status view.

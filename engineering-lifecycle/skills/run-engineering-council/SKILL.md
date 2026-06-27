@@ -27,18 +27,27 @@ Use only when the user asks for council review or when a decision is high-stakes
 
 1. Confirm the question is high-stakes enough for council review.
 2. Collect explicit context files or directories; do not broaden scope silently.
-3. Run `python scripts/council.py ask --question "<question>" --context <path>` or create the same artifact structure manually.
-4. Preserve independent advisor drafts, peer reviews, events, and chair synthesis.
-5. Treat deterministic local output as structured scaffolding until a human or live model adapter replaces placeholder judgment.
-6. Validate the synthesis with `python scripts/validate-artifact.py .project/.engineering/council/<run-id>/synthesis.md`.
+3. Run `python scripts/council.py ask --question "<question>" --context <path>` for deterministic local mode.
+4. For live model mode, run `python scripts/council.py ask --mode live-model --adapter command|anthropic|openai --question "<question>" --context <path>` after configuring the required environment variables.
+5. Preserve independent advisor drafts, anonymized drafts, peer reviews, events, and chair synthesis.
+6. Treat deterministic local output as a safe, fixture-friendly baseline; use live adapters only when model cost, credentials, and privacy constraints are acceptable.
+7. Validate the synthesis with `python scripts/validate-artifact.py .project/.engineering/council/<run-id>/synthesis.md`.
 
 ## Outputs
 
 - `.project/.engineering/council/<run-id>/input.json`
 - `.project/.engineering/council/<run-id>/advisor-drafts/`
+- `.project/.engineering/council/<run-id>/anonymized-drafts/`
 - `.project/.engineering/council/<run-id>/peer-reviews/`
 - `.project/.engineering/council/<run-id>/synthesis.md`
 - `.project/.engineering/council/<run-id>/events.jsonl`
+
+## Live Adapter Configuration
+
+- `--adapter command` requires `ENGINEERING_COUNCIL_ADAPTER_COMMAND`. The command receives JSON on stdin and returns either plain Markdown or JSON with `content`, `text`, `markdown`, or `response`.
+- `--adapter anthropic` requires `ANTHROPIC_API_KEY` and `ENGINEERING_COUNCIL_MODEL`.
+- `--adapter openai` requires `OPENAI_API_KEY` and `ENGINEERING_COUNCIL_MODEL`.
+- Optional controls: `ENGINEERING_COUNCIL_TIMEOUT_SECONDS`, `ENGINEERING_COUNCIL_MAX_CONTEXT_CHARS`, `ENGINEERING_COUNCIL_MAX_TOKENS`, provider-specific URL overrides, and `--fallback-on-error`.
 
 ## Required Front Matter
 

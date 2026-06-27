@@ -3,7 +3,7 @@
   "action_items": [
     {
       "id": "action-001",
-      "title": "Confirm unresolved lifecycle question.",
+      "title": "Resolve lifecycle decision that blocks the next artifact.",
       "status": "open",
       "source": "template",
       "owner": "unassigned",

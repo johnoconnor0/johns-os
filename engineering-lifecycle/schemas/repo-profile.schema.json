@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/engineering-lifecycle/repo-profile.schema.json",
+  "title": "Engineering Lifecycle Repository Profile",
+  "type": "object",
+  "required": ["repo_root", "git", "facts", "unknowns"],
+  "properties": {
+    "repo_root": { "type": "string", "minLength": 1 },
+    "git": {
+      "type": "object",
+      "required": ["available", "branch", "dirty"],
+      "properties": {
+        "available": { "type": "boolean" },
+        "branch": { "type": ["string", "null"] },
+        "dirty": { "type": ["boolean", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "facts": {
+      "type": "object",
+      "required": ["file_count", "suffix_counts", "manifests", "docs", "tests", "configs"],
+      "properties": {
+        "file_count": { "type": "integer", "minimum": 0 },
+        "suffix_counts": { "type": "object" },
+        "manifests": { "type": "array", "items": { "type": "string" } },
+        "docs": { "type": "array", "items": { "type": "string" } },
+        "tests": { "type": "array", "items": { "type": "string" } },
+        "configs": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "unknowns": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

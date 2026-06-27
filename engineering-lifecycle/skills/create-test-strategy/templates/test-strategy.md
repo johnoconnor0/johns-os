@@ -14,17 +14,27 @@ source_artifacts:
 
 Define unit, integration, contract, E2E, regression, security, migration, and manual coverage.
 
+| Layer | Required? | Scope | Risk Covered |
+| --- | --- | --- | --- |
+| Unit/integration/contract/E2E/regression/security/migration/manual | yes/no | Target | Risk |
+
 ## Scenarios
 
-List behavior-driven scenarios and failure modes.
+| Scenario | Given | When | Then |
+| --- | --- | --- | --- |
+| Scenario name | Preconditions | Action/event | Expected result |
 
 ## Manual QA
 
-List checks that require human validation and why.
+| Check | Why Manual | Environment |
+| --- | --- | --- |
+| Manual check | Reason automation is impractical | Local/staging/prod-like |
 
 ## Required Commands
 
-List exact commands to run before merge, release, and after release.
+| Command | Required Before | Notes |
+| --- | --- | --- |
+| Test/lint/typecheck command | merge/release/post-release | Scope |
 
 ## Release Gates
 

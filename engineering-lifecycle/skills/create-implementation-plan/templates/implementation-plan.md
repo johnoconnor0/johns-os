@@ -12,7 +12,9 @@ source_artifacts:
 
 ## Goal
 
-State the user-facing and technical outcome.
+- User-facing outcome:
+- Technical outcome:
+- Acceptance source:
 
 ## Current State
 
@@ -24,15 +26,21 @@ Summarize confirmed current behavior and files/modules likely to change.
 
 ## Data Or Migration Work
 
-Describe schema, data, config, or backfill changes.
+| Change | Risk | Validation | Rollback |
+| --- | --- | --- | --- |
+| Schema/data/config/backfill item | Risk | Check | Revert/fallback |
 
 ## Test Plan
 
-List required automated and manual checks.
+| Check | Command / Method | Required Before |
+| --- | --- | --- |
+| Unit/integration/manual/release check | Command or QA step | merge/release/post-release |
 
 ## Rollback
 
-Describe how to disable, revert, or mitigate the change.
+| Failure | Rollback / Mitigation | Owner |
+| --- | --- | --- |
+| Failure mode | Disable/revert/fallback step | Owner/unknown |
 
 ## Open Questions
 

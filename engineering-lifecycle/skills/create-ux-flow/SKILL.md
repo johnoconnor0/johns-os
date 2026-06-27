@@ -21,10 +21,29 @@ Use when the user asks for user journeys, screen flow, UI states, interaction de
 - Existing UI files and design conventions.
 - Product profile and user types.
 
+## Workflow
+
+1. Inspect the PRD, discovery brief, existing UI routes/components, and design conventions before defining screens or states.
+2. Identify primary users, entry points, happy paths, alternate paths, and exit points.
+3. Define screen inventory, state matrix, key interactions, empty/loading/error/success/permission states, and accessibility considerations.
+4. Mark any visual, content, or design-system claim as confirmed only when inspected.
+5. Record unresolved UX decisions as open questions with the downstream implementation impact.
+6. Validate generated UX artifacts with `python scripts/validate-artifact.py <artifact paths>`.
+
 ## Outputs
 
 - `.project/.engineering/initiatives/<initiative-id>/ux/ux-flow.md`
 - `.project/.engineering/initiatives/<initiative-id>/ux/screen-inventory.md`
+
+## Required Sections
+
+- Users
+- Journeys
+- Screens
+- States
+- Edge Cases
+- Accessibility
+- Open Questions
 
 ## Safety Constraints
 

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/engineering-lifecycle/missing-artifacts.schema.json",
+  "title": "Engineering Lifecycle Missing Artifacts",
+  "type": "object",
+  "required": ["generated_at", "initiative_id", "missing_artifacts"],
+  "properties": {
+    "generated_at": { "type": "string", "minLength": 1 },
+    "initiative_id": { "type": "string", "minLength": 1 },
+    "missing_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["stage", "artifact", "reason"],
+        "properties": {
+          "stage": { "type": "string", "minLength": 1 },
+          "artifact": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 1 },
+          "recommended_skill": { "type": "string" },
+          "priority": { "type": "string", "enum": ["low", "normal", "high", "urgent"] }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
