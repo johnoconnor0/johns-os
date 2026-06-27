@@ -9,6 +9,8 @@ validation.
 The marketplace catalog lives at:
 
 ```text
+marketplace.json
+.agents/plugins/marketplace.json
 marketplace/catalog.json
 ```
 
@@ -58,8 +60,12 @@ marketplace/
   schemas/
     catalog.schema.json
     plugin.schema.json
+.agents/
+  plugins/
+    marketplace.json
 scripts/
   johns-os-marketplace.py
 engineering-lifecycle/
+  .codex-plugin/plugin.json
   .claude-plugin/plugin.json
 ```

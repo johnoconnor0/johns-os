@@ -1,0 +1,20 @@
+{
+  "name": "johns-os",
+  "interface": {
+    "displayName": "johns-os"
+  },
+  "plugins": [
+    {
+      "name": "engineering-lifecycle",
+      "source": {
+        "source": "local",
+        "path": "./engineering-lifecycle"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

@@ -6,7 +6,7 @@
   "category": "engineering",
   "version": "0.1.0",
   "path": "engineering-lifecycle",
-  "manifest": "engineering-lifecycle/.claude-plugin/plugin.json",
+  "manifest": "engineering-lifecycle/.codex-plugin/plugin.json",
   "source": {
     "type": "local",
     "url": ""
@@ -33,6 +33,7 @@
     "type": "local-path",
     "instructions": [
       "Use the plugin from the local engineering-lifecycle directory.",
+      "Codex discovers this plugin through .agents/plugins/marketplace.json at the johns-os root.",
       "Validate with python engineering-lifecycle/bin/eng-life validate before use."
     ]
   },
