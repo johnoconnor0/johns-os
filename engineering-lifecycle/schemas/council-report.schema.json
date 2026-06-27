@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/engineering-lifecycle/council-report.schema.json",
+  "title": "Engineering Council Report",
+  "type": "object",
+  "required": ["run_id", "question", "status", "advisor_count", "context", "synthesis"],
+  "properties": {
+    "run_id": { "type": "string" },
+    "question": { "type": "string" },
+    "status": { "type": "string", "enum": ["quorum-met", "quorum-failed"] },
+    "advisor_count": { "type": "integer", "minimum": 0 },
+    "context": { "type": "array", "items": { "type": "string" } },
+    "synthesis": { "type": "string" }
+  },
+  "additionalProperties": true
+}

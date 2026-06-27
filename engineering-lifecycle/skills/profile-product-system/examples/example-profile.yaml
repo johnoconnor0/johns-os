@@ -1,0 +1,23 @@
+generated_at: "2026-01-01T00:00:00Z"
+product:
+  name: "Example Product"
+  summary: "Example profile showing the expected shape."
+  users:
+    - "Primary user"
+  workflows:
+    - "Primary workflow"
+repo:
+  root: "."
+  facts:
+    manifests:
+      - "package.json"
+    docs:
+      - "README.md"
+    tests: []
+integrations: []
+constraints: []
+unknowns:
+  - "Deployment target not confirmed."
+evidence:
+  inspected_files:
+    - "README.md"

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/engineering-lifecycle/human-tasks.schema.json",
+  "title": "Engineering Lifecycle Human Tasks",
+  "type": "object",
+  "required": ["generated_at", "human_tasks"],
+  "properties": {
+    "generated_at": { "type": "string" },
+    "human_tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "task", "status", "reason"],
+        "properties": {
+          "id": { "type": "string" },
+          "task": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["open", "in-progress", "blocked", "done", "deferred", "cancelled"]
+          },
+          "reason": { "type": "string" },
+          "owner": { "type": "string" },
+          "source": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

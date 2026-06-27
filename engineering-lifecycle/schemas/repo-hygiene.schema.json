@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/engineering-lifecycle/repo-hygiene.schema.json",
+  "title": "Repository Hygiene Report",
+  "type": "object",
+  "properties": {
+    "generated_at": { "type": "string" },
+    "new_env_vars": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "seen_in", "in_env_example", "recommended_placeholder"],
+        "properties": {
+          "name": { "type": "string" },
+          "seen_in": { "type": "array", "items": { "type": "string" } },
+          "in_env_example": { "type": "boolean" },
+          "recommended_placeholder": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "gitignore_candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["pattern", "reason", "safe_to_add"],
+        "properties": {
+          "pattern": { "type": "string" },
+          "reason": { "type": "string" },
+          "safe_to_add": { "type": "boolean" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "docs_updates": { "type": "array", "items": { "type": "object" } },
+    "risks": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}

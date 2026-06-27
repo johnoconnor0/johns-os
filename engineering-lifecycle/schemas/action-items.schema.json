@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/engineering-lifecycle/action-items.schema.json",
+  "title": "Engineering Lifecycle Action Items",
+  "type": "object",
+  "required": ["generated_at", "action_items"],
+  "properties": {
+    "generated_at": { "type": "string" },
+    "action_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "status", "source"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1 },
+          "status": {
+            "type": "string",
+            "enum": ["open", "in-progress", "blocked", "done", "deferred", "cancelled"]
+          },
+          "source": { "type": "string" },
+          "owner": { "type": "string" },
+          "priority": { "type": "string", "enum": ["low", "normal", "high", "urgent"] },
+          "created_at": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

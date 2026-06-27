@@ -1,0 +1,23 @@
+generated_at: "YYYY-MM-DDTHH:MM:SSZ"
+product:
+  name: "unknown"
+  summary: "unknown"
+  users: []
+  workflows: []
+repo:
+  root: "."
+  facts:
+    manifests: []
+    docs: []
+    tests: []
+integrations: []
+constraints: []
+unknowns:
+  - "Primary product owner is unknown."
+evidence:
+  inspected_files: []
+action_items:
+  - id: "profile-001"
+    title: "Confirm product users and primary workflows."
+    status: "open"
+    source: "profile-product-system"

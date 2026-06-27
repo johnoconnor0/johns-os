@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/engineering-lifecycle/handoff.schema.json",
+  "title": "Engineering Lifecycle Handoff",
+  "type": "object",
+  "required": ["created_at", "from", "to", "summary", "artifacts", "open_items"],
+  "properties": {
+    "created_at": { "type": "string" },
+    "from": { "type": "string" },
+    "to": { "type": "string" },
+    "summary": { "type": "string" },
+    "artifacts": { "type": "array", "items": { "type": "string" } },
+    "open_items": { "type": "array", "items": { "type": "string" } },
+    "risks": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,249 @@
+#!/usr/bin/env python3
+"""Shared helpers for the Engineering Lifecycle plugin scripts."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+WORKSPACE = Path(".project") / ".engineering"
+REQUIRED_FRONT_MATTER = [
+    "initiative_id",
+    "skill",
+    "created_at",
+    "status",
+    "confidence",
+    "source_artifacts",
+]
+
+
+def plugin_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def repo_root(start: Path | None = None) -> Path:
+    cur = (start or Path.cwd()).resolve()
+    for candidate in [cur, *cur.parents]:
+        if (candidate / ".git").exists():
+            return candidate
+        if (candidate / ".claude-plugin" / "plugin.json").exists():
+            return candidate
+    return cur
+
+
+def engineering_root(root: Path | None = None) -> Path:
+    return (root or repo_root()) / WORKSPACE
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def read_json(path: Path, default: Any = None) -> Any:
+    if not path.exists() or path.stat().st_size == 0:
+        return default
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def write_json(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="\n") as f:
+        json.dump(data, f, indent=2, sort_keys=True)
+        f.write("\n")
+
+
+def write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def emit_json(data: Any) -> None:
+    print(json.dumps(data, indent=2, sort_keys=True))
+
+
+def append_jsonl(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(data, sort_keys=True) + "\n")
+
+
+def git(args: list[str], cwd: Path | None = None) -> tuple[int, str, str]:
+    proc = subprocess.run(
+        ["git", *args],
+        cwd=str(cwd or repo_root()),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def git_files(root: Path | None = None) -> list[Path]:
+    root = root or repo_root()
+    code, out, _ = git(["ls-files"], root)
+    if code != 0:
+        ignored = {".git", ".project", "node_modules", "__pycache__"}
+        return sorted(
+            p.relative_to(root)
+            for p in root.rglob("*")
+            if p.is_file() and not any(part in ignored for part in p.relative_to(root).parts)
+        )
+    return [Path(line) for line in out.splitlines() if line.strip()]
+
+
+def changed_files(root: Path | None = None) -> list[Path]:
+    root = root or repo_root()
+    code, out, _ = git(["status", "--porcelain"], root)
+    if code != 0:
+        return []
+    files: list[Path] = []
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        raw = line[3:]
+        if " -> " in raw:
+            raw = raw.split(" -> ", 1)[1]
+        files.append(Path(raw))
+    return sorted(set(files))
+
+
+def untracked_files(root: Path | None = None) -> list[str]:
+    root = root or repo_root()
+    code, out, _ = git(["status", "--porcelain"], root)
+    if code != 0:
+        return []
+    return sorted(line[3:] for line in out.splitlines() if line.startswith("?? "))
+
+
+def parse_front_matter(text: str) -> tuple[dict[str, Any], str]:
+    if not text.startswith("---\n"):
+        return {}, text
+    end = text.find("\n---", 4)
+    if end == -1:
+        return {}, text
+    raw = text[4:end].strip()
+    body = text[end + 4 :].lstrip("\n")
+    data: dict[str, Any] = {}
+    current_key: str | None = None
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        if line.startswith("  - ") and current_key:
+            data.setdefault(current_key, []).append(line[4:].strip().strip('"'))
+            continue
+        if ":" in line:
+            key, value = line.split(":", 1)
+            key = key.strip()
+            value = value.strip()
+            current_key = key
+            if value == "[]":
+                data[key] = []
+            elif value == "":
+                data[key] = []
+            elif value.lower() in {"true", "false"}:
+                data[key] = value.lower() == "true"
+            else:
+                data[key] = value.strip('"')
+    return data, body
+
+
+def slugify(value: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
+    return slug or "item"
+
+
+def load_hook_payload() -> dict[str, Any]:
+    try:
+        if os.isatty(0):
+            return {}
+        raw = os.read(0, 1024 * 1024).decode("utf-8", errors="replace").strip()
+        return json.loads(raw) if raw else {}
+    except Exception:
+        return {}
+
+
+def hook_output(event_name: str, **values: Any) -> dict[str, Any]:
+    return {"hookSpecificOutput": {"hookEventName": event_name, **values}}
+
+
+def hook_additional_context(event_name: str, message: str) -> dict[str, Any]:
+    return hook_output(event_name, additionalContext=message)
+
+
+def permission_output(event_name: str, decision: str, reason: str, **values: Any) -> dict[str, Any]:
+    return hook_output(
+        event_name,
+        permissionDecision=decision,
+        permissionDecisionReason=reason,
+        **values,
+    )
+
+
+def relpath(path: Path, root: Path | None = None) -> str:
+    root = (root or repo_root()).resolve()
+    try:
+        return str(path.resolve().relative_to(root)).replace("\\", "/")
+    except Exception:
+        return str(path).replace("\\", "/")
+
+
+def classify_file_path(path: Path) -> str:
+    parts = {part.lower() for part in path.parts}
+    name = path.name.lower()
+    suffix = path.suffix.lower()
+    text = str(path).replace("\\", "/").lower()
+    if name.startswith(".env") or suffix in {".pem", ".key", ".p12"} or "credential" in name or "secret" in name:
+        return "secret-risk"
+    if any(part in parts for part in {"tests", "test", "__tests__", "spec", "specs"}) or name.endswith((".test.ts", ".test.js", ".spec.ts", ".spec.js", "_test.py")):
+        return "test"
+    if suffix in {".md", ".mdx", ".rst"}:
+        return "docs"
+    if suffix in {".json", ".yaml", ".yml", ".toml", ".ini", ".cfg"} or name.startswith("."):
+        return "config"
+    if "migration" in parts or "migrations" in parts:
+        return "migration"
+    if suffix in {".schema", ".graphql"} or "schema" in parts or name.endswith(".schema.json"):
+        return "schema"
+    if any(part in parts for part in {"dist", "build", "coverage", "__pycache__", ".next", ".turbo"}):
+        return "build-artifact"
+    if "generated" in text or name.endswith((".generated.ts", ".generated.js", ".gen.ts", ".pb.go")):
+        return "generated"
+    if suffix in {".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".java", ".cs", ".rb", ".php", ".sh"}:
+        return "source"
+    return "unknown"
+
+
+ENV_VAR_RE = re.compile(
+    r"(?:process\.env\.|os\.environ(?:\.get)?\(['\"]|getenv\(['\"]|\$env:|\$\{?)([A-Z][A-Z0-9_]{2,})"
+)
+
+
+def placeholder_for_env(name: str) -> str:
+    lname = name.lower()
+    if "stripe" in lname and "webhook" in lname:
+        return "whsec_example"
+    if "stripe" in lname and "secret" in lname:
+        return "sk_test_example"
+    if "anthropic" in lname or "claude" in lname:
+        return "sk-ant-example"
+    if "openai" in lname:
+        return "sk-example"
+    if "url" in lname:
+        return "https://example.invalid"
+    if "token" in lname or "secret" in lname or "key" in lname:
+        return "replace-me"
+    return "example"
+
+
+def first_existing(paths: list[Path]) -> Path | None:
+    for path in paths:
+        if path.exists():
+            return path
+    return None

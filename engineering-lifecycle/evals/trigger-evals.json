@@ -1,0 +1,31 @@
+{
+  "triggers": [
+    {
+      "id": "skills-changed",
+      "paths": [
+        "skills/**",
+        "templates/**"
+      ],
+      "evals": [
+        "artifact-validation"
+      ]
+    },
+    {
+      "id": "runtime-changed",
+      "paths": [
+        "scripts/**",
+        "hooks/**",
+        "schemas/**",
+        "tests/**"
+      ],
+      "evals": [
+        "hygiene-report",
+        "council-report",
+        "dashboard-data",
+        "quality-control-scripts",
+        "prompt-optimization",
+        "schema-validator"
+      ]
+    }
+  ]
+}

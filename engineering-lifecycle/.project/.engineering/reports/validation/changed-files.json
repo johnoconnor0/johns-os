@@ -1,0 +1,11 @@
+{
+  "counts": {
+    "source": 1
+  },
+  "files": [
+    {
+      "category": "source",
+      "path": "scripts/quality_tools.py"
+    }
+  ]
+}

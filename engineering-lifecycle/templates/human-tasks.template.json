@@ -1,0 +1,13 @@
+{
+  "generated_at": "2026-01-01T00:00:00Z",
+  "human_tasks": [
+    {
+      "id": "human-001",
+      "task": "Provide missing product or operational context.",
+      "status": "open",
+      "reason": "The assistant cannot verify this from repository evidence.",
+      "owner": "unassigned",
+      "source": "template"
+    }
+  ]
+}

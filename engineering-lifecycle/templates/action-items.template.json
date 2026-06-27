@@ -1,0 +1,14 @@
+{
+  "generated_at": "2026-01-01T00:00:00Z",
+  "action_items": [
+    {
+      "id": "action-001",
+      "title": "Confirm unresolved lifecycle question.",
+      "status": "open",
+      "source": "template",
+      "owner": "unassigned",
+      "priority": "normal",
+      "created_at": "2026-01-01T00:00:00Z"
+    }
+  ]
+}

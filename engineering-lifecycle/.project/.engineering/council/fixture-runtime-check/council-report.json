@@ -1,0 +1,10 @@
+{
+  "advisor_count": 5,
+  "context": [
+    "README.md"
+  ],
+  "question": "Should deterministic council artifacts ship before live LLM orchestration?",
+  "run_id": "fixture-runtime-check",
+  "status": "quorum-met",
+  "synthesis": ".project/.engineering/council/fixture-runtime-check/synthesis.md"
+}

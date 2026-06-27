@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/engineering-lifecycle/lifecycle-map.schema.json",
+  "title": "Engineering Lifecycle Map",
+  "type": "object",
+  "required": ["generated_at", "stages"],
+  "properties": {
+    "generated_at": { "type": "string" },
+    "initiative_id": { "type": "string" },
+    "stages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "status", "artifacts"],
+        "properties": {
+          "name": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["missing", "draft", "reviewed", "approved", "implemented", "superseded"]
+          },
+          "artifacts": { "type": "array", "items": { "type": "string" } },
+          "gaps": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

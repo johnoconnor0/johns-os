@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""Engineering Lifecycle command entrypoint."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def run(script: str, *args: str) -> int:
+    return subprocess.call([sys.executable, str(ROOT / script), *args], cwd=ROOT)
+
+
+def status() -> int:
+    ledger = ROOT / ".project" / ".engineering" / "ledger" / "ledger.json"
+    if not ledger.exists():
+        print("No ledger found. Run `eng-life sync-ledger` first.")
+        return 0
+    data = json.loads(ledger.read_text(encoding="utf-8"))
+    print(json.dumps(data.get("summary", {}), indent=2, sort_keys=True))
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("init")
+    sub.add_parser("validate")
+    sub.add_parser("sync-ledger")
+    sub.add_parser("build-dashboard")
+    sub.add_parser("status")
+    args = parser.parse_args()
+    if args.command == "init":
+        return run("scripts/init-workspace.py")
+    if args.command == "validate":
+        code = run("scripts/validate-plugin.py")
+        code = run("scripts/validate-schemas.py") or code
+        return code
+    if args.command in {"sync-ledger", "build-dashboard"}:
+        return run("scripts/sync-ledger.py")
+    if args.command == "status":
+        return status()
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

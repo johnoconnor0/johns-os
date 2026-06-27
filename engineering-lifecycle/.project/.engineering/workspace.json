@@ -1,0 +1,16 @@
+{
+  "created_or_checked_at": "2026-06-27T06:15:54+00:00",
+  "directories": [
+    "profile",
+    "lifecycle",
+    "initiatives",
+    "decisions",
+    "handoffs",
+    "hygiene",
+    "ledger",
+    "council",
+    "dashboards",
+    "reports"
+  ],
+  "workspace": ".project/.engineering"
+}

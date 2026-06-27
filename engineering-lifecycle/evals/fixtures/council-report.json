@@ -1,0 +1,10 @@
+{
+  "advisor_count": 5,
+  "context": [
+    "README.md"
+  ],
+  "question": "Should the plugin use deterministic local council artifacts first?",
+  "run_id": "fixture-council",
+  "status": "quorum-met",
+  "synthesis": ".project/.engineering/council/fixture-council/synthesis.md"
+}

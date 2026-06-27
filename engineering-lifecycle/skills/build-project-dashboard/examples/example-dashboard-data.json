@@ -1,0 +1,17 @@
+{
+  "generated_at": "2026-01-01T00:00:00+00:00",
+  "initiatives": [
+    {
+      "id": "example-checkout",
+      "status": "implementation",
+      "open_actions": 3,
+      "latest_artifact": ".project/.engineering/initiatives/example-checkout/implementation/plan.md"
+    }
+  ],
+  "risks": [
+    {
+      "severity": "medium",
+      "summary": "Release checklist is not complete."
+    }
+  ]
+}

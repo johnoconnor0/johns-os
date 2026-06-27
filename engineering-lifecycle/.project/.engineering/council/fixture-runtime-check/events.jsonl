@@ -1,0 +1,16 @@
+{"at": "2026-06-27T06:15:54+00:00", "event": "input_recorded", "payload": {"run_id": "fixture-runtime-check"}}
+{"at": "2026-06-27T06:15:54+00:00", "event": "advisor_draft_written", "payload": {"role": "contrarian"}}
+{"at": "2026-06-27T06:15:54+00:00", "event": "advisor_draft_written", "payload": {"role": "first-principles"}}
+{"at": "2026-06-27T06:15:54+00:00", "event": "advisor_draft_written", "payload": {"role": "expansionist"}}
+{"at": "2026-06-27T06:15:54+00:00", "event": "advisor_draft_written", "payload": {"role": "outsider"}}
+{"at": "2026-06-27T06:15:54+00:00", "event": "advisor_draft_written", "payload": {"role": "executor"}}
+{"at": "2026-06-27T06:15:54+00:00", "event": "peer_reviews_written", "payload": {"count": 5}}
+{"at": "2026-06-27T06:15:54+00:00", "event": "synthesis_written", "payload": {"quorum": true}}
+{"at": "2026-06-27T06:17:18+00:00", "event": "input_recorded", "payload": {"run_id": "fixture-runtime-check"}}
+{"at": "2026-06-27T06:17:18+00:00", "event": "advisor_draft_written", "payload": {"role": "contrarian"}}
+{"at": "2026-06-27T06:17:18+00:00", "event": "advisor_draft_written", "payload": {"role": "first-principles"}}
+{"at": "2026-06-27T06:17:18+00:00", "event": "advisor_draft_written", "payload": {"role": "expansionist"}}
+{"at": "2026-06-27T06:17:18+00:00", "event": "advisor_draft_written", "payload": {"role": "outsider"}}
+{"at": "2026-06-27T06:17:18+00:00", "event": "advisor_draft_written", "payload": {"role": "executor"}}
+{"at": "2026-06-27T06:17:18+00:00", "event": "peer_reviews_written", "payload": {"count": 5}}
+{"at": "2026-06-27T06:17:18+00:00", "event": "synthesis_written", "payload": {"quorum": true}}

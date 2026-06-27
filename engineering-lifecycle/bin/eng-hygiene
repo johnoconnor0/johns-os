@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+"""Run Engineering Lifecycle hygiene detection and optional safe updates."""
+
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def run(script: str, *args: str) -> int:
+    return subprocess.call([sys.executable, str(ROOT / script), *args])
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("detect")
+    sub.add_parser("apply-env")
+    args = parser.parse_args()
+    if args.command == "detect":
+        code = run("hooks/scripts/detect-new-env-vars.py")
+        code = run("hooks/scripts/suggest-gitignore-updates.py") or code
+        return code
+    if args.command == "apply-env":
+        return run("hooks/scripts/update-env-example.py", "--apply")
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

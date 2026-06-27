@@ -1,0 +1,7 @@
+{
+  "context": [],
+  "created_at": "2026-01-01T00:00:00Z",
+  "mode": "deterministic-local",
+  "question": "What high-stakes decision should the council review?",
+  "run_id": "example-council-run"
+}

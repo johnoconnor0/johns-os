@@ -1,0 +1,23 @@
+{
+  "generated_at": "2026-01-01T00:00:00Z",
+  "gitignore_candidates": [
+    {
+      "pattern": ".turbo/",
+      "reason": "Generated Turborepo cache",
+      "safe_to_add": true
+    }
+  ],
+  "new_env_vars": [
+    {
+      "in_env_example": false,
+      "name": "STRIPE_WEBHOOK_SECRET",
+      "recommended_placeholder": "STRIPE_WEBHOOK_SECRET=<replace-me>",
+      "seen_in": [
+        "src/billing/webhook.ts"
+      ]
+    }
+  ],
+  "risks": [
+    "Missing environment placeholder requires review."
+  ]
+}

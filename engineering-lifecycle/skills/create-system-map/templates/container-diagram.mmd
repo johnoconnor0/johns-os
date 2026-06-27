@@ -1,0 +1,10 @@
+flowchart TB
+  Web[Web/App Surface]
+  API[Application/API Layer]
+  Data[(Data Store)]
+  Jobs[Background Jobs]
+
+  Web --> API
+  API --> Data
+  API --> Jobs
+  Jobs --> Data

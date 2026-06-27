@@ -1,0 +1,61 @@
+{
+  "evals": [
+    {
+      "id": "artifact-validation",
+      "description": "Validates generated artifact front matter and required sections.",
+      "fixtures": [
+        "fixtures/artifact-valid.md",
+        "fixtures/artifact-invalid.md"
+      ],
+      "command": "python scripts/validate-artifact.py evals/fixtures/artifact-valid.md"
+    },
+    {
+      "id": "hygiene-report",
+      "description": "Validates hygiene report JSON shape.",
+      "fixtures": [
+        "fixtures/hygiene-report.json"
+      ],
+      "command": "python scripts/validate-schemas.py"
+    },
+    {
+      "id": "council-report",
+      "description": "Validates council report fixture shape.",
+      "fixtures": [
+        "fixtures/council-report.json"
+      ],
+      "command": "python scripts/validate-schemas.py"
+    },
+    {
+      "id": "dashboard-data",
+      "description": "Validates dashboard data fixture JSON.",
+      "fixtures": [
+        "fixtures/dashboard-data.json"
+      ],
+      "command": "python scripts/validate-schemas.py"
+    },
+    {
+      "id": "quality-control-scripts",
+      "description": "Runs regression tests for prompt intake, guardrails, validation, and completion quality scripts.",
+      "fixtures": [],
+      "command": "python -m unittest discover -s tests"
+    },
+    {
+      "id": "prompt-optimization",
+      "description": "Generates the deterministic prompt optimization report.",
+      "fixtures": [
+        "trigger-evals.json"
+      ],
+      "command": "python scripts/prompt-optimization-evaluator.py --root ."
+    },
+    {
+      "id": "schema-validator",
+      "description": "Runs the quality-control schema validator over plugin schemas and generated workspace JSON.",
+      "fixtures": [
+        "fixtures/hygiene-report.json",
+        "fixtures/council-report.json",
+        "fixtures/dashboard-data.json"
+      ],
+      "command": "python scripts/schema-validator.py --root ."
+    }
+  ]
+}

@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-hooks.json",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "hooks/scripts/session-start-context.sh"
+          },
+          {
+            "type": "command",
+            "command": "scripts/init-workspace.py"
+          },
+          {
+            "type": "command",
+            "command": "scripts/detect-stack.py"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "hooks/scripts/user-prompt-intake.py"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "hooks/scripts/ask-user-question-bridge.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "hooks/scripts/block-dangerous-bash.sh"
+          },
+          {
+            "type": "command",
+            "command": "hooks/scripts/block-secret-exfil.sh"
+          },
+          {
+            "type": "command",
+            "command": "hooks/scripts/secret-exfiltration-guard.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|MultiEdit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "hooks/scripts/edit-scope-guard.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|MultiEdit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "hooks/scripts/detect-new-env-vars.py"
+          },
+          {
+            "type": "command",
+            "command": "hooks/scripts/suggest-gitignore-updates.py"
+          },
+          {
+            "type": "command",
+            "command": "hooks/scripts/validate-generated-artifacts.py"
+          },
+          {
+            "type": "command",
+            "command": "hooks/scripts/sync-ledger.py"
+          }
+        ]
+      }
+    ],
+    "PostToolBatch": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "hooks/scripts/post-edit-hygiene.py"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "hooks/scripts/hygiene-stop-check.py"
+          },
+          {
+            "type": "command",
+            "command": "hooks/scripts/capture-session-summary.py"
+          },
+          {
+            "type": "command",
+            "command": "hooks/scripts/stop-completion-check.py"
+          }
+        ]
+      }
+    ]
+  }
+}

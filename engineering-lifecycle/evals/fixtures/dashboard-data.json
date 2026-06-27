@@ -1,0 +1,29 @@
+{
+  "generated_at": "2026-01-01T00:00:00Z",
+  "missing_artifact_groups": [
+    "profile"
+  ],
+  "open_action_items": [
+    {
+      "id": "fixture-001",
+      "source": "evals/fixtures/action-items.json",
+      "status": "open",
+      "title": "Review fixture action item."
+    }
+  ],
+  "recent_artifacts": [
+    {
+      "kind": "md",
+      "path": "evals/fixtures/artifact-valid.md",
+      "status": "draft"
+    }
+  ],
+  "risks": [
+    "Missing profile artifact."
+  ],
+  "summary": {
+    "artifact_count": 1,
+    "council_run_count": 0,
+    "open_action_item_count": 1
+  }
+}

@@ -1,0 +1,10 @@
+erDiagram
+  USER ||--o{ ITEM : owns
+  USER {
+    string id
+    string email
+  }
+  ITEM {
+    string id
+    string owner_id
+  }
