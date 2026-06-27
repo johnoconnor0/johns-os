@@ -55,6 +55,16 @@
       "should_trigger": "create-ux-flow"
     },
     {
+      "id": "create-design-system-positive",
+      "query": "Create a design system for this SaaS MVP with colours, typography, spacing, reusable components, and accessibility rules.",
+      "should_trigger": "create-design-system"
+    },
+    {
+      "id": "build-ui-prototype-positive",
+      "query": "Build a clickable UI prototype with mock data for the onboarding flow.",
+      "should_trigger": "build-ui-prototype"
+    },
+    {
       "id": "create-system-map-positive",
       "query": "Create a system map that shows external systems, component boundaries, data flow, and failure points.",
       "should_trigger": "create-system-map"
@@ -131,6 +141,12 @@
       "query": "Review the changed files and report bugs, security issues, and missing tests with file references.",
       "should_trigger": "review-change",
       "should_not_trigger": "create-test-strategy"
+    },
+    {
+      "id": "design-system-not-ux-flow",
+      "query": "Define colours, typography, spacing, and reusable component standards for this dashboard.",
+      "should_trigger": "create-design-system",
+      "should_not_trigger": "create-ux-flow"
     }
   ]
 }

@@ -1,0 +1,45 @@
+{
+  "id": "engineering-lifecycle",
+  "name": "Engineering Lifecycle",
+  "summary": "Move software products through a structured engineering lifecycle from discovery to maintenance.",
+  "status": "local",
+  "category": "engineering",
+  "version": "0.1.0",
+  "path": "engineering-lifecycle",
+  "manifest": "engineering-lifecycle/.claude-plugin/plugin.json",
+  "source": {
+    "type": "local",
+    "url": ""
+  },
+  "capabilities": [
+    "skills",
+    "agents",
+    "hooks",
+    "schemas",
+    "deterministic-scripts",
+    "lifecycle-artifacts"
+  ],
+  "tags": [
+    "engineering",
+    "lifecycle",
+    "architecture",
+    "product",
+    "testing",
+    "release",
+    "repo-hygiene"
+  ],
+  "risk": "low",
+  "install": {
+    "type": "local-path",
+    "instructions": [
+      "Use the plugin from the local engineering-lifecycle directory.",
+      "Validate with python engineering-lifecycle/bin/eng-life validate before use."
+    ]
+  },
+  "validation": {
+    "commands": [
+      "python engineering-lifecycle/bin/eng-life validate",
+      "python -m unittest discover -s engineering-lifecycle/tests"
+    ]
+  }
+}

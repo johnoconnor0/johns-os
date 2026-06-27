@@ -1,6 +1,6 @@
 # Engineering Lifecycle
 
-Engineering Lifecycle is a Claude Code plugin for moving software products through a structured engineering lifecycle. It helps teams profile a product system, define requirements, map UX and architecture, design data and API contracts, plan implementation, review changes, test, release, and maintain repository hygiene.
+Engineering Lifecycle is a Claude Code plugin for moving software products through a structured engineering lifecycle. It helps teams profile a product system, define requirements, map UX and architecture, plan design systems, design data and API contracts, plan implementation, review changes, test, release, and maintain repository hygiene.
 
 This plugin is the replacement for the previous `engineering-os` direction. It is a new plugin in a new repository shape. It does not depend on the old plugin, its workspace layout, or its compatibility behavior.
 
@@ -34,10 +34,11 @@ The repository URL is not declared in the manifest yet because the final public 
 1. Profile the product system with `profile-product-system`.
 2. Map lifecycle state with `map-product-lifecycle`.
 3. Create missing artifacts with the relevant lifecycle skill.
-4. Plan implementation with `create-implementation-plan`.
-5. Implement only after the plan is accepted, using `implement-feature-safely` when execution support is needed.
-6. Review, test, and release with `review-change`, `create-test-strategy`, and `create-release-plan`.
-7. Maintain repo hygiene with `update-repo-hygiene` and the conservative hook checks.
+4. Create a design system with `create-design-system` when UI foundations, tokens, or reusable component standards are needed.
+5. Plan implementation with `create-implementation-plan`.
+6. Implement only after the plan is accepted, using `implement-feature-safely` when execution support is needed.
+7. Review, test, and release with `review-change`, `create-test-strategy`, and `create-release-plan`.
+8. Maintain repo hygiene with `update-repo-hygiene` and the conservative hook checks.
 
 ## Workspace Contract
 
@@ -109,6 +110,8 @@ The skills define production-oriented lifecycle contracts with repeatable workfl
 - `create-discovery-brief`: turn a product idea or problem into a discovery brief.
 - `create-prd`: produce practical requirements and acceptance criteria.
 - `create-ux-flow`: map user journeys, screens, states, and interactions.
+- `create-design-system`: plan or audit UI foundations, design tokens, component inventory, accessibility rules, and implementation mapping.
+- `build-ui-prototype`: build a lightweight UI prototype, clickable MVP, app shell, dashboard mock, or frontend proof of concept.
 - `create-system-map`: map actors, components, workflows, data flow, boundaries, risks, and deployment shape.
 - `create-architecture-plan`: turn system understanding into architecture decisions and ADR candidates.
 - `create-data-model`: define entities, relationships, ownership, sensitivity, retention, and migration risk.
