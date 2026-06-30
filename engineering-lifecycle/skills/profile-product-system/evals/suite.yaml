@@ -1,0 +1,53 @@
+# Starter eval suite for profile-product-system. Review and tune judge_criteria + edge expectations.
+skill: profile-product-system
+description: Profiles a product, users, stack, integrations, constraints, and development maturity at the start of work.
+test_cases:
+  - id: activate-positive-1
+    kind: activation
+    description: should fire when the user asks to understand an unfamiliar repo
+    user_input: "Help me understand this repo's product, stack, and integrations before we plan."
+    expected_activation: true
+  - id: activate-positive-2
+    kind: activation
+    description: should fire when starting a new initiative needing baseline context
+    user_input: "Profile this product system and its current engineering maturity."
+    expected_activation: true
+  - id: activate-positive-3
+    kind: activation
+    description: should fire when preparing inputs for lifecycle or architecture work
+    user_input: "Build baseline product, repo, and tech-stack context for this codebase."
+    expected_activation: true
+  - id: activate-negative-1
+    kind: activation
+    description: should NOT fire when the user asks to map the lifecycle stage (map-product-lifecycle)
+    user_input: "Which lifecycle stage are we in and what artifact should we create next?"
+    expected_activation: false
+  - id: activate-negative-2
+    kind: activation
+    description: should NOT fire when the user asks to design the architecture (create-architecture-plan)
+    user_input: "Design the architecture plan with module boundaries and tradeoffs."
+    expected_activation: false
+  - id: functional-1
+    kind: functional
+    description: produces the expected profile artifact
+    user_input: "Profile this product system and write the product, tech-stack, and repo profiles."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "*product-system-profile.yaml"
+      - kind: contains
+        text: "unknowns:"
+    judge_criteria:
+      - "Separates confirmed facts from product assumptions"
+      - "Marks unknown users, workflows, integrations, and constraints explicitly"
+      - "Cites files inspected for non-obvious repo or product claims"
+    timeout_seconds: 300
+  - id: edge-empty-argument
+    kind: edge-case
+    description: handles empty input gracefully
+    user_input: ""
+    expected_error: "empty-argument"
+  - id: edge-empty-repo
+    kind: edge-case
+    description: handles an empty repo with no README, docs, or manifests
+    user_input: "Profile this repository that has no README, docs, or package manifests."
+    expected_error: "insufficient-context"

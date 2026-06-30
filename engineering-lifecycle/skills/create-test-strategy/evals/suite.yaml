@@ -1,0 +1,53 @@
+# Starter eval suite for create-test-strategy. Review and tune judge_criteria + edge expectations.
+skill: create-test-strategy
+description: Verifies create-test-strategy fires on test-planning requests, produces a coverage-by-type strategy artifact, and handles missing context gracefully.
+test_cases:
+  - id: activate-positive-1
+    kind: activation
+    description: should fire when the user asks what to test and which test types are needed
+    user_input: "What should we test and which test types are needed to verify this feature?"
+    expected_activation: true
+  - id: activate-positive-2
+    kind: activation
+    description: should fire when the user wants to reduce release risk through testing
+    user_input: "Define the automated and manual test plan to reduce release risk for this change."
+    expected_activation: true
+  - id: activate-positive-3
+    kind: activation
+    description: should fire when coverage expectations for a migration are unclear
+    user_input: "How do we verify this migration is safe across unit, integration, and regression?"
+    expected_activation: true
+  - id: activate-negative-1
+    kind: activation
+    description: should NOT fire when the user wants a release/rollout plan (create-release-plan)
+    user_input: "Plan the rollout, monitoring, and rollback for shipping this to production."
+    expected_activation: false
+  - id: activate-negative-2
+    kind: activation
+    description: should NOT fire when the user wants to review a diff/PR (review-change)
+    user_input: "Review this pull request for correctness, security, and maintainability."
+    expected_activation: false
+  - id: functional-1
+    kind: functional
+    description: produces the expected test strategy artifact
+    user_input: "Create the test strategy for the saved-cart checkout initiative."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "*test-strategy.md"
+      - kind: contains
+        text: "Manual QA"
+    judge_criteria:
+      - "Every recommended test is tied to a user-facing behavior, failure mode, or implementation slice"
+      - "Required Sections present: Coverage, Scenarios, Manual QA, Required Commands, Release Gates"
+      - "Tests are not claimed to have passed unless run; manual QA is included where automation is impractical"
+    timeout_seconds: 300
+  - id: edge-empty-argument
+    kind: edge-case
+    description: handles empty input gracefully
+    user_input: ""
+    expected_error: "empty-argument"
+  - id: edge-missing-upstream-artifact
+    kind: edge-case
+    description: handles a request with no PRD, implementation plan, or acceptance criteria to test against
+    user_input: "Create the test strategy, but there is no PRD, implementation plan, or acceptance criteria yet."
+    expected_error: "missing-upstream-artifact"

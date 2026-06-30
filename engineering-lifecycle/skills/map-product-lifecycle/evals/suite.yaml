@@ -1,0 +1,53 @@
+# Starter eval suite for map-product-lifecycle. Review and tune judge_criteria + edge expectations.
+skill: map-product-lifecycle
+description: Identifies where a product or initiative sits in the engineering lifecycle and which artifacts are missing.
+test_cases:
+  - id: activate-positive-1
+    kind: activation
+    description: should fire when the user asks what should happen next in the lifecycle
+    user_input: "Where does this initiative sit in the lifecycle and what should happen next?"
+    expected_activation: true
+  - id: activate-positive-2
+    kind: activation
+    description: should fire when the user asks which planning artifacts are missing
+    user_input: "Which planning artifacts are missing for this product right now?"
+    expected_activation: true
+  - id: activate-positive-3
+    kind: activation
+    description: should fire when the user asks how mature the initiative is
+    user_input: "How mature is this initiative and what is the recommended next step?"
+    expected_activation: true
+  - id: activate-negative-1
+    kind: activation
+    description: should NOT fire when the user asks to profile the product system (profile-product-system)
+    user_input: "Profile this repo's product, users, stack, and integrations from scratch."
+    expected_activation: false
+  - id: activate-negative-2
+    kind: activation
+    description: should NOT fire when the user asks to write the PRD (create-prd)
+    user_input: "Write the PRD with functional requirements and acceptance criteria."
+    expected_activation: false
+  - id: functional-1
+    kind: functional
+    description: produces the expected lifecycle map artifact
+    user_input: "Map this initiative's lifecycle stage and list missing artifacts."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "*lifecycle-map.md"
+      - kind: contains
+        text: "## Current Stage"
+    judge_criteria:
+      - "Classifies lifecycle stages and lists missing artifacts"
+      - "Recommends exactly one primary next skill"
+      - "Distinguishes confirmed evidence from inferred lifecycle state"
+    timeout_seconds: 300
+  - id: edge-empty-argument
+    kind: edge-case
+    description: handles empty input gracefully
+    user_input: ""
+    expected_error: "empty-argument"
+  - id: edge-no-profile-context
+    kind: edge-case
+    description: handles missing profile and initiative artifacts
+    user_input: "Map the lifecycle for a brand-new empty repo with no profile or initiative artifacts."
+    expected_error: "insufficient-context"

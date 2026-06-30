@@ -1,0 +1,54 @@
+# Starter eval suite for create-data-model. Review and tune judge_criteria + edge expectations.
+skill: create-data-model
+description: "Verifies create-data-model activates on entity/schema/ERD requests and produces an entity model with required sections and migration risk notes."
+test_cases:
+  - id: activate-positive-1
+    kind: activation
+    description: should fire when the user asks to design entities and relationships
+    user_input: "Design the entities, relationships, ownership, and retention for the saved-cart checkout domain."
+    expected_activation: true
+  - id: activate-positive-2
+    kind: activation
+    description: should fire when the user asks for an ERD and schema shape
+    user_input: "Produce an ERD and schema shape for orders, with cardinality and source of truth marked."
+    expected_activation: true
+  - id: activate-positive-3
+    kind: activation
+    description: should fire when the user asks about data lifecycle and migration planning
+    user_input: "Plan the data lifecycle, sensitive fields, retention, and migration risks before we add the new tables."
+    expected_activation: true
+  - id: activate-negative-1
+    kind: activation
+    description: should NOT fire when the user wants an API contract instead
+    user_input: "Define the endpoints, request/response shapes, and error model for the checkout API."
+    expected_activation: false
+  - id: activate-negative-2
+    kind: activation
+    description: should NOT fire when the user wants architecture direction instead
+    user_input: "Recommend the architecture and module boundaries for the checkout subsystem."
+    expected_activation: false
+  - id: functional-1
+    kind: functional
+    description: produces an entity model with required sections (see examples/example-entity-model.md)
+    user_input: "Create the data model for the saved-cart checkout initiative."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "**/data/entity-model.md"
+      - kind: contains
+        text: "## Migration Risk"
+    judge_criteria:
+      - "Australian English used throughout"
+      - "Includes the required sections: Entities, Relationships, Ownership, Sensitivity, Retention, Audit And Lifecycle, Migration Risk, Open Questions"
+      - "Sensitive fields and retention assumptions are explicitly marked"
+      - "Destructive migrations are not proposed without explicit risk notes; unknown source-of-truth questions are flagged"
+    timeout_seconds: 300
+  - id: edge-empty-argument
+    kind: edge-case
+    description: handles empty input gracefully
+    user_input: ""
+    expected_error: "empty-argument"
+  - id: edge-missing-architecture
+    kind: edge-case
+    description: handles a request with no architecture direction upstream
+    user_input: "Write the entity model with no architecture plan or system map available."
+    expected_error: "missing-input"

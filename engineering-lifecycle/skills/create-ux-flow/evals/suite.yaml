@@ -1,0 +1,53 @@
+# Starter eval suite for create-ux-flow. Review and tune judge_criteria + edge expectations.
+skill: create-ux-flow
+description: Verifies create-ux-flow fires on user-journey/screen requests, produces a UX flow plus screen inventory, and handles missing context gracefully.
+test_cases:
+  - id: activate-positive-1
+    kind: activation
+    description: should fire when the user asks to map user journeys and screens
+    user_input: "Map the user journeys, screens, and UI states for the saved-cart checkout."
+    expected_activation: true
+  - id: activate-positive-2
+    kind: activation
+    description: should fire when the user wants a screen inventory and interaction flow
+    user_input: "Produce a screen inventory and the interaction flow for this feature."
+    expected_activation: true
+  - id: activate-positive-3
+    kind: activation
+    description: should fire when empty/loading/error/accessibility states need coverage
+    user_input: "I need the empty, loading, error, and accessibility states defined for each screen."
+    expected_activation: true
+  - id: activate-negative-1
+    kind: activation
+    description: should NOT fire when the user wants product requirements (create-prd)
+    user_input: "Write the functional requirements and acceptance criteria for saved-cart checkout."
+    expected_activation: false
+  - id: activate-negative-2
+    kind: activation
+    description: should NOT fire when the user wants to build a working UI prototype (build-ui-prototype)
+    user_input: "Build a clickable UI prototype of the checkout from these requirements."
+    expected_activation: false
+  - id: functional-1
+    kind: functional
+    description: produces the expected UX flow artifact
+    user_input: "Create the UX flow for the saved-cart checkout initiative."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "*ux-flow.md"
+      - kind: contains
+        text: "Happy Path"
+    judge_criteria:
+      - "Screen inventory, state matrix, and accessibility considerations are explicit and cover empty/loading/error/success/permission states"
+      - "Required Sections present: Users, Journeys, Screens, States, Edge Cases, Accessibility, Open Questions"
+      - "No UI is implemented; visual/design-system claims are only made when inspected"
+    timeout_seconds: 300
+  - id: edge-empty-argument
+    kind: edge-case
+    description: handles empty input gracefully
+    user_input: ""
+    expected_error: "empty-argument"
+  - id: edge-missing-requirements
+    kind: edge-case
+    description: handles a request with no PRD or discovery brief to derive journeys from
+    user_input: "Create the UX flow, but there is no PRD, discovery brief, or described feature yet."
+    expected_error: "missing-requirements"

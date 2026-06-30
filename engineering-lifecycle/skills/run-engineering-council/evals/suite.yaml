@@ -1,0 +1,53 @@
+# Starter eval suite for run-engineering-council. Review and tune judge_criteria + edge expectations.
+skill: run-engineering-council
+description: Convenes a multi-perspective engineering council for high-stakes decisions and synthesizes tradeoff analysis.
+test_cases:
+  - id: activate-positive-1
+    kind: activation
+    description: should fire for a major architecture decision needing multi-perspective review
+    user_input: "Convene an engineering council on whether to adopt a payment orchestration layer."
+    expected_activation: true
+  - id: activate-positive-2
+    kind: activation
+    description: should fire for a build-vs-buy decision
+    user_input: "Run a council review on build-vs-buy for our search infrastructure."
+    expected_activation: true
+  - id: activate-positive-3
+    kind: activation
+    description: should fire for a risky migration or security-sensitive design
+    user_input: "We need independent specialist perspectives on this risky database migration."
+    expected_activation: true
+  - id: activate-negative-1
+    kind: activation
+    description: should NOT fire for a routine typo fix
+    user_input: "Fix this typo in the README heading."
+    expected_activation: false
+  - id: activate-negative-2
+    kind: activation
+    description: should NOT fire for a simple routine refactor
+    user_input: "Do a simple refactor to rename this helper function."
+    expected_activation: false
+  - id: functional-1
+    kind: functional
+    description: produces the expected council synthesis artifact
+    user_input: "Run an engineering council on direct provider integration vs payment orchestration and synthesize the decision."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "*synthesis.md"
+      - kind: contains
+        text: "## Recommendation"
+    judge_criteria:
+      - "Preserves independent advisor drafts and meaningful dissent"
+      - "Records confidence and next actions"
+      - "Honors quorum rules (at least three advisor drafts)"
+    timeout_seconds: 300
+  - id: edge-empty-argument
+    kind: edge-case
+    description: handles empty input gracefully
+    user_input: ""
+    expected_error: "empty-argument"
+  - id: edge-low-stakes-decision
+    kind: edge-case
+    description: declines council for a routine low-stakes change
+    user_input: "Convene the full council to decide whether to add a single log statement."
+    expected_error: "not-high-stakes"

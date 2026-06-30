@@ -1,0 +1,53 @@
+# Starter eval suite for create-implementation-plan. Review and tune judge_criteria + edge expectations.
+skill: create-implementation-plan
+description: Verifies create-implementation-plan fires on build/sequencing requests, produces a sequenced plan artifact, and handles missing context gracefully.
+test_cases:
+  - id: activate-positive-1
+    kind: activation
+    description: should fire when the user asks how to build/sequence a feature
+    user_input: "How should we break this feature into sequenced, testable implementation slices?"
+    expected_activation: true
+  - id: activate-positive-2
+    kind: activation
+    description: should fire when the user asks to scope and split work before coding
+    user_input: "Split the saved-cart checkout work into low-risk PRs with rollback notes."
+    expected_activation: true
+  - id: activate-positive-3
+    kind: activation
+    description: should fire when migration/dependency ordering matters
+    user_input: "Plan the implementation order so the migration ships safely before the API change."
+    expected_activation: true
+  - id: activate-negative-1
+    kind: activation
+    description: should NOT fire when the user wants product requirements (create-prd)
+    user_input: "Write the functional requirements and acceptance criteria for saved-cart checkout."
+    expected_activation: false
+  - id: activate-negative-2
+    kind: activation
+    description: should NOT fire when the user wants a release/rollout plan (create-release-plan)
+    user_input: "Plan the rollout, feature flags, and monitoring for shipping this to production."
+    expected_activation: false
+  - id: functional-1
+    kind: functional
+    description: produces the expected sequenced implementation plan artifact
+    user_input: "Create the implementation plan for the saved-cart checkout initiative."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "*implementation-plan.md"
+      - kind: contains
+        text: "Implementation Slices"
+    judge_criteria:
+      - "Work is split into independently reviewable slices, each naming likely files/modules and tests"
+      - "Required Sections present: Goal, Current State, Implementation Slices, Data Or Migration Work, Test Plan, Rollback, Open Questions"
+      - "No source files are edited; affected files are only identified"
+    timeout_seconds: 300
+  - id: edge-empty-argument
+    kind: edge-case
+    description: handles empty input gracefully
+    user_input: ""
+    expected_error: "empty-argument"
+  - id: edge-missing-upstream-artifact
+    kind: edge-case
+    description: handles a request with no approved requirements/architecture to plan against
+    user_input: "Create the implementation plan, but there is no PRD, system map, or architecture plan yet."
+    expected_error: "missing-upstream-artifact"

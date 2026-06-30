@@ -1,0 +1,54 @@
+# Starter eval suite for create-architecture-plan. Review and tune judge_criteria + edge expectations.
+skill: create-architecture-plan
+description: "Verifies create-architecture-plan activates on architecture/tradeoff requests and produces an architecture plan with required sections and ADR candidates."
+test_cases:
+  - id: activate-positive-1
+    kind: activation
+    description: should fire when the user asks for an implementable architecture plan
+    user_input: "Turn the system map into an implementable architecture plan with module boundaries and tradeoffs."
+    expected_activation: true
+  - id: activate-positive-2
+    kind: activation
+    description: should fire when the user asks to decide technical direction with tradeoffs
+    user_input: "Decide the technical direction and scaling shape for checkout, and capture the tradeoffs as ADR candidates."
+    expected_activation: true
+  - id: activate-positive-3
+    kind: activation
+    description: should fire when the user asks about module ownership and interfaces
+    user_input: "Define module ownership, interfaces, and migration impact for the new payments boundary."
+    expected_activation: true
+  - id: activate-negative-1
+    kind: activation
+    description: should NOT fire when the user wants an API contract instead
+    user_input: "Define the request and response shapes and error model for the checkout endpoints."
+    expected_activation: false
+  - id: activate-negative-2
+    kind: activation
+    description: should NOT fire when the user wants a data model instead
+    user_input: "Model the entities, cardinality, and retention for the orders database."
+    expected_activation: false
+  - id: functional-1
+    kind: functional
+    description: produces an architecture plan with required sections (see examples/example-architecture-plan.md)
+    user_input: "Create the architecture plan for the saved-cart checkout initiative."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "**/architecture/architecture-plan.md"
+      - kind: contains
+        text: "## Decision Summary"
+    judge_criteria:
+      - "Australian English used throughout"
+      - "Includes the required sections: Decision Summary, Constraints, Recommended Architecture, Interfaces And Boundaries, Alternatives Considered, Risks, Migration And Rollback, ADR Candidates"
+      - "Recommended decisions are clearly distinguished from alternatives considered"
+      - "Operational constraints are not invented; council review reserved for high-stakes decisions"
+    timeout_seconds: 300
+  - id: edge-empty-argument
+    kind: edge-case
+    description: handles empty input gracefully
+    user_input: ""
+    expected_error: "empty-argument"
+  - id: edge-missing-system-map
+    kind: edge-case
+    description: handles a request with no system map or product understanding upstream
+    user_input: "Write the architecture plan with no system map, PRD, or product profile available."
+    expected_error: "missing-input"

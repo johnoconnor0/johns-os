@@ -1,0 +1,53 @@
+# Starter eval suite for update-repo-hygiene. Review and tune judge_criteria + edge expectations.
+skill: update-repo-hygiene
+description: Inspects and intentionally updates repository hygiene files such as .gitignore, .env.example, docs, and changelog.
+test_cases:
+  - id: activate-positive-1
+    kind: activation
+    description: should fire when the user asks to sync env examples
+    user_input: "Sync the .env.example with the new environment variables we added."
+    expected_activation: true
+  - id: activate-positive-2
+    kind: activation
+    description: should fire when the user asks to update ignore rules
+    user_input: "Review the ignored files and update .gitignore for generated artifacts."
+    expected_activation: true
+  - id: activate-positive-3
+    kind: activation
+    description: should fire when cleaning up repo support artifacts before handoff
+    user_input: "Clean up the repo hygiene files and refresh the hygiene report before release."
+    expected_activation: true
+  - id: activate-negative-1
+    kind: activation
+    description: should NOT fire when the user asks to plan the release (create-release-plan)
+    user_input: "Plan the rollout, feature flags, rollback, and monitoring for this release."
+    expected_activation: false
+  - id: activate-negative-2
+    kind: activation
+    description: should NOT fire when the user asks for a security review (review-change)
+    user_input: "Review this diff for auth and data-exposure security issues."
+    expected_activation: false
+  - id: functional-1
+    kind: functional
+    description: produces the expected repo hygiene report artifact
+    user_input: "Inspect repo hygiene and write the hygiene report covering env vars and ignore rules."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "*hygiene-report.md"
+      - kind: contains
+        text: "## Environment Variables"
+    judge_criteria:
+      - "Never copies secret values into .env.example, only placeholders"
+      - "Adds .gitignore entries only for safe generated/local patterns"
+      - "Suggests docs updates by default rather than editing them unrequested"
+    timeout_seconds: 300
+  - id: edge-empty-argument
+    kind: edge-case
+    description: handles empty input gracefully
+    user_input: ""
+    expected_error: "empty-argument"
+  - id: edge-secret-value-in-env
+    kind: edge-case
+    description: refuses to copy a real secret value into .env.example
+    user_input: "Add API_KEY=sk-live-9f2c-real-secret-value to the .env.example file."
+    expected_error: "secret-value-rejected"

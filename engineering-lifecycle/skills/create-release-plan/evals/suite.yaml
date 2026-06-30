@@ -1,0 +1,53 @@
+# Starter eval suite for create-release-plan. Review and tune judge_criteria + edge expectations.
+skill: create-release-plan
+description: Verifies create-release-plan fires on rollout/ship requests, produces a release plan with rollback and post-release validation, and handles missing context gracefully.
+test_cases:
+  - id: activate-positive-1
+    kind: activation
+    description: should fire when the user asks how to roll out and monitor a release
+    user_input: "Plan the rollout, feature flags, monitoring, and rollback for shipping this to production."
+    expected_activation: true
+  - id: activate-positive-2
+    kind: activation
+    description: should fire when the user asks to prepare migration and support notes for a release
+    user_input: "Prepare the migration steps, support handoff, and changelog for this release."
+    expected_activation: true
+  - id: activate-positive-3
+    kind: activation
+    description: should fire when release risk and post-release validation matter
+    user_input: "How do we safely ship this, and what do we validate after release?"
+    expected_activation: true
+  - id: activate-negative-1
+    kind: activation
+    description: should NOT fire when the user wants a test plan (create-test-strategy)
+    user_input: "What should we test and which test types are needed to reduce risk?"
+    expected_activation: false
+  - id: activate-negative-2
+    kind: activation
+    description: should NOT fire when the user wants an implementation breakdown (create-implementation-plan)
+    user_input: "Split this change into sequenced, independently reviewable implementation slices."
+    expected_activation: false
+  - id: functional-1
+    kind: functional
+    description: produces the expected release plan artifact
+    user_input: "Create the release plan for the saved-cart checkout initiative."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "*release-plan.md"
+      - kind: contains
+        text: "Post-Release Validation"
+    judge_criteria:
+      - "Rollback or disablement steps are specific enough to execute"
+      - "Required Sections present: Scope, Preconditions, Rollout, Monitoring, Rollback, Support, Post-Release Validation, Open Questions"
+      - "Deployment status is not invented; required release gates are separated from optional hardening"
+    timeout_seconds: 300
+  - id: edge-empty-argument
+    kind: edge-case
+    description: handles empty input gracefully
+    user_input: ""
+    expected_error: "empty-argument"
+  - id: edge-missing-upstream-artifact
+    kind: edge-case
+    description: handles a request with no reviewed change, implementation plan, or test strategy to release
+    user_input: "Create the release plan, but no implementation plan, review, or test strategy exists yet."
+    expected_error: "missing-upstream-artifact"

@@ -1,0 +1,55 @@
+# Starter eval suite for build-ui-prototype. Review and tune judge_criteria + edge expectations.
+skill: build-ui-prototype
+description: "Verifies build-ui-prototype activates on prototype/MVP build requests and produces a scoped prototype with mock data and a limitations artefact."
+test_cases:
+  - id: activate-positive-1
+    kind: activation
+    description: should fire when the user asks to build a clickable UI prototype
+    user_input: "Build a clickable UI prototype of the audit dashboard with mock data from the screen inventory."
+    expected_activation: true
+  - id: activate-positive-2
+    kind: activation
+    description: should fire when the user asks to scaffold an app shell / SaaS shell
+    user_input: "Scaffold a SaaS dashboard app shell with navigation, cards, tables, and empty states using placeholder data."
+    expected_activation: true
+  - id: activate-positive-3
+    kind: activation
+    description: should fire when the user asks for a frontend proof-of-concept from a PRD/UX flow
+    user_input: "Create a frontend proof-of-concept MVP slice for the onboarding flow from our PRD and UX flow."
+    expected_activation: true
+  - id: activate-negative-1
+    kind: activation
+    description: should NOT fire when the user wants a design system instead
+    user_input: "Document a design system with design tokens, typography, colours, and reusable component standards."
+    expected_activation: false
+  - id: activate-negative-2
+    kind: activation
+    description: should NOT fire when the user wants the UX flow mapped, not built
+    user_input: "Map the user journey, screens, and interaction states for the checkout flow before any code."
+    expected_activation: false
+  - id: functional-1
+    kind: functional
+    description: produces a scoped prototype and the limitations artefact (see examples/example-saas-mvp-shell.md)
+    user_input: "Build a SaaS MVP shell prototype for the example-checkout initiative using mock data."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "**/prototype/prototype-limitations.md"
+      - kind: contains
+        text: "Prototype Scope"
+    judge_criteria:
+      - "Australian English used throughout"
+      - "A scope statement defines prototype mode, included screens, excluded screens, and data source before editing"
+      - "Mock data is used and never represented as production data"
+      - "Empty, loading, error, success, and permission states are covered where relevant"
+      - "Known limitations are visible and the prototype is not claimed production-ready"
+    timeout_seconds: 300
+  - id: edge-empty-argument
+    kind: edge-case
+    description: handles empty input gracefully
+    user_input: ""
+    expected_error: "empty-argument"
+  - id: edge-unclear-intent
+    kind: edge-case
+    description: halts to clarify when implementation intent is ambiguous
+    user_input: "Do something with the dashboard."
+    expected_error: "ambiguous-intent"

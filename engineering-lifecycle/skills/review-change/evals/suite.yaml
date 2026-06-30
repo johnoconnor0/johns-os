@@ -1,0 +1,53 @@
+# Starter eval suite for review-change. Review and tune judge_criteria + edge expectations.
+skill: review-change
+description: Reviews a branch, PR, diff, or uncommitted change for correctness, architecture, security, tests, and migrations.
+test_cases:
+  - id: activate-positive-1
+    kind: activation
+    description: should fire when the user asks for a PR review
+    user_input: "Review my pull request diff for correctness, security, and migration risk."
+    expected_activation: true
+  - id: activate-positive-2
+    kind: activation
+    description: should fire when the user asks for a diff or branch review
+    user_input: "Do a code review of the changes on this branch before merge."
+    expected_activation: true
+  - id: activate-positive-3
+    kind: activation
+    description: should fire when the user asks for a risk assessment of a change
+    user_input: "Assess the risk of these uncommitted changes touching the payments flow."
+    expected_activation: true
+  - id: activate-negative-1
+    kind: activation
+    description: should NOT fire when the user asks to design a test strategy (create-test-strategy)
+    user_input: "Design a test strategy across unit, integration, and E2E for this feature."
+    expected_activation: false
+  - id: activate-negative-2
+    kind: activation
+    description: should NOT fire when the user asks to implement the change (implement-feature-safely)
+    user_input: "Implement the approved plan in small verified slices."
+    expected_activation: false
+  - id: functional-1
+    kind: functional
+    description: produces the expected change review artifact
+    user_input: "Review the checkout API diff and write a change review."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "*change-review.md"
+      - kind: contains
+        text: "## Findings"
+    judge_criteria:
+      - "Puts findings first, ordered by severity, with concrete file references"
+      - "States tests actually run separately from recommended tests"
+      - "Marks residual risk when checks cannot be run"
+    timeout_seconds: 300
+  - id: edge-empty-argument
+    kind: edge-case
+    description: handles empty input gracefully
+    user_input: ""
+    expected_error: "empty-argument"
+  - id: edge-no-diff
+    kind: edge-case
+    description: handles a request to review when there is no diff or changed files
+    user_input: "Review the change, but there is no diff, PR, or changed files to inspect."
+    expected_error: "no-diff"

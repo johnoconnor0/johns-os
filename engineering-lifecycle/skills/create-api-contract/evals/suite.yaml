@@ -1,0 +1,54 @@
+# Starter eval suite for create-api-contract. Review and tune judge_criteria + edge expectations.
+skill: create-api-contract
+description: "Verifies create-api-contract activates on interface/contract requests and produces an api-contract artifact with the required sections."
+test_cases:
+  - id: activate-positive-1
+    kind: activation
+    description: should fire when the user asks to define request/response shapes for endpoints
+    user_input: "Define the REST API contract for saved-cart checkout, including request/response shapes and the error model."
+    expected_activation: true
+  - id: activate-positive-2
+    kind: activation
+    description: should fire when the user asks for a webhook/event contract between services
+    user_input: "Specify the webhook and event contract between the orders service and the payments service, with auth and idempotency."
+    expected_activation: true
+  - id: activate-positive-3
+    kind: activation
+    description: should fire when the user asks for an external integration contract
+    user_input: "We need an integration contract for the external shipping provider — endpoints, pagination, rate limits, and errors."
+    expected_activation: true
+  - id: activate-negative-1
+    kind: activation
+    description: should NOT fire when the user wants a data model instead
+    user_input: "Design the entities, relationships, ownership, and retention for the checkout domain."
+    expected_activation: false
+  - id: activate-negative-2
+    kind: activation
+    description: should NOT fire when the user wants architecture direction, not interfaces
+    user_input: "Decide the module boundaries and architecture tradeoffs for the checkout subsystem."
+    expected_activation: false
+  - id: functional-1
+    kind: functional
+    description: produces an api-contract artifact with required sections (see examples/example-api-contract.md)
+    user_input: "Create the API contract for the saved-cart checkout initiative."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "**/api/api-contract.md"
+      - kind: contains
+        text: "## Endpoints Or Messages"
+    judge_criteria:
+      - "Australian English used throughout"
+      - "Includes the required sections: Purpose, Consumers, Endpoints Or Messages, Request Shape, Response Shape, Errors, Auth And Permissions, Compatibility, Open Questions"
+      - "Breaking changes are marked explicitly with compatibility or migration notes"
+      - "External provider behaviour is not invented; unknowns are recorded as open questions"
+    timeout_seconds: 300
+  - id: edge-empty-argument
+    kind: edge-case
+    description: handles empty input gracefully
+    user_input: ""
+    expected_error: "empty-argument"
+  - id: edge-missing-upstream
+    kind: edge-case
+    description: handles a request with no architecture or data model upstream
+    user_input: "Write the API contract for a system with no architecture plan or data model yet."
+    expected_error: "missing-input"

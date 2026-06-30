@@ -1,0 +1,54 @@
+# Starter eval suite for create-discovery-brief. Review and tune judge_criteria + edge expectations.
+skill: create-discovery-brief
+description: "Verifies create-discovery-brief activates on vague product ideas/problems and produces a discovery brief with required sections and an MVP boundary."
+test_cases:
+  - id: activate-positive-1
+    kind: activation
+    description: should fire when the user has a vague product idea needing clarification
+    user_input: "I have a rough idea for a tool that helps freelancers chase invoices — turn it into a discovery brief."
+    expected_activation: true
+  - id: activate-positive-2
+    kind: activation
+    description: should fire when target user and success criteria are not yet defined
+    user_input: "We want to reduce checkout abandonment but haven't defined the target user or success signals yet."
+    expected_activation: true
+  - id: activate-positive-3
+    kind: activation
+    description: should fire when assumptions and open questions need to be made explicit
+    user_input: "Clarify this feature concept into goals, risks, assumptions, and an MVP boundary before we write requirements."
+    expected_activation: true
+  - id: activate-negative-1
+    kind: activation
+    description: should NOT fire when requirements are clear and a PRD is wanted
+    user_input: "We have the discovery done — write the PRD with functional requirements and acceptance criteria."
+    expected_activation: false
+  - id: activate-negative-2
+    kind: activation
+    description: should NOT fire on an unrelated coding question
+    user_input: "Help me fix a flaky Jest test that fails intermittently in CI."
+    expected_activation: false
+  - id: functional-1
+    kind: functional
+    description: produces a discovery brief with required sections (see examples/example-discovery-brief.md)
+    user_input: "Create the discovery brief for the saved-cart checkout initiative."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "**/discovery/discovery-brief.md"
+      - kind: contains
+        text: "## MVP Boundary"
+    judge_criteria:
+      - "Australian English used throughout"
+      - "Includes the required sections: Problem, Users, Evidence, Goals And Success Signals, Assumptions, Risks, MVP Boundary, Open Questions, Recommended Next Artifact"
+      - "Confirmed facts are separated from assumptions and unknowns are marked"
+      - "Business facts are not invented; unclear facts become open questions and the MVP boundary stays explicit"
+    timeout_seconds: 300
+  - id: edge-empty-argument
+    kind: edge-case
+    description: handles empty input gracefully
+    user_input: ""
+    expected_error: "empty-argument"
+  - id: edge-no-product-context
+    kind: edge-case
+    description: handles a request with no product idea or problem to clarify
+    user_input: "Write a discovery brief."
+    expected_error: "missing-input"

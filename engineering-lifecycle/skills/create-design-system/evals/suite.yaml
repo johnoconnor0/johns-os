@@ -1,0 +1,54 @@
+# Starter eval suite for create-design-system. Review and tune judge_criteria + edge expectations.
+skill: create-design-system
+description: "Verifies create-design-system activates on design-system/UI-kit/token requests and produces a design-system plan with required sections."
+test_cases:
+  - id: activate-positive-1
+    kind: activation
+    description: should fire when the user asks to plan a design system with tokens
+    user_input: "Plan a design system for our SaaS app with design tokens, typography, colours, and spacing."
+    expected_activation: true
+  - id: activate-positive-2
+    kind: activation
+    description: should fire when the user asks for a component library / UI kit inventory
+    user_input: "Document a UI kit and component inventory with variants, states, and accessibility rules."
+    expected_activation: true
+  - id: activate-positive-3
+    kind: activation
+    description: should fire when the user asks to audit inconsistent existing UI patterns
+    user_input: "Audit our existing UI for inconsistent components and drift, then propose reusable component standards."
+    expected_activation: true
+  - id: activate-negative-1
+    kind: activation
+    description: should NOT fire when the user wants a clickable UI prototype built
+    user_input: "Build a clickable UI prototype of the dashboard with mock data so we can demo the flow."
+    expected_activation: false
+  - id: activate-negative-2
+    kind: activation
+    description: should NOT fire when the user wants UX flows and journeys mapped
+    user_input: "Map the user journeys, screens, and interaction states for the onboarding flow."
+    expected_activation: false
+  - id: functional-1
+    kind: functional
+    description: produces a design-system plan with required sections (see examples/example-saas-design-system.md)
+    user_input: "Create the design system plan for the example-checkout SaaS product."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "**/design-system/design-system-plan.md"
+      - kind: contains
+        text: "## Design Tokens"
+    judge_criteria:
+      - "Australian English used throughout"
+      - "Includes the required sections: Design System Scope, Product Context, Design Principles, Foundations, Design Tokens, Component Inventory, Component States, Accessibility Rules, Responsive Rules, Implementation Mapping, Open Questions, Recommended Next Skill"
+      - "Proposed design decisions are clearly separated from inspected existing conventions"
+      - "No brand rules, colours, or components are invented; source is not modified unless implementation is explicitly requested"
+    timeout_seconds: 300
+  - id: edge-empty-argument
+    kind: edge-case
+    description: handles empty input gracefully
+    user_input: ""
+    expected_error: "empty-argument"
+  - id: edge-unknown-mode
+    kind: edge-case
+    description: handles a request that does not map to a known design-system mode
+    user_input: "Make the app look nicer."
+    expected_error: "ambiguous-intent"

@@ -1,0 +1,53 @@
+# Starter eval suite for create-system-map. Review and tune judge_criteria + edge expectations.
+skill: create-system-map
+description: Verifies create-system-map fires on architecture-mapping requests, produces a system map plus diagrams, and handles missing context gracefully.
+test_cases:
+  - id: activate-positive-1
+    kind: activation
+    description: should fire when the user asks to map a system and its components
+    user_input: "Map this system: the actors, components, data flow, and external systems."
+    expected_activation: true
+  - id: activate-positive-2
+    kind: activation
+    description: should fire when the user wants to understand architecture before changes
+    user_input: "I'm onboarding to this codebase, help me understand the architecture and failure points."
+    expected_activation: true
+  - id: activate-positive-3
+    kind: activation
+    description: should fire when service boundaries and data flow are unclear
+    user_input: "What are the responsibility boundaries and where does data flow between services?"
+    expected_activation: true
+  - id: activate-negative-1
+    kind: activation
+    description: should NOT fire when the user wants an architecture plan with tradeoffs (create-architecture-plan)
+    user_input: "Turn this into an implementable architecture plan with module boundaries and ADR candidates."
+    expected_activation: false
+  - id: activate-negative-2
+    kind: activation
+    description: should NOT fire when the user wants a data model (create-data-model)
+    user_input: "Design the entities, relationships, and retention rules for this domain."
+    expected_activation: false
+  - id: functional-1
+    kind: functional
+    description: produces the expected system map artifact
+    user_input: "Create the system map for the saved-cart checkout initiative."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "*system-map.md"
+      - kind: contains
+        text: "Data Flow"
+    judge_criteria:
+      - "Each component claim is marked as confirmed from inspected evidence or clearly labeled as inference"
+      - "Required Sections present: Product Context, Actors And External Systems, Workflows, Components, Data Flow, Security And Permissions, Deployment, Failure Modes, Missing Information, Recommended Next Artifacts"
+      - "No source files are edited; gaps are recorded under Missing Information instead of guessed"
+    timeout_seconds: 300
+  - id: edge-empty-argument
+    kind: edge-case
+    description: handles empty input gracefully
+    user_input: ""
+    expected_error: "empty-argument"
+  - id: edge-no-repo-context
+    kind: edge-case
+    description: handles a request with no repo, entrypoints, or product context to inspect
+    user_input: "Map the system, but there is no codebase, product profile, or PRD available to inspect."
+    expected_error: "no-repo-context"

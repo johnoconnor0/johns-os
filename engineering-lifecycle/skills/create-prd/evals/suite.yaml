@@ -1,0 +1,53 @@
+# Starter eval suite for create-prd. Review and tune judge_criteria + edge expectations.
+skill: create-prd
+description: Verifies create-prd fires on requirements/spec requests, produces a PRD with testable acceptance criteria, and handles missing context gracefully.
+test_cases:
+  - id: activate-positive-1
+    kind: activation
+    description: should fire when the user asks for requirements and acceptance criteria
+    user_input: "Write a PRD with functional requirements and acceptance criteria for saved-cart checkout."
+    expected_activation: true
+  - id: activate-positive-2
+    kind: activation
+    description: should fire when the user asks for user stories and product scope
+    user_input: "Define the user stories and must-have scope for the new feature."
+    expected_activation: true
+  - id: activate-positive-3
+    kind: activation
+    description: should fire when the user wants a testable feature spec
+    user_input: "I need a feature spec where every requirement is testable."
+    expected_activation: true
+  - id: activate-negative-1
+    kind: activation
+    description: should NOT fire when the user wants UX journeys and screens (create-ux-flow)
+    user_input: "Map the user journeys, screens, and UI states for this feature."
+    expected_activation: false
+  - id: activate-negative-2
+    kind: activation
+    description: should NOT fire when the user wants an implementation breakdown (create-implementation-plan)
+    user_input: "Break this work into sequenced implementation slices with rollback notes."
+    expected_activation: false
+  - id: functional-1
+    kind: functional
+    description: produces the expected PRD artifact
+    user_input: "Create the PRD for the saved-cart checkout initiative."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "*prd.md"
+      - kind: contains
+        text: "Functional Requirements"
+    judge_criteria:
+      - "Acceptance criteria are written as measurable, testable outcomes tied to user-visible behavior"
+      - "Required Sections present: Problem, Goals, Users, Functional Requirements, Non-Functional Requirements, Permissions And Data Handling, Acceptance Criteria, Edge Cases, Out Of Scope, Open Questions"
+      - "Must-have scope is separated from later enhancements and explicit out-of-scope decisions"
+    timeout_seconds: 300
+  - id: edge-empty-argument
+    kind: edge-case
+    description: handles empty input gracefully
+    user_input: ""
+    expected_error: "empty-argument"
+  - id: edge-missing-discovery-context
+    kind: edge-case
+    description: handles a request with no discovery brief or product context to ground requirements
+    user_input: "Write the PRD, but there is no discovery brief, product profile, or described problem."
+    expected_error: "missing-discovery-context"

@@ -1,0 +1,53 @@
+# Starter eval suite for implement-feature-safely. Review and tune judge_criteria + edge expectations.
+skill: implement-feature-safely
+description: Guides implementation of an approved plan in small verified slices respecting architecture, tests, and hygiene.
+test_cases:
+  - id: activate-positive-1
+    kind: activation
+    description: should fire when the user asks to implement an approved plan
+    user_input: "Implement the approved checkout API plan in small safe slices."
+    expected_activation: true
+  - id: activate-positive-2
+    kind: activation
+    description: should fire when the user asks to safely make a code change
+    user_input: "Make this code change safely, keeping tests and hygiene aligned."
+    expected_activation: true
+  - id: activate-positive-3
+    kind: activation
+    description: should fire when the user wants execution support for a planned slice
+    user_input: "Start building the first slice of the implementation plan and run the relevant tests."
+    expected_activation: true
+  - id: activate-negative-1
+    kind: activation
+    description: should NOT fire when the user asks to plan the implementation (create-implementation-plan)
+    user_input: "Plan the implementation work and break it into sequenced, testable tasks."
+    expected_activation: false
+  - id: activate-negative-2
+    kind: activation
+    description: should NOT fire when the user asks to review a PR (review-change)
+    user_input: "Review my PR diff for correctness, security, and migration risk."
+    expected_activation: false
+  - id: functional-1
+    kind: functional
+    description: produces the expected implementation log artifact
+    user_input: "Implement the approved checkout API slice and record an implementation log."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "*implementation-log.md"
+      - kind: contains
+        text: "# Implementation Log"
+    judge_criteria:
+      - "Inspects affected source, tests, and configs before editing"
+      - "Keeps changes scoped to the accepted plan and pauses before out-of-scope edits"
+      - "Records exact validation commands run and their results"
+    timeout_seconds: 300
+  - id: edge-empty-argument
+    kind: edge-case
+    description: handles empty input gracefully
+    user_input: ""
+    expected_error: "empty-argument"
+  - id: edge-no-plan-or-approval
+    kind: edge-case
+    description: refuses to implement when no plan or approval exists yet
+    user_input: "Just start coding this feature now, there is no plan or approval yet."
+    expected_error: "missing-approved-plan"

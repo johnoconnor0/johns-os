@@ -147,6 +147,18 @@
       "query": "Define colours, typography, spacing, and reusable component standards for this dashboard.",
       "should_trigger": "create-design-system",
       "should_not_trigger": "create-ux-flow"
+    },
+    {
+      "id": "implement-not-plan",
+      "query": "Implement the approved checkout feature safely in small verified slices and run the relevant tests; do not re-plan it.",
+      "should_trigger": "implement-feature-safely",
+      "should_not_trigger": "create-implementation-plan"
+    },
+    {
+      "id": "council-not-review-change",
+      "query": "Run the engineering council for this high-stakes build vs buy tradeoff and preserve dissent; this is not a routine code review.",
+      "should_trigger": "run-engineering-council",
+      "should_not_trigger": "review-change"
     }
   ]
 }
