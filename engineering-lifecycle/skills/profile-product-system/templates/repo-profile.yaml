@@ -1,0 +1,15 @@
+# Repository profile — fill from inspected files; run scripts/profile-repo.py to populate facts.
+repo_root: "."
+git:
+  available: false
+  branch: null
+  dirty: null
+facts:
+  file_count: 0
+  suffix_counts: {}
+  manifests: []
+  docs: []
+  tests: []
+  configs: []
+unknowns:
+  - "Repository facts not yet generated; run scripts/profile-repo.py --print."

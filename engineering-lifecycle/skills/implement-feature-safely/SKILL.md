@@ -23,12 +23,11 @@ Use when the user explicitly asks to implement an approved plan or safely make a
 
 ## Workflow
 
-1. Confirm implementation is requested and identify the accepted plan or inline plan for small changes.
+1. Confirm an approved implementation plan exists, or — for a small change — an agreed inline plan. If neither exists, stop and run create-implementation-plan first.
 2. Inspect affected source, tests, configs, package scripts, docs, generated artifacts, and hygiene reports before editing.
-3. State the scoped slice being implemented, expected files, tests to run, rollback path, and docs/hygiene checks.
-4. Make small changes that match the accepted scope; pause and ask before editing files outside scope or touching sensitive/generated files.
-5. Run the smallest relevant validation commands available and record exact results.
-6. Update implementation log, action items, and hygiene artifacts when relevant.
+3. Implement one slice at a time: make the smallest change that satisfies the accepted scope, naming the expected files and rollback path; pause and ask before editing files outside scope or touching sensitive/generated files.
+4. Run the smallest relevant validation commands available and record exact results. Never claim a check passed unless it was run.
+5. Update the implementation log, action items, and hygiene artifacts when relevant.
 
 ## Outputs
 

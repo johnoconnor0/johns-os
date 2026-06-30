@@ -1,0 +1,8 @@
+# Tech stack profile — fill from inspected manifests/config; use "unknown" rather than guessing.
+package_manager: "unknown"
+frameworks: []
+backend: []
+database: []
+test_commands: {}
+unknowns:
+  - "Test commands not yet confirmed from package scripts or CI config."
