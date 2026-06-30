@@ -25,8 +25,8 @@ Use when the user asks for a project status view, lifecycle dashboard, initiativ
 
 1. Run `python scripts/sync-ledger.py` to refresh normalized project state.
 2. Inspect `.project/.engineering/ledger/ledger.json` and `.project/.engineering/dashboards/dashboard-data.json`.
-3. Confirm missing or stale artifacts are marked as missing/unknown rather than inferred complete.
-4. Open action items, risks, council runs, hygiene status, and recent artifacts must be visible.
+3. Artifact status is derived automatically (content/role-aware): Markdown uses its front-matter `status`; generated JSON/JSONL are classified as `valid`/`invalid`/`error` (validation reports), `generated`, `log`, `current`, or `council`. Files older than the staleness threshold are flagged `freshness: stale`. Never relabel real state as complete.
+4. The generated `project-dashboard.html` is a self-contained, themeable page (light/dark, responsive) that surfaces summary chips, risks, missing artifact groups with remediation tips, open action items, council runs, and a searchable/sortable/filterable artifacts table. Confirm these are visible.
 5. Re-run `python scripts/validate-schemas.py` after changing dashboard data fixtures or schema-backed JSON.
 
 ## Outputs
@@ -36,8 +36,8 @@ Use when the user asks for a project status view, lifecycle dashboard, initiativ
 
 ## Safety Constraints
 
-- Do not invent completion status.
-- Mark stale or missing artifacts.
+- Status is derived from artifact content/role, not invented — do not hand-edit it to imply completion.
+- Stale (`freshness`) and missing artifact groups must stay visible.
 - Keep risks and follow-ups visible.
 
 ## Related Agents

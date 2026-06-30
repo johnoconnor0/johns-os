@@ -1,5 +1,12 @@
 {
+  "council_runs": [],
   "generated_at": "2026-01-01T00:00:00Z",
+  "hygiene": {
+    "gitignore_candidates": 0,
+    "new_env_vars": 0,
+    "risk_count": 0,
+    "status": null
+  },
   "missing_artifact_groups": [],
   "open_action_items": [],
   "recent_artifacts": [],

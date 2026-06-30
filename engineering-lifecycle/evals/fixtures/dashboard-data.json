@@ -1,5 +1,12 @@
 {
+  "council_runs": [],
   "generated_at": "2026-01-01T00:00:00Z",
+  "hygiene": {
+    "gitignore_candidates": 0,
+    "new_env_vars": 0,
+    "risk_count": 1,
+    "status": "attention"
+  },
   "missing_artifact_groups": [
     "profile"
   ],
@@ -13,6 +20,7 @@
   ],
   "recent_artifacts": [
     {
+      "freshness": "current",
       "kind": "md",
       "path": "evals/fixtures/artifact-valid.md",
       "status": "draft"

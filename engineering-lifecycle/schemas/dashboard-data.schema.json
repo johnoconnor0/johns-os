@@ -27,13 +27,27 @@
           "path": { "type": "string", "minLength": 1 },
           "kind": { "type": "string" },
           "status": { "type": "string" },
+          "freshness": { "type": "string" },
           "skill": { "type": ["string", "null"] },
           "initiative_id": { "type": ["string", "null"] }
         },
         "additionalProperties": true
       }
     },
-    "risks": { "type": "array" }
+    "risks": { "type": "array" },
+    "council_runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "run_id": { "type": "string" },
+          "input": { "type": ["string", "null"] },
+          "synthesis": { "type": ["string", "null"] }
+        },
+        "additionalProperties": true
+      }
+    },
+    "hygiene": { "type": "object" }
   },
   "additionalProperties": true
 }
