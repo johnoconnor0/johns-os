@@ -11,14 +11,10 @@ REPORT = ROOT / ".project" / ".engineering" / "hygiene" / "hygiene-report.json"
 
 
 def main() -> int:
-    if not REPORT.exists() or REPORT.stat().st_size == 0:
-        print("engineering lifecycle: no hygiene report found")
-        return 0
-    data = json.loads(REPORT.read_text(encoding="utf-8"))
-    missing_env = len(data.get("new_env_vars", []))
-    ignores = len(data.get("gitignore_candidates", []))
-    if missing_env or ignores:
-        print(f"engineering lifecycle hygiene: {missing_env} env var(s), {ignores} gitignore candidate(s) need review")
+    # Stop hooks must stay silent. Any stdout here is injected back into the
+    # conversation as context and re-invokes the model, producing an endless
+    # "(Standing by.)" loop. Surface hygiene reminders on UserPromptSubmit (the
+    # next real turn) instead of on Stop.
     return 0
 
 

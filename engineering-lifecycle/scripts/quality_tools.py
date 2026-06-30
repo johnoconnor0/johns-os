@@ -926,10 +926,12 @@ def render_hook(tool_name: str, result: dict[str, Any]) -> dict[str, Any] | None
     if tool_name == "post-edit-hygiene":
         return hook_additional_context("PostToolBatch", "Post-edit hygiene checks completed. Review generated validation reports if issues are present.")
     if tool_name == "stop-completion-check":
-        recs = result.get("completion", {}).get("recommendations", [])
-        if recs:
-            return hook_additional_context("Stop", "Before finishing: " + " ".join(recs))
-        return hook_additional_context("Stop", "Completion quality checks passed.")
+        # Stop hooks must stay silent. Any output from a Stop hook is injected
+        # back into the conversation as context and re-invokes the model; with
+        # no pending request the model replies "(Standing by.)" and stops again,
+        # which re-fires this hook -> an endless loop. Recommendations are
+        # available via the non-hook CLI output; never inject them on Stop.
+        return None
     return None
 
 
@@ -952,10 +954,19 @@ def cli_main(tool_name: str | None = None) -> int:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--hook", action="store_true", help="Read Claude hook payload from stdin and emit hook-shaped JSON when applicable")
     args = parser.parse_args()
+    # Tools wired to the Stop event must stay silent unless render_hook returns
+    # an explicit payload: any stdout from a Stop hook is injected back into the
+    # conversation as context and re-invokes the model, producing an endless
+    # "(Standing by.)" loop. Other events keep the raw-result fallback so the
+    # PreToolUse guards still report their allow/block decisions.
+    silent_when_empty = {"stop-completion-check"}
     result = run_tool(name, args)
     if args.hook:
         hook = render_hook(name, result)
-        emit_json(hook or result)
+        if hook is not None:
+            emit_json(hook)
+        elif name not in silent_when_empty:
+            emit_json(result)
     else:
         emit_json(result)
     return 0

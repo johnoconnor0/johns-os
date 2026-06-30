@@ -242,22 +242,31 @@ class QualityToolTests(unittest.TestCase):
                 )
                 self.assertEqual(sensitive["hookSpecificOutput"]["permissionDecision"], "ask")
 
-    def test_stop_hook_completion_feedback_cases(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            needs_feedback = self.run_hook(
-                "hooks/scripts/stop-completion-check.py",
-                {"prompt": "Implemented the export feature."},
-                root,
-            )
-            self.assertIn("Before finishing:", needs_feedback["hookSpecificOutput"]["additionalContext"])
-
-            passed = self.run_hook(
-                "hooks/scripts/stop-completion-check.py",
-                {"prompt": "Implemented the export feature. Tests passed with python -m unittest discover -s tests."},
-                root,
-            )
-            self.assertIn("Completion quality checks passed.", passed["hookSpecificOutput"]["additionalContext"])
+    def test_stop_hook_stays_silent(self) -> None:
+        # A Stop hook must emit NO stdout. Any output from a Stop hook is
+        # injected back into the conversation as context and re-invokes the
+        # model; with no pending request it replies "(Standing by.)" and stops
+        # again, re-firing the hook -> an endless loop. This must hold whether
+        # or not the completion check found recommendations.
+        for prompt in (
+            "Implemented the export feature.",
+            "Implemented the export feature. Tests passed with python -m unittest discover -s tests.",
+        ):
+            with tempfile.TemporaryDirectory() as tmp:
+                proc = subprocess.run(
+                    [
+                        sys.executable,
+                        str(ROOT / "hooks/scripts/stop-completion-check.py"),
+                        "--hook",
+                        "--root",
+                        tmp,
+                    ],
+                    input=json.dumps({"prompt": prompt}),
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+                self.assertEqual(proc.stdout.strip(), "", proc.stdout)
 
     def test_prompt_trigger_evals_route_expected_skills(self) -> None:
         audit = quality_tools.skill_trigger_audit(ROOT)
