@@ -13,7 +13,7 @@
       "displayName": "Engineering Lifecycle",
       "source": "./engineering-lifecycle",
       "description": "Move software products through a structured engineering lifecycle from discovery to maintenance, with deterministic local artifacts.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "author": {
         "name": "John O'Connor",
         "email": "john@weblifter.com.au"
