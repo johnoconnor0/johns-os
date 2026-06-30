@@ -342,7 +342,7 @@ def extract_text_response(raw: str) -> str:
         raise RuntimeError("live adapter returned no content")
     try:
         data = json.loads(text)
-    except Exception:
+    except json.JSONDecodeError:
         return text
     if isinstance(data, dict):
         for key in ("content", "text", "markdown", "response"):

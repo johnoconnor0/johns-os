@@ -271,7 +271,9 @@ def detect_stack(root: Path) -> dict[str, Any]:
                 frameworks.append("React")
             if "vue" in deps:
                 frameworks.append("Vue")
-        except Exception:
+        except (OSError, ValueError):
+            # Malformed or unreadable package.json: skip framework detection,
+            # but let unexpected errors (e.g. bugs) surface instead of hiding.
             pass
     backend = []
     if "requirements.txt" in files or "pyproject.toml" in files:
@@ -616,7 +618,7 @@ def failure_pattern_miner(root: Path) -> dict[str, Any]:
         for line in log.read_text(encoding="utf-8", errors="ignore").splitlines():
             try:
                 item = json.loads(line)
-            except Exception:
+            except (json.JSONDecodeError, ValueError):
                 continue
             status = item.get("outcome", {}).get("status", "unknown")
             patterns[status] = patterns.get(status, 0) + 1
@@ -890,7 +892,7 @@ def load_current_plan_scope(root: Path) -> list[str]:
         return []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, ValueError):
         return []
     values = data.get("affected_files") or data.get("files") or []
     return [str(item).replace("\\", "/") for item in values if isinstance(item, str)]
