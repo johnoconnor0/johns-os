@@ -5,7 +5,7 @@ created_at: 2026-01-01T00:00:00+00:00
 status: draft
 confidence: medium
 source_artifacts:
-  - .project/.engineering/initiatives/example-checkout/architecture/architecture-plan.md
+  - README.md
 ---
 
 # Engineering Council Report
@@ -19,6 +19,15 @@ Should checkout use a direct provider integration or a payment orchestration lay
 - Checkout has one confirmed payment provider for v1.
 - Future provider expansion is possible but not committed.
 - Recovery and webhook idempotency are higher immediate risks than provider portability.
+
+## Evidence
+
+| Source | Relevance | Confidence |
+| --- | --- | --- |
+| Architecture plan for checkout v1 | Establishes the single-provider scope and the adapter boundary | high |
+| Test strategy webhook idempotency scenarios | Shows recovery is the dominant near-term risk | high |
+| Product roadmap notes | Mention possible second provider but with no committed date | low |
+| Stripe integration guide | Confirms direct integration is well-supported for the v1 use case | medium |
 
 ## Advisor Positions
 

@@ -177,6 +177,20 @@ class QualityToolTests(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 0, f"{path.name}: {proc.stdout}{proc.stderr}")
 
+    def test_per_skill_examples_validate(self) -> None:
+        # Every per-skill example artifact (example-*.md) must satisfy the same
+        # contract real artifacts do, so the canonical examples cannot drift.
+        examples = sorted((ROOT / "skills").glob("*/examples/example-*.md"))
+        self.assertTrue(examples, "expected per-skill example artifacts to exist")
+        for path in examples:
+            proc = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "validate-artifact.py"), "--root", str(ROOT), str(path.relative_to(ROOT))],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 0, f"{path.relative_to(ROOT)}: {proc.stdout}{proc.stderr}")
+
     def test_gitignore_covers_generated_and_secret_noise(self) -> None:
         text = (ROOT / ".gitignore").read_text(encoding="utf-8")
         for pattern in ["__pycache__/", "*.py[cod]", ".env", "!.env.example", ".project/.engineering/reports/intake/*.json"]:

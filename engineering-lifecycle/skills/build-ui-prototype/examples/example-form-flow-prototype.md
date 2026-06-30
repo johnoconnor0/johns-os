@@ -1,3 +1,13 @@
+---
+initiative_id: example-onboarding-flow
+skill: build-ui-prototype
+created_at: 2026-01-01T00:00:00Z
+status: draft
+confidence: medium
+source_artifacts:
+  - README.md
+---
+
 # Form Flow Prototype Example
 
 ## Prompt
