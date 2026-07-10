@@ -1,0 +1,59 @@
+# Starter eval suite for service-outline. Review and tune judge_criteria + edge expectations.
+skill: service-outline
+description: Verifies service-outline fires on service-definition requests, interviews first, assembles the right modules per service type, and handles missing input gracefully.
+test_cases:
+  - id: activate-positive-1
+    kind: activation
+    description: should fire when the user asks to draft a service outline
+    user_input: "Draft a service outline for our AI-driven PPC optimisation service."
+    expected_activation: true
+  - id: activate-positive-2
+    kind: activation
+    description: should fire when the user asks to update an existing service document
+    user_input: "Update our existing web design service document from this Notion page."
+    expected_activation: true
+  - id: activate-positive-3
+    kind: activation
+    description: should fire when the user asks for a service definition or internal brief
+    user_input: "Write a service definition and internal brief for a new branding service."
+    expected_activation: true
+  - id: activate-negative-1
+    kind: activation
+    description: should NOT fire for an unrelated engineering task
+    user_input: "Refactor the checkout module and add tests."
+    expected_activation: false
+  - id: activate-negative-2
+    kind: activation
+    description: should NOT fire for a general marketing copy request
+    user_input: "Write a blog post about our latest product launch."
+    expected_activation: false
+  - id: functional-1
+    kind: functional
+    description: produces a valid service outline with the right modules for the service type
+    user_input: "Create a new service outline for our AI PPC optimisation service (type ai-ppc-optimisation)."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "*service-outline.md"
+      - kind: contains
+        text: "Service Overview"
+    judge_criteria:
+      - "Interviews the user for missing context before writing the outline"
+      - "Includes all core modules and the AI Service Addendum for an AI PPC service"
+      - "Leaves unknown client-specific values as [TBC] rather than inventing them"
+    timeout_seconds: 400
+  - id: functional-2
+    kind: functional
+    description: unknown service type falls back to the generic profile
+    user_input: "Create a service outline for a custom service (type made-up-type)."
+    expected_outputs:
+      - kind: file_created
+        path_glob: "*service-outline.md"
+    judge_criteria:
+      - "Falls back to the generic profile and infers the type during the interview"
+      - "Confirms both addendum triggers (technical/security and AI) explicitly"
+    timeout_seconds: 400
+  - id: edge-empty-argument
+    kind: edge-case
+    description: handles no service name, type, or described service gracefully
+    user_input: ""
+    expected_error: "empty-argument"

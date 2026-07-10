@@ -1,0 +1,11 @@
+# The plugin never carries a workspace; generated artifacts live in the TARGET repo's
+# .project/business-development/. Ignore any local .project the lifecycle hooks may create.
+.project/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# OS noise
+.DS_Store
+Thumbs.db

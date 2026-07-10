@@ -1,0 +1,34 @@
+# Service-type profile — seeds defaults and addendum switches for the service-outline skill.
+# Values are starting points; the interview confirms and overrides them. Use "unknown" rather than guessing.
+service_type: software-development
+display_name: "Software Development"
+category: "Implementation"
+engagement_type: "Phased engagement"
+include_addenda:
+  technical_security_compliance: true
+  ai_service: "interview"   # include only if the build uses AI/LLM components
+default_tools:
+  - "Next.js / React / TypeScript"
+  - "Supabase / Postgres"
+  - "API integrations and automation workflows"
+  - "CI/CD and testing tooling"
+default_deliverables:
+  - "Software application or feature"
+  - "Technical documentation"
+  - "Test coverage"
+  - "Deployment and handover"
+default_timeline: "6-16+ weeks depending on scope and complexity"
+default_pricing_model: "Fixed-price project or sprint-based engagement; optional ongoing maintenance"
+default_metrics:
+  - "System reliability"
+  - "Performance and speed"
+  - "Manual-process reduction"
+  - "Defect / error rate"
+default_risks:
+  - "Legacy systems and technical constraints"
+  - "Third-party platform limitations"
+  - "Scope creep"
+  - "Delayed access to systems"
+emphasis_notes: "Include the Technical/Security/Compliance Addendum; add the AI Service Addendum only if the build uses AI/LLM components."
+unknowns:
+  - "Hosting ownership and target environments."

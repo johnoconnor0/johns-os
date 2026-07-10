@@ -3,11 +3,15 @@
   "name": "johns-os",
   "description": "Local plugin marketplace for John's OS.",
   "version": "0.1.0",
-  "updated_at": "2026-06-27T00:00:00Z",
+  "updated_at": "2026-07-10T00:00:00Z",
   "plugins": [
     {
       "id": "engineering-lifecycle",
       "record": "marketplace/plugins/engineering-lifecycle.json"
+    },
+    {
+      "id": "business-development",
+      "record": "marketplace/plugins/business-development.json"
     }
   ]
 }

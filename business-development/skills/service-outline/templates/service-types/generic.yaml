@@ -1,0 +1,18 @@
+# Fallback service-type profile — used when --type is missing or unrecognised.
+# Everything is inferred from the interview; confirm both addenda explicitly.
+service_type: generic
+display_name: "Custom / Other Service"
+category: "unknown"
+engagement_type: "unknown"
+include_addenda:
+  technical_security_compliance: "interview"
+  ai_service: "interview"
+default_tools: []
+default_deliverables: []
+default_timeline: "unknown"
+default_pricing_model: "unknown"
+default_metrics: []
+default_risks: []
+emphasis_notes: "No service-type defaults; infer category, addenda, and defaults from the interview and confirm both addenda explicitly."
+unknowns:
+  - "Service type not recognised — determine category, addenda, and defaults from the interview."

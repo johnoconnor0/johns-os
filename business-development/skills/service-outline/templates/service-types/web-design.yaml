@@ -1,0 +1,34 @@
+# Service-type profile — seeds defaults and addendum switches for the service-outline skill.
+# Values are starting points; the interview confirms and overrides them. Use "unknown" rather than guessing.
+service_type: web-design
+display_name: "Web Design"
+category: "Design and Implementation"
+engagement_type: "Fixed project"
+include_addenda:
+  technical_security_compliance: true
+  ai_service: false
+default_tools:
+  - "Figma"
+  - "Webflow / WordPress"
+  - "Next.js"
+  - "Conversion rate optimisation"
+  - "UX research"
+default_deliverables:
+  - "Website design files"
+  - "Wireframes"
+  - "Implemented website"
+  - "Brand-aligned page templates"
+default_timeline: "4-10 weeks depending on scope"
+default_pricing_model: "Fixed-price project; optional ongoing optimisation retainer"
+default_metrics:
+  - "Website speed"
+  - "User engagement"
+  - "Conversion rate"
+  - "Accessibility compliance"
+default_risks:
+  - "Delayed content or brand assets"
+  - "Third-party platform limitations"
+  - "Scope creep on design revisions"
+emphasis_notes: "Include the Technical/Security/Compliance Addendum for hosting, performance, and accessibility; no AI addendum by default."
+unknowns:
+  - "Content ownership and CMS preference."

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/business-development/service-type-profile.schema.json",
+  "title": "Service Type Profile",
+  "type": "object",
+  "required": ["service_type", "display_name", "include_addenda"],
+  "properties": {
+    "service_type": { "type": "string", "minLength": 1 },
+    "display_name": { "type": "string", "minLength": 1 },
+    "category": { "type": "string" },
+    "engagement_type": { "type": "string" },
+    "include_addenda": {
+      "type": "object",
+      "required": ["technical_security_compliance", "ai_service"],
+      "properties": {
+        "technical_security_compliance": {
+          "description": "true / false, or 'interview' to decide during the interview.",
+          "type": ["boolean", "string"]
+        },
+        "ai_service": {
+          "description": "true / false, or 'interview' to decide during the interview.",
+          "type": ["boolean", "string"]
+        }
+      },
+      "additionalProperties": true
+    },
+    "default_tools": { "type": "array", "items": { "type": "string" } },
+    "default_deliverables": { "type": "array", "items": { "type": "string" } },
+    "default_timeline": { "type": "string" },
+    "default_pricing_model": { "type": "string" },
+    "default_metrics": { "type": "array", "items": { "type": "string" } },
+    "default_risks": { "type": "array", "items": { "type": "string" } },
+    "emphasis_notes": { "type": "string" },
+    "unknowns": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}

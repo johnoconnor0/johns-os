@@ -1,0 +1,41 @@
+{
+  "name": "business-development",
+  "version": "0.1.0",
+  "description": "Generate and update professional Service Outline documents from a modular template, adapted per service type, with an interview-first workflow.",
+  "author": {
+    "name": "John O'Connor",
+    "email": "john@weblifter.com.au"
+  },
+  "homepage": "",
+  "license": "MIT",
+  "keywords": [
+    "business-development",
+    "services",
+    "service-outline",
+    "proposals",
+    "sales",
+    "documentation"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Business Development",
+    "shortDescription": "Service definition and outline authoring",
+    "longDescription": "Interview-driven generation and updating of Service Outline documents from a modular 10-part template, adapted to the service type, with conditional technical/security and AI-service addenda. Also produces a short-form internal service brief with tiered offers.",
+    "developerName": "John O'Connor",
+    "category": "Business",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "",
+    "privacyPolicyURL": "",
+    "termsOfServiceURL": "",
+    "defaultPrompt": [
+      "Draft a Service Outline for a new service.",
+      "Update an existing service document from a file or Notion page.",
+      "Create an internal service brief with tiered offers."
+    ],
+    "brandColor": "#0F766E",
+    "screenshots": []
+  }
+}
