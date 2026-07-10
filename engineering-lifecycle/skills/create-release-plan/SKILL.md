@@ -27,7 +27,8 @@ Use when the user asks how to ship, roll out, migrate, monitor, rollback, or pre
 3. Identify migration, data, config, dependency, and customer-impact risks.
 4. Define rollback or disablement steps that are specific enough to execute.
 5. Separate required release gates from optional hardening follow-ups.
-6. Validate the artifact with `python scripts/validate-artifact.py .project/.engineering/initiatives/<initiative-id>/release/release-plan.md`.
+6. For a high-risk or hard-to-reverse release, convene `run-engineering-council` before scheduling it.
+7. Validate the artifact with `python scripts/validate-artifact.py .project/.engineering/initiatives/<initiative-id>/release/release-plan.md`.
 
 ## Outputs
 

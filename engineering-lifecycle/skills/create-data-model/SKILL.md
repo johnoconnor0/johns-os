@@ -28,7 +28,8 @@ Use when the user asks for entities, schema shape, ERD, storage boundaries, data
 3. Classify sensitive fields, retention/deletion behavior, audit needs, import/export paths, and permission implications.
 4. Identify migration, backfill, rollback, and data integrity risks before proposing schema changes.
 5. Render the entity model and ERD with unknowns marked explicitly.
-6. Validate generated artifacts with `python scripts/validate-artifact.py <artifact paths>`.
+6. For an irreversible or high-blast-radius migration, convene `run-engineering-council` before proposing the change.
+7. Validate generated artifacts with `python scripts/validate-artifact.py <artifact paths>`.
 
 ## Outputs
 

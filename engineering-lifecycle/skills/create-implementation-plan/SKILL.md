@@ -27,7 +27,8 @@ Use when the user asks how to build, sequence, scope, split, estimate, or safely
 3. For each slice, name likely files/modules, behavior to change, tests to add/run, rollback notes, and dependencies.
 4. Separate required work from optional follow-ups.
 5. Emit action items for unresolved questions, blocked dependencies, manual QA, and release prerequisites.
-6. Run `python scripts/validate-artifact.py .project/.engineering/initiatives/<initiative-id>/implementation/implementation-plan.md`.
+6. For a high-stakes, irreversible, or cross-cutting change, convene `run-engineering-council` before committing to the sequence.
+7. Run `python scripts/validate-artifact.py .project/.engineering/initiatives/<initiative-id>/implementation/implementation-plan.md`.
 
 ## Outputs
 

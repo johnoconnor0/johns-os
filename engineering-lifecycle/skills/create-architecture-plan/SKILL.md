@@ -28,7 +28,7 @@ Use when the user asks for architecture, technical direction, module boundaries,
 3. Define the recommended architecture, module ownership, interfaces, migration impact, and rollout/rollback considerations.
 4. Record alternatives considered and why they were rejected.
 5. Create ADR candidates for decisions that affect durable architecture or operations.
-6. Use `run-engineering-council` only when the decision is high-stakes.
+6. Convene `run-engineering-council` for high-stakes, irreversible, or cross-cutting decisions before finalizing (the prompt intake also flags these and suggests it).
 7. Run `python scripts/validate-artifact.py .project/.engineering/initiatives/<initiative-id>/architecture/architecture-plan.md`.
 
 ## Outputs
@@ -60,7 +60,7 @@ Use when the user asks for architecture, technical direction, module boundaries,
 
 - Distinguish recommended decisions from alternatives considered.
 - Do not invent operational constraints.
-- Use council review only for high-stakes decisions.
+- Reserve council review for high-stakes, irreversible, or cross-cutting decisions; skip it for routine ones.
 
 ## Related Agents
 

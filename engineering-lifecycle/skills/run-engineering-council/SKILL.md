@@ -1,20 +1,21 @@
 ---
 name: run-engineering-council
-description: Use manually for high-stakes engineering decisions that benefit from independent specialist perspectives and synthesized tradeoff analysis.
+description: Convene an independent multi-perspective engineering council before high-stakes or hard-to-reverse work — major architecture, a new plugin or subsystem, external integrations, risky migrations, security-sensitive or AI-system design, or build-vs-buy. Invoke proactively when a change is large, cross-cutting, or costly to undo, not only when explicitly asked; skip it for routine bug fixes and simple docs.
 ---
 
 # Run Engineering Council
 
 ## Trigger
 
-Use only when the user asks for council review or when a decision is high-stakes enough to justify explicit multi-perspective analysis.
+Use proactively before starting an enormous, irreversible, or cross-cutting change, and whenever the user asks for a council review. The user-prompt intake flags high-stakes signals (new plugin/subsystem, architecture, external provider/integration, migration, security, AI-system, build-vs-buy) and suggests this skill — act on that suggestion rather than waiting to be asked.
 
 ## When To Use
 
 - Major architecture decisions.
+- New plugin, subsystem, or platform-shaping work.
 - Build-vs-buy choices.
-- Risky migrations.
-- Security-sensitive designs.
+- Risky or irreversible migrations.
+- Security-sensitive or external-integration designs.
 - Scaling or AI-system design tradeoffs.
 
 ## Inputs Inspected
