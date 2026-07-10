@@ -17,6 +17,22 @@
       ]
     }
   ],
+  "env_var_inventory": [
+    {
+      "in_env_example": true,
+      "name": "DATABASE_URL",
+      "seen_in": [
+        "src/db.ts"
+      ]
+    },
+    {
+      "in_env_example": false,
+      "name": "STRIPE_WEBHOOK_SECRET",
+      "seen_in": [
+        "src/billing/webhook.ts"
+      ]
+    }
+  ],
   "risks": [
     "Missing environment placeholder requires review."
   ]

@@ -121,6 +121,27 @@ class QualityToolTests(unittest.TestCase):
         route = quality_tools.skill_router("implement checkout safely")
         self.assertEqual(route["recommended_skill"], "implement-feature-safely")
 
+    def test_council_trigger_detector_and_intake_surface_council(self) -> None:
+        # A strong signal fires on its own; a lone domain word on a routine prompt does not.
+        self.assertTrue(quality_tools.council_trigger_detector("migrate auth to a new provider")["recommend_council"])
+        self.assertFalse(quality_tools.council_trigger_detector("add an auth header to the fetch call")["recommend_council"])
+        # The intake hook must SURFACE the council recommendation for high-stakes work,
+        # and stay quiet for routine work.
+        with tempfile.TemporaryDirectory() as tmp:
+            high = self.run_hook(
+                "hooks/scripts/user-prompt-intake.py",
+                {"prompt": "migrate the billing database to a new provider across all services"},
+                Path(tmp),
+            )
+            self.assertIn("run-engineering-council", high["hookSpecificOutput"]["additionalContext"])
+        with tempfile.TemporaryDirectory() as tmp:
+            low = self.run_hook(
+                "hooks/scripts/user-prompt-intake.py",
+                {"prompt": "add an auth header to the fetch call"},
+                Path(tmp),
+            )
+            self.assertNotIn("run-engineering-council", low["hookSpecificOutput"]["additionalContext"])
+
     def test_command_and_secret_guards(self) -> None:
         dangerous = quality_tools.dangerous_command_guard("git reset --hard")
         self.assertTrue(dangerous["blocked"])
@@ -140,6 +161,187 @@ class QualityToolTests(unittest.TestCase):
             self.assertFalse((root / ".env.example").exists())
             ignore = quality_tools.gitignore_sync(root, apply=False)
             self.assertIn(".env.local", ignore["safe_additions"])
+
+    def test_env_example_discovery_walks_up_to_app_dir(self) -> None:
+        # Regression: a monorepo var documented in apps/cloud/.env.example must be
+        # recognized both by the cwd-scoped detector (run from apps/cloud/src) and by
+        # the repo-wide env_example_sync — no more all-false in_env_example reports.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".claude-plugin").mkdir()
+            (root / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+            src = root / "apps" / "cloud" / "src"
+            src.mkdir(parents=True)
+            (root / "apps" / "cloud" / ".env.example").write_text("FOO_KEY=example\n", encoding="utf-8")
+            (src / "app.ts").write_text(
+                "const a = process.env.FOO_KEY;\nconst b = process.env.UNDOCUMENTED_KEY;\n",
+                encoding="utf-8",
+            )
+            # cwd-scoped detector, run from the nested src dir
+            subprocess.run(
+                [sys.executable, str(ROOT / "hooks" / "scripts" / "detect-new-env-vars.py")],
+                cwd=str(src),
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            report = json.loads((src / ".project" / ".engineering" / "hygiene" / "hygiene-report.json").read_text(encoding="utf-8"))
+            names = {item["name"] for item in report["new_env_vars"]}
+            self.assertNotIn("FOO_KEY", names)           # documented one dir up
+            self.assertIn("UNDOCUMENTED_KEY", names)      # genuinely missing
+            inv = {i["name"]: i["in_env_example"] for i in report.get("env_var_inventory", [])}
+            self.assertTrue(inv.get("FOO_KEY"))            # inventory shows documented -> true
+            self.assertFalse(inv.get("UNDOCUMENTED_KEY"))  # inventory shows missing -> false
+            # repo-wide detector agrees (per-file nearest-ancestor resolution)
+            sync = quality_tools.env_example_sync(root, apply=False)
+            sync_missing = {m["name"] for m in sync["missing"]}
+            self.assertNotIn("FOO_KEY", sync_missing)
+            self.assertIn("UNDOCUMENTED_KEY", sync_missing)
+
+    def test_ledger_ingests_human_tasks(self) -> None:
+        # AI + human tracking: the ledger must aggregate human-tasks.json, not only
+        # action-items.json, and surface open human tasks in the dashboard data.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger_dir = root / ".project" / ".engineering" / "ledger"
+            ledger_dir.mkdir(parents=True)
+            (ledger_dir / "human-tasks.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-07-10T00:00:00+00:00",
+                        "human_tasks": [
+                            {"id": "human-001", "task": "Grant production DB access", "status": "open", "reason": "needs an owner"},
+                            {"id": "human-002", "task": "Countersign the DPA", "status": "done", "reason": "legal review complete"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "sync-ledger.py"), "--root", str(root)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            ledger = json.loads((ledger_dir / "ledger.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(ledger["human_tasks"]), 2)
+            self.assertEqual(ledger["summary"]["open_human_task_count"], 1)
+            dashboard = json.loads((root / ".project" / ".engineering" / "dashboards" / "dashboard-data.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(dashboard["open_human_tasks"]), 1)
+            self.assertIn("Grant production DB access", dashboard["open_human_tasks"][0]["task"])
+
+    def test_linear_sync_plan_reconcile_and_pull(self) -> None:
+        # Deterministic Linear sync: plan proposes creates, reconcile writes ids back
+        # and makes re-runs no-ops (idempotent), a change proposes an update, and pull
+        # applies status only.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger = root / ".project" / ".engineering" / "ledger"
+            ledger.mkdir(parents=True)
+            (ledger / "action-items.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-07-10T00:00:00+00:00",
+                        "action_items": [
+                            {"id": "action-001", "title": "Wire the API", "status": "open", "source": "plan.md", "owner": "unassigned", "priority": "high"}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (ledger / "human-tasks.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-07-10T00:00:00+00:00",
+                        "human_tasks": [{"id": "human-001", "task": "Grant DB access", "status": "open", "reason": "needs owner"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (ledger / "linear-config.json").write_text(
+                json.dumps({"team": "ENG", "status_map": {"open": "Todo", "done": "Done"}, "enforcement": "remind"}),
+                encoding="utf-8",
+            )
+
+            def run(*args: str) -> dict:
+                proc = subprocess.run(
+                    [sys.executable, str(ROOT / "scripts" / "linear-sync.py"), "--root", str(root), *args],
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+                return json.loads(proc.stdout)
+
+            plan = run("plan")
+            self.assertEqual(len(plan["plan"]), 2)
+            self.assertTrue(all(p["action"] == "create" for p in plan["plan"]))
+            self.assertEqual(plan["team"], "ENG")
+            action = next(p for p in plan["plan"] if p["kind"] == "action")
+            self.assertEqual(action["priority"], 2)  # high -> 2
+            self.assertEqual(action["linear_state"], "Todo")  # open -> Todo
+
+            results = ledger / "results.json"
+            results.write_text(
+                json.dumps(
+                    [
+                        {"key": "action:action-001", "linear_id": "LIN-1", "linear_url": "https://linear.app/1"},
+                        {"key": "human:human-001", "linear_id": "LIN-2", "linear_url": "https://linear.app/2"},
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(run("reconcile", "--results", str(results))["reconciled"], 2)
+            ai = json.loads((ledger / "action-items.json").read_text(encoding="utf-8"))
+            self.assertEqual(ai["action_items"][0]["linear_id"], "LIN-1")
+            self.assertEqual(run("pending")["count"], 0)  # idempotent
+
+            ai["action_items"][0]["status"] = "in-progress"
+            (ledger / "action-items.json").write_text(json.dumps(ai), encoding="utf-8")
+            plan2 = run("plan")
+            self.assertEqual(len(plan2["plan"]), 1)
+            self.assertEqual(plan2["plan"][0]["action"], "update")
+            self.assertEqual(plan2["plan"][0]["linear_id"], "LIN-1")
+
+            updates = ledger / "updates.json"
+            updates.write_text(json.dumps([{"key": "human:human-001", "status": "done"}]), encoding="utf-8")
+            self.assertEqual(run("apply-pull", "--updates", str(updates))["pulled"], 1)
+            ht = json.loads((ledger / "human-tasks.json").read_text(encoding="utf-8"))
+            self.assertEqual(ht["human_tasks"][0]["status"], "done")
+
+    def test_council_enforcement_levels(self) -> None:
+        # off suppresses the council suggestion; ask strengthens it. Never a hard block.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            council_dir = root / ".project" / ".engineering" / "council"
+            council_dir.mkdir(parents=True)
+            prompt = {"prompt": "migrate the billing database to a new provider across all services"}
+            (council_dir / "council-config.json").write_text(json.dumps({"enforcement": "off"}), encoding="utf-8")
+            off = self.run_hook("hooks/scripts/user-prompt-intake.py", prompt, root)
+            self.assertNotIn("run-engineering-council", off["hookSpecificOutput"]["additionalContext"])
+            (council_dir / "council-config.json").write_text(json.dumps({"enforcement": "ask"}), encoding="utf-8")
+            ask = self.run_hook("hooks/scripts/user-prompt-intake.py", prompt, root)
+            self.assertIn("run-engineering-council", ask["hookSpecificOutput"]["additionalContext"])
+            self.assertIn("confirm you are skipping", ask["hookSpecificOutput"]["additionalContext"])
+
+    def test_intake_reminds_when_linear_sync_pending(self) -> None:
+        # When Linear is configured and tasks are unsynced, the intake nudges to
+        # sync; when Linear is not configured, it stays silent.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger = root / ".project" / ".engineering" / "ledger"
+            ledger.mkdir(parents=True)
+            (ledger / "linear-config.json").write_text(
+                json.dumps({"team": "ENG", "status_map": {}, "enforcement": "remind"}), encoding="utf-8"
+            )
+            (ledger / "action-items.json").write_text(
+                json.dumps({"generated_at": "t", "action_items": [{"id": "action-001", "title": "X", "status": "open", "source": "s"}]}),
+                encoding="utf-8",
+            )
+            self.assertEqual(quality_tools.linear_pending(root)["pending"], 1)
+            data = self.run_hook("hooks/scripts/user-prompt-intake.py", {"prompt": "keep building the feature"}, root)
+            self.assertIn("not yet tracked in Linear", data["hookSpecificOutput"]["additionalContext"])
+            (ledger / "linear-config.json").unlink()
+            self.assertFalse(quality_tools.linear_pending(root)["configured"])
 
     def test_schema_markdown_artifact_and_example_validators(self) -> None:
         schemas = quality_tools.schema_validator(ROOT)

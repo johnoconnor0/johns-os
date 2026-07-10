@@ -5,7 +5,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from eng_common import nearest_env_example
 
 ROOT = Path.cwd()
 REPORT = ROOT / ".project" / ".engineering" / "hygiene" / "hygiene-report.json"
@@ -20,7 +24,7 @@ def main() -> int:
     if not args.apply:
         print("\n".join(additions) if additions else "no .env.example additions")
         return 0
-    path = ROOT / ".env.example"
+    path = nearest_env_example(ROOT) or (ROOT / ".env.example")
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
     with path.open("a", encoding="utf-8", newline="\n") as f:
         if existing and not existing.endswith("\n"):

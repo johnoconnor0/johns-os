@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/engineering-lifecycle/linear-config.schema.json",
+  "title": "Linear Integration Config",
+  "type": "object",
+  "required": ["team", "status_map", "enforcement"],
+  "properties": {
+    "team": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Linear team id or key (required to create issues)."
+    },
+    "project": { "type": ["string", "null"], "description": "Default Linear project id, or null." },
+    "cycle": { "type": ["string", "null"], "description": "Default Linear cycle id, or null." },
+    "status_map": {
+      "type": "object",
+      "description": "Plugin action-item status -> Linear workflow state name.",
+      "required": ["open", "in-progress", "blocked", "done", "deferred", "cancelled"],
+      "additionalProperties": { "type": "string" }
+    },
+    "assignee_map": {
+      "type": "object",
+      "description": "Plugin owner string -> Linear user id/email/name (or 'me').",
+      "additionalProperties": { "type": "string" }
+    },
+    "enforcement": {
+      "type": "string",
+      "enum": ["off", "remind", "ask"],
+      "description": "How strongly to enforce that tasks are tracked in Linear."
+    },
+    "label": { "type": ["string", "null"], "description": "Optional Linear label applied to synced issues." }
+  },
+  "additionalProperties": true
+}

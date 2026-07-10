@@ -6,14 +6,14 @@
     "email": "john@weblifter.com.au"
   },
   "description": "John's plugin marketplace for Claude Code — structured engineering lifecycle tooling and related developer plugins.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "plugins": [
     {
       "name": "engineering-lifecycle",
       "displayName": "Engineering Lifecycle",
       "source": "./engineering-lifecycle",
       "description": "Move software products through a structured engineering lifecycle from discovery to maintenance, with deterministic local artifacts.",
-      "version": "0.2.0",
+      "version": "0.4.0",
       "author": {
         "name": "John O'Connor",
         "email": "john@weblifter.com.au"
@@ -29,6 +29,28 @@
         "testing",
         "release",
         "repo-hygiene"
+      ]
+    },
+    {
+      "name": "business-development",
+      "displayName": "Business Development",
+      "source": "./business-development",
+      "description": "Generate and update professional Service Outline documents from a modular, service-type-aware template, with an interview-first workflow.",
+      "version": "0.2.0",
+      "author": {
+        "name": "John O'Connor",
+        "email": "john@weblifter.com.au"
+      },
+      "repository": "https://github.com/johnoconnor0/johns-os",
+      "license": "MIT",
+      "category": "Business",
+      "keywords": [
+        "business-development",
+        "services",
+        "service-outline",
+        "proposals",
+        "sales",
+        "documentation"
       ]
     }
   ]

@@ -1,0 +1,35 @@
+# Service-type profile — seeds defaults and addendum switches for the service-outline skill.
+# Values are starting points; the interview confirms and overrides them. Use "unknown" rather than guessing.
+service_type: ai-engineering
+display_name: "AI Engineering"
+category: "Implementation"
+engagement_type: "Sprint or phased engagement"
+include_addenda:
+  technical_security_compliance: true
+  ai_service: true
+default_tools:
+  - "OpenAI / Anthropic / Gemini"
+  - "Retrieval / RAG pipelines"
+  - "Python / TypeScript"
+  - "Vector stores and API integrations"
+  - "Evaluation and monitoring tooling"
+default_deliverables:
+  - "AI prototype or system"
+  - "Evaluation report"
+  - "Prompt and model configuration"
+  - "Implementation and operations documentation"
+default_timeline: "AI prototype 2-6 weeks; production system 6-16+ weeks"
+default_pricing_model: "Sprint-based engagement or fixed-price prototype, with optional ongoing optimisation"
+default_metrics:
+  - "Accuracy and groundedness"
+  - "Cost per interaction"
+  - "Response time"
+  - "Task success rate"
+default_risks:
+  - "Hallucination and incorrect retrieval"
+  - "Data exposure and prompt injection"
+  - "Cost volatility"
+  - "Model or provider changes"
+emphasis_notes: "Always include the AI Service Addendum and the Technical/Security/Compliance Addendum; be explicit about human oversight and evaluation."
+unknowns:
+  - "Grounding sources and acceptable data residency."

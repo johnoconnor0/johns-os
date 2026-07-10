@@ -1,0 +1,31 @@
+# Service-type profile — seeds defaults and addendum switches for the service-outline skill.
+# Values are starting points; the interview confirms and overrides them. Use "unknown" rather than guessing.
+service_type: branding
+display_name: "Branding"
+category: "Design and Strategy"
+engagement_type: "Fixed project"
+include_addenda:
+  technical_security_compliance: false
+  ai_service: false
+default_tools:
+  - "Brand strategy frameworks"
+  - "Figma"
+  - "Visual identity systems"
+default_deliverables:
+  - "Brand guidelines"
+  - "Visual identity and logo suite"
+  - "Messaging and positioning"
+  - "Brand asset library"
+default_timeline: "3-8 weeks depending on scope"
+default_pricing_model: "Fixed-price project; optional additional design concepts"
+default_metrics:
+  - "Brand consistency"
+  - "Brand clarity and recognition"
+  - "Stakeholder alignment"
+default_risks:
+  - "Subjective feedback and slow approvals"
+  - "Unclear brand strategy inputs"
+  - "Multiple competing stakeholders"
+emphasis_notes: "No technical or AI addenda by default; focus on positioning, identity, and consistency."
+unknowns:
+  - "Existing brand assets and constraints."

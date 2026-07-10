@@ -28,7 +28,8 @@ Use when the user asks for a code review, PR review, diff review, architecture r
 3. Review correctness, security, data/migration impact, API compatibility, operational risk, and maintainability.
 4. Put findings first, ordered by severity, with concrete file references.
 5. State tests actually run separately from recommended tests.
-6. Write the review artifact and validate it with `python scripts/validate-artifact.py <review artifact>`.
+6. When the review surfaces a high-stakes, irreversible, or cross-cutting decision, recommend `run-engineering-council` before merge.
+7. Write the review artifact and validate it with `python scripts/validate-artifact.py <review artifact>`.
 
 ## Outputs
 

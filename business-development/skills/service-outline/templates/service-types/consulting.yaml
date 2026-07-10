@@ -1,0 +1,31 @@
+# Service-type profile — seeds defaults and addendum switches for the service-outline skill.
+# Values are starting points; the interview confirms and overrides them. Use "unknown" rather than guessing.
+service_type: consulting
+display_name: "Consulting / Advisory"
+category: "Consulting"
+engagement_type: "Fixed project"
+include_addenda:
+  technical_security_compliance: "interview"   # include only if the engagement touches client systems or data
+  ai_service: false
+default_tools:
+  - "Discovery workshops"
+  - "Audit and analysis frameworks"
+  - "Strategy and roadmap templates"
+default_deliverables:
+  - "Discovery summary"
+  - "Audit or assessment report"
+  - "Strategy document and roadmap"
+  - "Prioritised recommendations"
+default_timeline: "Audit 1-2 weeks; strategy engagement 2-4 weeks"
+default_pricing_model: "Fixed-price project or hourly consulting; strategy plus optional implementation support"
+default_metrics:
+  - "Time saved"
+  - "Cost reduction"
+  - "Decision quality and clarity"
+default_risks:
+  - "Slow stakeholder feedback"
+  - "Unclear decision ownership"
+  - "Limited access to information"
+emphasis_notes: "Lead with the business problem and outcomes; keep deliverables advisory unless implementation is explicitly scoped."
+unknowns:
+  - "Whether implementation support is in scope."

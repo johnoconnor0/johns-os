@@ -115,6 +115,11 @@
       "should_trigger": "run-engineering-council"
     },
     {
+      "id": "sync-linear-tasks-positive",
+      "query": "Push our engineering tasks to Linear and reconcile the issue status.",
+      "should_trigger": "sync-linear-tasks"
+    },
+    {
       "id": "update-repo-hygiene-positive",
       "query": "Update repo hygiene by checking .env.example, .gitignore, generated files, docs drift, and changelog needs.",
       "should_trigger": "update-repo-hygiene"

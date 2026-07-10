@@ -1,0 +1,43 @@
+{
+  "id": "business-development",
+  "name": "Business Development",
+  "summary": "Generate and update professional Service Outline documents from a modular, service-type-aware template.",
+  "status": "local",
+  "category": "business",
+  "version": "0.2.0",
+  "path": "business-development",
+  "manifest": "business-development/.codex-plugin/plugin.json",
+  "source": {
+    "type": "local",
+    "url": ""
+  },
+  "capabilities": [
+    "skills",
+    "schemas",
+    "deterministic-scripts",
+    "templates"
+  ],
+  "tags": [
+    "business-development",
+    "services",
+    "service-outline",
+    "proposals",
+    "sales",
+    "documentation"
+  ],
+  "risk": "low",
+  "install": {
+    "type": "local-path",
+    "instructions": [
+      "Use the plugin from the local business-development directory.",
+      "Codex discovers this plugin through .agents/plugins/marketplace.json at the johns-os root.",
+      "Validate with python scripts/johns-os-marketplace.py validate before use."
+    ]
+  },
+  "validation": {
+    "commands": [
+      "python scripts/johns-os-marketplace.py validate",
+      "python business-development/scripts/validate-service-outline.py business-development/skills/service-outline/examples/ai-ppc-optimisation.service-outline.md"
+    ]
+  }
+}

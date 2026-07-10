@@ -26,10 +26,13 @@ from eng_common import (
     hook_additional_context,
     hook_output,
     load_hook_payload,
+    nearest_env_example,
     now_iso,
+    parse_env_example_keys,
     parse_front_matter,
     permission_output,
     placeholder_for_env,
+    read_json,
     relpath,
     repo_root,
     slugify,
@@ -57,6 +60,7 @@ INTENT_KEYWORDS = {
     "release": ["release", "deploy", "rollback", "launch"],
     "repo-hygiene": ["hygiene", "gitignore", "env.example", "cleanup"],
     "council-decision": ["council", "tradeoff", "build vs buy", "high-stakes"],
+    "linear-sync": ["linear", "sync tasks", "push tasks to linear", "task tracker", "reconcile issues"],
     "discovery": ["discover", "discovery", "clarify", "product idea", "assumptions", "open questions", "mvp boundary", "explore", "research", "brief"],
 }
 
@@ -79,6 +83,7 @@ SKILL_BY_INTENT = {
     "release": "create-release-plan",
     "repo-hygiene": "update-repo-hygiene",
     "council-decision": "run-engineering-council",
+    "linear-sync": "sync-linear-tasks",
     "discovery": "create-discovery-brief",
 }
 
@@ -357,14 +362,32 @@ def env_example_sync(root: Path, apply: bool = False) -> dict[str, Any]:
             if name in {"PATH", "HOME", "USER", "SHELL"}:
                 continue
             found.setdefault(name, set()).add(relpath(full, root))
-    env_path = root / ".env.example"
-    existing: set[str] = set()
-    if env_path.exists():
-        for line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-            if "=" in line and not line.strip().startswith("#"):
-                existing.add(line.split("=", 1)[0].strip())
-    missing = [{"name": name, "placeholder": f"{name}={placeholder_for_env(name)}", "seen_in": sorted(paths)} for name, paths in sorted(found.items()) if name not in existing]
+
+    # A variable is documented if it appears in the nearest .env.example above ANY
+    # file that references it (per-package resolution). This fixes the monorepo case
+    # where code in apps/cloud/src is documented in apps/cloud/.env.example, and it
+    # avoids a repo-wide union that would let one package's docs mask another's.
+    key_cache: dict[str, set[str]] = {}
+
+    def documented(name: str, rels: set[str]) -> bool:
+        for rel in rels:
+            example = nearest_env_example(root / rel, root)
+            if example is None:
+                continue
+            cache_key = str(example)
+            if cache_key not in key_cache:
+                key_cache[cache_key] = parse_env_example_keys(example)
+            if name in key_cache[cache_key]:
+                return True
+        return False
+
+    missing = [
+        {"name": name, "placeholder": f"{name}={placeholder_for_env(name)}", "seen_in": sorted(paths)}
+        for name, paths in sorted(found.items())
+        if not documented(name, paths)
+    ]
     if apply and missing:
+        env_path = nearest_env_example(root, root) or (root / ".env.example")
         with env_path.open("a", encoding="utf-8", newline="\n") as f:
             if env_path.exists() and env_path.stat().st_size:
                 f.write("\n")
@@ -687,10 +710,85 @@ def architecture_decision_detector(root: Path, text: str) -> dict[str, Any]:
     return {"decision_detected": detected, "adr_required": detected and not adr_files, "suggested_title": "ADR-record-architecture-decision" if detected else None}
 
 
+# Council triggers use word-boundary regex (not bare substring) plus an AND rule:
+# suggest the council for a strong signal on its own, OR a domain signal backed by a
+# scale signal. This catches genuinely high-stakes work ("migrate the billing database",
+# "integrate an external provider across all services") without firing on routine
+# prompts like "add an auth header".
+COUNCIL_STRONG_TRIGGERS = [
+    r"build vs\.? buy", r"\birreversible\b", r"re-?architect", r"\brewrite\b",
+    r"breaking change", r"\bmigrat(e|es|ing|ion)\b", r"new (plugin|subsystem|service|system)",
+    r"architectur\w* decision", r"high[- ]stakes", r"\btradeoff\b",
+]
+COUNCIL_DOMAIN_TRIGGERS = [
+    r"\bsecurity\b", r"\bauth(entication|orization)?\b", r"\boauth\b", r"\bprovider\b",
+    r"\bintegrat(e|es|ing|ion)\b", r"\bscal(e|es|ing|ability)\b", r"\bai model\b", r"\bllm\b",
+    r"\beval(uation)?s?\b", r"data model", r"schema change", r"deploy\w* pipeline",
+    r"external system", r"\bcompliance\b", r"\bpayment\b", r"\bbilling\b",
+]
+COUNCIL_SCALE_SIGNALS = [
+    r"cross-cutting", r"\bacross\b", r"\bmultiple\b", r"\bseveral\b", r"\bentire\b",
+    r"\bwhole\b", r"end-to-end", r"\benormous\b", r"\bcritical\b", r"\bmajor\b",
+    r"\bplugin\b", r"\bsubsystem\b", r"\bplatform\b", r"\ball (of|the)\b",
+]
+
+
+def _regex_hits(patterns: list[str], text: str) -> list[str]:
+    hits: list[str] = []
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            hits.append(match.group(0).strip())
+    return sorted(set(hits))
+
+
 def council_trigger_detector(text: str) -> dict[str, Any]:
-    triggers = ["irreversible", "security", "migration", "scaling", "build vs buy", "high cost", "ai model", "eval"]
-    hits = [item for item in triggers if item in text.lower()]
-    return {"recommend_council": bool(hits), "reason": "High-impact decision trigger detected." if hits else "No council trigger detected.", "triggers": hits}
+    low = text.lower()
+    strong = _regex_hits(COUNCIL_STRONG_TRIGGERS, low)
+    domain = _regex_hits(COUNCIL_DOMAIN_TRIGGERS, low)
+    scale = _regex_hits(COUNCIL_SCALE_SIGNALS, low)
+    recommend = bool(strong) or (bool(domain) and bool(scale))
+    triggers = sorted(set(strong + (domain if recommend else [])))
+    reason = (
+        "High-impact decision detected (" + ", ".join(triggers) + ") — an engineering council review is recommended before proceeding."
+        if recommend
+        else "No high-stakes council trigger detected."
+    )
+    return {"recommend_council": recommend, "reason": reason, "triggers": triggers, "scale_signals": scale}
+
+
+def linear_pending(root: Path) -> dict[str, Any]:
+    """Deterministic 'tasks not yet in Linear' count for the intake reminder.
+
+    Only reports when Linear is configured. Hooks cannot call MCP, so this compares
+    the ledger tasks to the local sync state (linear-state.json) with no network.
+    """
+    ledger = engineering_root(root) / "ledger"
+    config = read_json(ledger / "linear-config.json", None)
+    if not isinstance(config, dict) or not config.get("team") or config.get("team") == "unknown":
+        return {"configured": False, "pending": 0, "enforcement": "off"}
+    state = read_json(ledger / "linear-state.json", {"tasks": {}})
+    synced = state.get("tasks", {}) if isinstance(state, dict) else {}
+    keys: set[str] = set()
+    action_data = read_json(ledger / "action-items.json", {})
+    for item in action_data.get("action_items", []) if isinstance(action_data, dict) else []:
+        keys.add(f"action:{item.get('id')}")
+    human_data = read_json(ledger / "human-tasks.json", {})
+    for item in human_data.get("human_tasks", []) if isinstance(human_data, dict) else []:
+        keys.add(f"human:{item.get('id')}")
+    pending = sum(1 for key in keys if key not in synced)
+    return {"configured": True, "pending": pending, "enforcement": config.get("enforcement", "remind")}
+
+
+def council_enforcement(root: Path) -> str:
+    """Council suggestion strength: off | remind (default) | ask.
+
+    Never a hard block — honors the plugin's 'suggest, don't auto-run' council design.
+    """
+    config = read_json(engineering_root(root) / "council" / "council-config.json", None)
+    if isinstance(config, dict) and config.get("enforcement") in {"off", "remind", "ask"}:
+        return config["enforcement"]
+    return "remind"
 
 
 def council_input_builder(root: Path, question: str, contexts: list[str]) -> dict[str, Any]:
@@ -880,6 +978,8 @@ def run_tool(name: str, args: argparse.Namespace) -> dict[str, Any]:
             "quality": prompt_quality_score(prompt),
             "clarification": clarification_gate(prompt),
             "skill_route": skill_router(prompt),
+            "council": {**council_trigger_detector(prompt), "enforcement": council_enforcement(root)},
+            "linear": linear_pending(root),
         }
         write_json(engineering_root(root) / "reports" / "intake" / f"{now_iso().replace(':', '-')}.json", result)
         return result
@@ -924,6 +1024,27 @@ def render_hook(tool_name: str, result: dict[str, Any]) -> dict[str, Any] | None
         ]
         if clarification["requires_clarification"]:
             messages.append("Clarification is recommended before implementation: " + clarification["reason"])
+        council = result.get("council") or {}
+        council_level = council.get("enforcement", "remind")
+        if council.get("recommend_council") and council_level != "off":
+            triggers = ", ".join(council.get("triggers", []))
+            if council_level == "ask":
+                messages.append(
+                    "High-stakes work detected (" + triggers + "). Run the run-engineering-council "
+                    "skill for independent review before proceeding, or explicitly confirm you are skipping it."
+                )
+            else:
+                messages.append(
+                    "High-stakes work detected (" + triggers + "). Consider running the "
+                    "run-engineering-council skill for independent review before planning or "
+                    "implementing. This is a suggestion, not a block."
+                )
+        linear = result.get("linear") or {}
+        if linear.get("configured") and linear.get("pending") and linear.get("enforcement") != "off":
+            messages.append(
+                f"{linear['pending']} task(s) are not yet tracked in Linear. Run the "
+                "sync-linear-tasks skill to push them."
+            )
         return hook_additional_context("UserPromptSubmit", "\n".join(messages))
     if tool_name == "post-edit-hygiene":
         return hook_additional_context("PostToolBatch", "Post-edit hygiene checks completed. Review generated validation reports if issues are present.")
