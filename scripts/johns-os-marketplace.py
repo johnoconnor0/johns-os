@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -152,6 +153,56 @@ def command_validate(_: argparse.Namespace) -> int:
     return 0
 
 
+def _write_json(path: Path, data: dict[str, Any]) -> None:
+    with path.open("w", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+
+
+def _set_version(path: Path, version: str, errors: list[str]) -> None:
+    if not path.is_file():
+        errors.append(f"missing file, cannot set version: {path}")
+        return
+    data = load_json(path)
+    data["version"] = version
+    _write_json(path, data)
+
+
+def command_bump_version(args: argparse.Namespace) -> int:
+    """Set a plugin's version across every marketplace surface, then validate.
+
+    Keeps the catalog record, both plugin manifests, and the Claude marketplace
+    entry in lockstep so a release can never drift one surface again.
+    """
+    plugin_id = args.plugin_id
+    version = args.version
+    errors: list[str] = []
+    data = catalog()
+    record_rel = next((e.get("record") for e in data.get("plugins", []) if e.get("id") == plugin_id), None)
+    if not isinstance(record_rel, str):
+        raise SystemExit(f"plugin not found in catalog: {plugin_id}")
+    record = load_json(ROOT / record_rel)
+    plugin_path = str(record.get("path", ""))
+
+    _set_version(ROOT / record_rel, version, errors)                                # catalog record
+    _set_version(ROOT / plugin_path / ".claude-plugin" / "plugin.json", version, errors)
+    _set_version(ROOT / plugin_path / ".codex-plugin" / "plugin.json", version, errors)
+    mp = ROOT / ".claude-plugin" / "marketplace.json"                               # Claude marketplace entry
+    if mp.is_file():
+        mp_data = load_json(mp)
+        for entry in mp_data.get("plugins", []):
+            if entry.get("name") == plugin_id:
+                entry["version"] = version
+        _write_json(mp, mp_data)
+    data["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00Z")  # refresh timestamp
+    _write_json(CATALOG, data)
+
+    if errors:
+        print("\n".join(errors), file=sys.stderr)
+        return 1
+    print(f"bumped {plugin_id} to {version} across all marketplace surfaces")
+    return command_validate(args)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -165,6 +216,10 @@ def main() -> int:
     show_parser.set_defaults(func=command_show)
     validate_parser = sub.add_parser("validate", help="Validate marketplace records.")
     validate_parser.set_defaults(func=command_validate)
+    bump_parser = sub.add_parser("bump-version", help="Set a plugin's version across all marketplace surfaces.")
+    bump_parser.add_argument("plugin_id")
+    bump_parser.add_argument("version")
+    bump_parser.set_defaults(func=command_bump_version)
     args = parser.parse_args()
     return args.func(args)
 
