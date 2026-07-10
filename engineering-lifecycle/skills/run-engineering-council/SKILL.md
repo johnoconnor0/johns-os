@@ -26,12 +26,12 @@ Use proactively before starting an enormous, irreversible, or cross-cutting chan
 
 ## Workflow
 
-1. Confirm the question is high-stakes enough for council review.
-2. Collect explicit context files or directories; do not broaden scope silently.
-3. Run `python scripts/council.py ask --question "<question>" --context <path>` for deterministic local mode.
-4. For live model mode, run `python scripts/council.py ask --mode live-model --adapter command|anthropic|openai --question "<question>" --context <path>` after configuring the required environment variables.
-5. Preserve independent advisor drafts, anonymized drafts, peer reviews, events, and chair synthesis.
-6. Treat deterministic local output as a safe, fixture-friendly baseline; use live adapters only when model cost, credentials, and privacy constraints are acceptable.
+1. Confirm the decision is high-stakes enough for council review (see When To Use). If a normal implementation plan is sufficient, use that instead.
+2. Collect the explicit question and context files or directories. Do not broaden scope silently.
+3. **Subagent council (default — real multi-perspective analysis).** Spawn the five advisor subagents IN PARALLEL, each with the same question and context: `council-contrarian`, `council-first-principles`, `council-expansionist`, `council-outsider`, `council-executor`. Each returns a Markdown draft with the sections `Position`, `Evidence Reviewed`, `Analysis`, `Evidence Gaps`, `Recommendation`. Write each to `.project/.engineering/council/<run-id>/advisor-drafts/<role>.md`.
+4. Anonymize the drafts (strip role labels) into `anonymized-drafts/advisor-N.md`, run a blind peer-review pass over the anonymized set, and write `peer-reviews/`.
+5. Spawn `council-chairperson` with the advisor drafts and peer reviews to synthesize `synthesis.md`, preserving meaningful dissent. Enforce quorum: require at least three advisor drafts; if fewer, write artifacts with `quorum-failed` status and do not present the recommendation as final.
+6. **Deterministic / CI fallback.** When subagents are unavailable (headless, offline, or fixture/CI runs), use `python scripts/council.py ask --question "<question>" --context <path>` (deterministic local) or `... --mode live-model --adapter command|anthropic|openai ...` (external adapters). Same artifact boundary as the subagent path.
 7. Validate the synthesis with `python scripts/validate-artifact.py .project/.engineering/council/<run-id>/synthesis.md`.
 
 ## Outputs
@@ -70,6 +70,14 @@ Use proactively before starting an enormous, irreversible, or cross-cutting chan
 - Do not use council for routine bug fixes or simple docs changes.
 - Keep advisor positions evidence-bound.
 - Chair synthesis must preserve meaningful dissent.
+
+## Enforcement
+
+Suggestion strength is configurable via `.project/.engineering/council/council-config.json`
+`{"enforcement": "off | remind | ask"}` (default `remind`). The user-prompt intake surfaces
+the suggestion at this level: `off` stays silent, `remind` suggests the council, and `ask`
+strengthens the wording. It never hard-blocks — the council is always suggested, never
+auto-run.
 
 ## Related Agents
 

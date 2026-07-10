@@ -780,6 +780,17 @@ def linear_pending(root: Path) -> dict[str, Any]:
     return {"configured": True, "pending": pending, "enforcement": config.get("enforcement", "remind")}
 
 
+def council_enforcement(root: Path) -> str:
+    """Council suggestion strength: off | remind (default) | ask.
+
+    Never a hard block — honors the plugin's 'suggest, don't auto-run' council design.
+    """
+    config = read_json(engineering_root(root) / "council" / "council-config.json", None)
+    if isinstance(config, dict) and config.get("enforcement") in {"off", "remind", "ask"}:
+        return config["enforcement"]
+    return "remind"
+
+
 def council_input_builder(root: Path, question: str, contexts: list[str]) -> dict[str, Any]:
     data = repo_context_pack(root)
     payload = {
@@ -967,7 +978,7 @@ def run_tool(name: str, args: argparse.Namespace) -> dict[str, Any]:
             "quality": prompt_quality_score(prompt),
             "clarification": clarification_gate(prompt),
             "skill_route": skill_router(prompt),
-            "council": council_trigger_detector(prompt),
+            "council": {**council_trigger_detector(prompt), "enforcement": council_enforcement(root)},
             "linear": linear_pending(root),
         }
         write_json(engineering_root(root) / "reports" / "intake" / f"{now_iso().replace(':', '-')}.json", result)
@@ -1014,12 +1025,20 @@ def render_hook(tool_name: str, result: dict[str, Any]) -> dict[str, Any] | None
         if clarification["requires_clarification"]:
             messages.append("Clarification is recommended before implementation: " + clarification["reason"])
         council = result.get("council") or {}
-        if council.get("recommend_council"):
-            messages.append(
-                "High-stakes work detected (" + ", ".join(council.get("triggers", []))
-                + "). Consider running the run-engineering-council skill for independent review "
-                "before planning or implementing. This is a suggestion, not a block."
-            )
+        council_level = council.get("enforcement", "remind")
+        if council.get("recommend_council") and council_level != "off":
+            triggers = ", ".join(council.get("triggers", []))
+            if council_level == "ask":
+                messages.append(
+                    "High-stakes work detected (" + triggers + "). Run the run-engineering-council "
+                    "skill for independent review before proceeding, or explicitly confirm you are skipping it."
+                )
+            else:
+                messages.append(
+                    "High-stakes work detected (" + triggers + "). Consider running the "
+                    "run-engineering-council skill for independent review before planning or "
+                    "implementing. This is a suggestion, not a block."
+                )
         linear = result.get("linear") or {}
         if linear.get("configured") and linear.get("pending") and linear.get("enforcement") != "off":
             messages.append(

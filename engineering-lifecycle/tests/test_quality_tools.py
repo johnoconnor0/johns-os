@@ -305,6 +305,21 @@ class QualityToolTests(unittest.TestCase):
             ht = json.loads((ledger / "human-tasks.json").read_text(encoding="utf-8"))
             self.assertEqual(ht["human_tasks"][0]["status"], "done")
 
+    def test_council_enforcement_levels(self) -> None:
+        # off suppresses the council suggestion; ask strengthens it. Never a hard block.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            council_dir = root / ".project" / ".engineering" / "council"
+            council_dir.mkdir(parents=True)
+            prompt = {"prompt": "migrate the billing database to a new provider across all services"}
+            (council_dir / "council-config.json").write_text(json.dumps({"enforcement": "off"}), encoding="utf-8")
+            off = self.run_hook("hooks/scripts/user-prompt-intake.py", prompt, root)
+            self.assertNotIn("run-engineering-council", off["hookSpecificOutput"]["additionalContext"])
+            (council_dir / "council-config.json").write_text(json.dumps({"enforcement": "ask"}), encoding="utf-8")
+            ask = self.run_hook("hooks/scripts/user-prompt-intake.py", prompt, root)
+            self.assertIn("run-engineering-council", ask["hookSpecificOutput"]["additionalContext"])
+            self.assertIn("confirm you are skipping", ask["hookSpecificOutput"]["additionalContext"])
+
     def test_intake_reminds_when_linear_sync_pending(self) -> None:
         # When Linear is configured and tasks are unsynced, the intake nudges to
         # sync; when Linear is not configured, it stays silent.
