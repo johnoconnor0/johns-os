@@ -4,7 +4,7 @@
   "summary": "Generate and update professional Service Outline documents from a modular, service-type-aware template.",
   "status": "local",
   "category": "business",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "path": "business-development",
   "manifest": "business-development/.codex-plugin/plugin.json",
   "source": {

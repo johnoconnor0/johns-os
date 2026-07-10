@@ -1,6 +1,6 @@
 {
   "name": "business-development",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Generate and update professional Service Outline documents from a modular template, adapted per service type, with an interview-first workflow.",
   "author": {
     "name": "John O'Connor",

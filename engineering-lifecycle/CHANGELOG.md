@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 - 2026-07-10
+## 0.4.0 - 2026-07-10
 
 ### Added
 - Linear task tracking: the `sync-linear-tasks` skill plus a deterministic `linear-sync.py` engine (idempotent push, status-only pull), an intake reminder when tasks are unsynced, and an `eng-life linear-sync` subcommand.

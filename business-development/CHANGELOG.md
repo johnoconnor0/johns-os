@@ -3,6 +3,13 @@
 All notable changes to the Business Development plugin are documented here.
 The format is based on Keep a Changelog, and this project adheres to semantic versioning.
 
+## [0.2.0] - 2026-07-10
+
+### Added
+
+- Read-only `service-document-analyst` agent that maps an existing service document onto the 10 modules, so `--update` interviews only the real gaps.
+- `--quick` mode that asks only the essentials plus the two addendum triggers.
+
 ## [0.1.0] - 2026-07-10
 
 ### Added
