@@ -227,6 +227,84 @@ class QualityToolTests(unittest.TestCase):
             self.assertEqual(len(dashboard["open_human_tasks"]), 1)
             self.assertIn("Grant production DB access", dashboard["open_human_tasks"][0]["task"])
 
+    def test_linear_sync_plan_reconcile_and_pull(self) -> None:
+        # Deterministic Linear sync: plan proposes creates, reconcile writes ids back
+        # and makes re-runs no-ops (idempotent), a change proposes an update, and pull
+        # applies status only.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger = root / ".project" / ".engineering" / "ledger"
+            ledger.mkdir(parents=True)
+            (ledger / "action-items.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-07-10T00:00:00+00:00",
+                        "action_items": [
+                            {"id": "action-001", "title": "Wire the API", "status": "open", "source": "plan.md", "owner": "unassigned", "priority": "high"}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (ledger / "human-tasks.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-07-10T00:00:00+00:00",
+                        "human_tasks": [{"id": "human-001", "task": "Grant DB access", "status": "open", "reason": "needs owner"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (ledger / "linear-config.json").write_text(
+                json.dumps({"team": "ENG", "status_map": {"open": "Todo", "done": "Done"}, "enforcement": "remind"}),
+                encoding="utf-8",
+            )
+
+            def run(*args: str) -> dict:
+                proc = subprocess.run(
+                    [sys.executable, str(ROOT / "scripts" / "linear-sync.py"), "--root", str(root), *args],
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+                return json.loads(proc.stdout)
+
+            plan = run("plan")
+            self.assertEqual(len(plan["plan"]), 2)
+            self.assertTrue(all(p["action"] == "create" for p in plan["plan"]))
+            self.assertEqual(plan["team"], "ENG")
+            action = next(p for p in plan["plan"] if p["kind"] == "action")
+            self.assertEqual(action["priority"], 2)  # high -> 2
+            self.assertEqual(action["linear_state"], "Todo")  # open -> Todo
+
+            results = ledger / "results.json"
+            results.write_text(
+                json.dumps(
+                    [
+                        {"key": "action:action-001", "linear_id": "LIN-1", "linear_url": "https://linear.app/1"},
+                        {"key": "human:human-001", "linear_id": "LIN-2", "linear_url": "https://linear.app/2"},
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(run("reconcile", "--results", str(results))["reconciled"], 2)
+            ai = json.loads((ledger / "action-items.json").read_text(encoding="utf-8"))
+            self.assertEqual(ai["action_items"][0]["linear_id"], "LIN-1")
+            self.assertEqual(run("pending")["count"], 0)  # idempotent
+
+            ai["action_items"][0]["status"] = "in-progress"
+            (ledger / "action-items.json").write_text(json.dumps(ai), encoding="utf-8")
+            plan2 = run("plan")
+            self.assertEqual(len(plan2["plan"]), 1)
+            self.assertEqual(plan2["plan"][0]["action"], "update")
+            self.assertEqual(plan2["plan"][0]["linear_id"], "LIN-1")
+
+            updates = ledger / "updates.json"
+            updates.write_text(json.dumps([{"key": "human:human-001", "status": "done"}]), encoding="utf-8")
+            self.assertEqual(run("apply-pull", "--updates", str(updates))["pulled"], 1)
+            ht = json.loads((ledger / "human-tasks.json").read_text(encoding="utf-8"))
+            self.assertEqual(ht["human_tasks"][0]["status"], "done")
+
     def test_schema_markdown_artifact_and_example_validators(self) -> None:
         schemas = quality_tools.schema_validator(ROOT)
         self.assertTrue(schemas["valid"], schemas.get("errors"))

@@ -59,6 +59,7 @@ INTENT_KEYWORDS = {
     "release": ["release", "deploy", "rollback", "launch"],
     "repo-hygiene": ["hygiene", "gitignore", "env.example", "cleanup"],
     "council-decision": ["council", "tradeoff", "build vs buy", "high-stakes"],
+    "linear-sync": ["linear", "sync tasks", "push tasks to linear", "task tracker", "reconcile issues"],
     "discovery": ["discover", "discovery", "clarify", "product idea", "assumptions", "open questions", "mvp boundary", "explore", "research", "brief"],
 }
 
@@ -81,6 +82,7 @@ SKILL_BY_INTENT = {
     "release": "create-release-plan",
     "repo-hygiene": "update-repo-hygiene",
     "council-decision": "run-engineering-council",
+    "linear-sync": "sync-linear-tasks",
     "discovery": "create-discovery-brief",
 }
 

@@ -1,0 +1,16 @@
+{
+  "team": "unknown",
+  "project": null,
+  "cycle": null,
+  "status_map": {
+    "open": "Todo",
+    "in-progress": "In Progress",
+    "blocked": "Blocked",
+    "done": "Done",
+    "deferred": "Backlog",
+    "cancelled": "Cancelled"
+  },
+  "assignee_map": {},
+  "enforcement": "remind",
+  "label": "eng-lifecycle"
+}
