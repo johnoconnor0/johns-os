@@ -305,6 +305,26 @@ class QualityToolTests(unittest.TestCase):
             ht = json.loads((ledger / "human-tasks.json").read_text(encoding="utf-8"))
             self.assertEqual(ht["human_tasks"][0]["status"], "done")
 
+    def test_intake_reminds_when_linear_sync_pending(self) -> None:
+        # When Linear is configured and tasks are unsynced, the intake nudges to
+        # sync; when Linear is not configured, it stays silent.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger = root / ".project" / ".engineering" / "ledger"
+            ledger.mkdir(parents=True)
+            (ledger / "linear-config.json").write_text(
+                json.dumps({"team": "ENG", "status_map": {}, "enforcement": "remind"}), encoding="utf-8"
+            )
+            (ledger / "action-items.json").write_text(
+                json.dumps({"generated_at": "t", "action_items": [{"id": "action-001", "title": "X", "status": "open", "source": "s"}]}),
+                encoding="utf-8",
+            )
+            self.assertEqual(quality_tools.linear_pending(root)["pending"], 1)
+            data = self.run_hook("hooks/scripts/user-prompt-intake.py", {"prompt": "keep building the feature"}, root)
+            self.assertIn("not yet tracked in Linear", data["hookSpecificOutput"]["additionalContext"])
+            (ledger / "linear-config.json").unlink()
+            self.assertFalse(quality_tools.linear_pending(root)["configured"])
+
     def test_schema_markdown_artifact_and_example_validators(self) -> None:
         schemas = quality_tools.schema_validator(ROOT)
         self.assertTrue(schemas["valid"], schemas.get("errors"))

@@ -32,6 +32,7 @@ from eng_common import (
     parse_front_matter,
     permission_output,
     placeholder_for_env,
+    read_json,
     relpath,
     repo_root,
     slugify,
@@ -756,6 +757,29 @@ def council_trigger_detector(text: str) -> dict[str, Any]:
     return {"recommend_council": recommend, "reason": reason, "triggers": triggers, "scale_signals": scale}
 
 
+def linear_pending(root: Path) -> dict[str, Any]:
+    """Deterministic 'tasks not yet in Linear' count for the intake reminder.
+
+    Only reports when Linear is configured. Hooks cannot call MCP, so this compares
+    the ledger tasks to the local sync state (linear-state.json) with no network.
+    """
+    ledger = engineering_root(root) / "ledger"
+    config = read_json(ledger / "linear-config.json", None)
+    if not isinstance(config, dict) or not config.get("team") or config.get("team") == "unknown":
+        return {"configured": False, "pending": 0, "enforcement": "off"}
+    state = read_json(ledger / "linear-state.json", {"tasks": {}})
+    synced = state.get("tasks", {}) if isinstance(state, dict) else {}
+    keys: set[str] = set()
+    action_data = read_json(ledger / "action-items.json", {})
+    for item in action_data.get("action_items", []) if isinstance(action_data, dict) else []:
+        keys.add(f"action:{item.get('id')}")
+    human_data = read_json(ledger / "human-tasks.json", {})
+    for item in human_data.get("human_tasks", []) if isinstance(human_data, dict) else []:
+        keys.add(f"human:{item.get('id')}")
+    pending = sum(1 for key in keys if key not in synced)
+    return {"configured": True, "pending": pending, "enforcement": config.get("enforcement", "remind")}
+
+
 def council_input_builder(root: Path, question: str, contexts: list[str]) -> dict[str, Any]:
     data = repo_context_pack(root)
     payload = {
@@ -944,6 +968,7 @@ def run_tool(name: str, args: argparse.Namespace) -> dict[str, Any]:
             "clarification": clarification_gate(prompt),
             "skill_route": skill_router(prompt),
             "council": council_trigger_detector(prompt),
+            "linear": linear_pending(root),
         }
         write_json(engineering_root(root) / "reports" / "intake" / f"{now_iso().replace(':', '-')}.json", result)
         return result
@@ -994,6 +1019,12 @@ def render_hook(tool_name: str, result: dict[str, Any]) -> dict[str, Any] | None
                 "High-stakes work detected (" + ", ".join(council.get("triggers", []))
                 + "). Consider running the run-engineering-council skill for independent review "
                 "before planning or implementing. This is a suggestion, not a block."
+            )
+        linear = result.get("linear") or {}
+        if linear.get("configured") and linear.get("pending") and linear.get("enforcement") != "off":
+            messages.append(
+                f"{linear['pending']} task(s) are not yet tracked in Linear. Run the "
+                "sync-linear-tasks skill to push them."
             )
         return hook_additional_context("UserPromptSubmit", "\n".join(messages))
     if tool_name == "post-edit-hygiene":

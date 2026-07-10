@@ -39,6 +39,10 @@ def main() -> int:
     sub.add_parser("sync-ledger")
     sub.add_parser("build-dashboard")
     sub.add_parser("status")
+    linear_parser = sub.add_parser("linear-sync")
+    linear_parser.add_argument("action", choices=["plan", "pending", "reconcile", "apply-pull"])
+    linear_parser.add_argument("--results")
+    linear_parser.add_argument("--updates")
     args = parser.parse_args()
     root = target_root(args.root)
     if args.command == "init":
@@ -51,6 +55,13 @@ def main() -> int:
         return run("scripts/sync-ledger.py", root)
     if args.command == "status":
         return status(root)
+    if args.command == "linear-sync":
+        extra: list[str] = []
+        if args.results:
+            extra += ["--results", args.results]
+        if args.updates:
+            extra += ["--updates", args.updates]
+        return run("scripts/linear-sync.py", root, args.action, *extra)
     return 1
 
 
