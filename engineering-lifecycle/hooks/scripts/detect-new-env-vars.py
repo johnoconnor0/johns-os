@@ -46,6 +46,12 @@ def main() -> int:
         for name, paths in sorted(found.items())
         if name not in example
     ]
+    # Full inventory of every referenced variable with an accurate in_env_example flag —
+    # documented variables show true here even though they are excluded from new_env_vars.
+    inventory = [
+        {"name": name, "seen_in": sorted(paths), "in_env_example": name in example}
+        for name, paths in sorted(found.items())
+    ]
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     data = {}
     if REPORT.exists() and REPORT.stat().st_size:
@@ -54,6 +60,7 @@ def main() -> int:
         except Exception:
             data = {}
     data["new_env_vars"] = missing
+    data["env_var_inventory"] = inventory
     data.setdefault("risks", [])
     REPORT.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"env var hygiene: {len(missing)} missing .env.example key(s)")

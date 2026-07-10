@@ -19,6 +19,19 @@
         "additionalProperties": true
       }
     },
+    "env_var_inventory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "seen_in", "in_env_example"],
+        "properties": {
+          "name": { "type": "string" },
+          "seen_in": { "type": "array", "items": { "type": "string" } },
+          "in_env_example": { "type": "boolean" }
+        },
+        "additionalProperties": true
+      }
+    },
     "gitignore_candidates": {
       "type": "array",
       "items": {

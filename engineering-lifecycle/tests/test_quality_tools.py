@@ -189,6 +189,9 @@ class QualityToolTests(unittest.TestCase):
             names = {item["name"] for item in report["new_env_vars"]}
             self.assertNotIn("FOO_KEY", names)           # documented one dir up
             self.assertIn("UNDOCUMENTED_KEY", names)      # genuinely missing
+            inv = {i["name"]: i["in_env_example"] for i in report.get("env_var_inventory", [])}
+            self.assertTrue(inv.get("FOO_KEY"))            # inventory shows documented -> true
+            self.assertFalse(inv.get("UNDOCUMENTED_KEY"))  # inventory shows missing -> false
             # repo-wide detector agrees (per-file nearest-ancestor resolution)
             sync = quality_tools.env_example_sync(root, apply=False)
             sync_missing = {m["name"] for m in sync["missing"]}
