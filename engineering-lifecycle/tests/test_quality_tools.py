@@ -121,6 +121,27 @@ class QualityToolTests(unittest.TestCase):
         route = quality_tools.skill_router("implement checkout safely")
         self.assertEqual(route["recommended_skill"], "implement-feature-safely")
 
+    def test_council_trigger_detector_and_intake_surface_council(self) -> None:
+        # A strong signal fires on its own; a lone domain word on a routine prompt does not.
+        self.assertTrue(quality_tools.council_trigger_detector("migrate auth to a new provider")["recommend_council"])
+        self.assertFalse(quality_tools.council_trigger_detector("add an auth header to the fetch call")["recommend_council"])
+        # The intake hook must SURFACE the council recommendation for high-stakes work,
+        # and stay quiet for routine work.
+        with tempfile.TemporaryDirectory() as tmp:
+            high = self.run_hook(
+                "hooks/scripts/user-prompt-intake.py",
+                {"prompt": "migrate the billing database to a new provider across all services"},
+                Path(tmp),
+            )
+            self.assertIn("run-engineering-council", high["hookSpecificOutput"]["additionalContext"])
+        with tempfile.TemporaryDirectory() as tmp:
+            low = self.run_hook(
+                "hooks/scripts/user-prompt-intake.py",
+                {"prompt": "add an auth header to the fetch call"},
+                Path(tmp),
+            )
+            self.assertNotIn("run-engineering-council", low["hookSpecificOutput"]["additionalContext"])
+
     def test_command_and_secret_guards(self) -> None:
         dangerous = quality_tools.dangerous_command_guard("git reset --hard")
         self.assertTrue(dangerous["blocked"])
@@ -140,6 +161,71 @@ class QualityToolTests(unittest.TestCase):
             self.assertFalse((root / ".env.example").exists())
             ignore = quality_tools.gitignore_sync(root, apply=False)
             self.assertIn(".env.local", ignore["safe_additions"])
+
+    def test_env_example_discovery_walks_up_to_app_dir(self) -> None:
+        # Regression: a monorepo var documented in apps/cloud/.env.example must be
+        # recognized both by the cwd-scoped detector (run from apps/cloud/src) and by
+        # the repo-wide env_example_sync — no more all-false in_env_example reports.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".claude-plugin").mkdir()
+            (root / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+            src = root / "apps" / "cloud" / "src"
+            src.mkdir(parents=True)
+            (root / "apps" / "cloud" / ".env.example").write_text("FOO_KEY=example\n", encoding="utf-8")
+            (src / "app.ts").write_text(
+                "const a = process.env.FOO_KEY;\nconst b = process.env.UNDOCUMENTED_KEY;\n",
+                encoding="utf-8",
+            )
+            # cwd-scoped detector, run from the nested src dir
+            subprocess.run(
+                [sys.executable, str(ROOT / "hooks" / "scripts" / "detect-new-env-vars.py")],
+                cwd=str(src),
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            report = json.loads((src / ".project" / ".engineering" / "hygiene" / "hygiene-report.json").read_text(encoding="utf-8"))
+            names = {item["name"] for item in report["new_env_vars"]}
+            self.assertNotIn("FOO_KEY", names)           # documented one dir up
+            self.assertIn("UNDOCUMENTED_KEY", names)      # genuinely missing
+            # repo-wide detector agrees (per-file nearest-ancestor resolution)
+            sync = quality_tools.env_example_sync(root, apply=False)
+            sync_missing = {m["name"] for m in sync["missing"]}
+            self.assertNotIn("FOO_KEY", sync_missing)
+            self.assertIn("UNDOCUMENTED_KEY", sync_missing)
+
+    def test_ledger_ingests_human_tasks(self) -> None:
+        # AI + human tracking: the ledger must aggregate human-tasks.json, not only
+        # action-items.json, and surface open human tasks in the dashboard data.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger_dir = root / ".project" / ".engineering" / "ledger"
+            ledger_dir.mkdir(parents=True)
+            (ledger_dir / "human-tasks.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-07-10T00:00:00+00:00",
+                        "human_tasks": [
+                            {"id": "human-001", "task": "Grant production DB access", "status": "open", "reason": "needs an owner"},
+                            {"id": "human-002", "task": "Countersign the DPA", "status": "done", "reason": "legal review complete"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "sync-ledger.py"), "--root", str(root)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            ledger = json.loads((ledger_dir / "ledger.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(ledger["human_tasks"]), 2)
+            self.assertEqual(ledger["summary"]["open_human_task_count"], 1)
+            dashboard = json.loads((root / ".project" / ".engineering" / "dashboards" / "dashboard-data.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(dashboard["open_human_tasks"]), 1)
+            self.assertIn("Grant production DB access", dashboard["open_human_tasks"][0]["task"])
 
     def test_schema_markdown_artifact_and_example_validators(self) -> None:
         schemas = quality_tools.schema_validator(ROOT)

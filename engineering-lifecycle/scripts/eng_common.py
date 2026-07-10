@@ -247,3 +247,57 @@ def first_existing(paths: list[Path]) -> Path | None:
         if path.exists():
             return path
     return None
+
+
+def parse_env_example_keys(path: Path) -> set[str]:
+    """Variable names declared in one .env.example file (handles `export`/comments/quotes)."""
+    keys: set[str] = set()
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("export "):
+            stripped = stripped[len("export ") :].lstrip()
+        if "=" in stripped:
+            keys.add(stripped.split("=", 1)[0].strip())
+    return keys
+
+
+def nearest_env_example(start: Path, stop: Path | None = None) -> Path | None:
+    """Nearest .env.example at or above `start`, never searching past the repo root.
+
+    Fixes the monorepo case where code lives in `apps/cloud/src` but the env template
+    is one level up at `apps/cloud/.env.example`.
+    """
+    start = start.resolve()
+    stop = (stop or repo_root(start)).resolve()
+    current = start if start.is_dir() else start.parent
+    while True:
+        candidate = current / ".env.example"
+        if candidate.exists():
+            return candidate
+        if current == stop or current == current.parent:
+            return None
+        current = current.parent
+
+
+def env_example_keys(start: Path | None = None) -> set[str]:
+    """Union of keys from every .env.example from `start` (or cwd) up to the repo root.
+
+    Ancestor-walk only. A repo-wide descendant scan is deliberately avoided: on a
+    hygiene/secrets tool it would let one package's .env.example mask another
+    package's genuinely undocumented variable — a false negative worse than the
+    noisy false positives this replaces.
+    """
+    start = (start or Path.cwd()).resolve()
+    stop = repo_root(start)
+    keys: set[str] = set()
+    current = start if start.is_dir() else start.parent
+    while True:
+        candidate = current / ".env.example"
+        if candidate.exists():
+            keys |= parse_env_example_keys(candidate)
+        if current == stop or current == current.parent:
+            break
+        current = current.parent
+    return keys

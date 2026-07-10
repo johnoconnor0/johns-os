@@ -8,6 +8,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from eng_common import env_example_keys
+
 ROOT = Path.cwd()
 REPORT = ROOT / ".project" / ".engineering" / "hygiene" / "hygiene-report.json"
 ENV_RE = re.compile(r"(?:process\.env\.|os\.environ(?:\.get)?\(['\"]|getenv\(['\"])([A-Z][A-Z0-9_]{2,})")
@@ -26,24 +29,13 @@ def tracked_files() -> list[Path]:
     ]
 
 
-def env_example_keys() -> set[str]:
-    path = ROOT / ".env.example"
-    if not path.exists():
-        return set()
-    keys = set()
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        if "=" in line and not line.strip().startswith("#"):
-            keys.add(line.split("=", 1)[0].strip())
-    return keys
-
-
 def main() -> int:
     found: dict[str, set[str]] = {}
     for path in tracked_files():
         text = path.read_text(encoding="utf-8", errors="ignore")
         for name in ENV_RE.findall(text):
             found.setdefault(name, set()).add(str(path.relative_to(ROOT)).replace("\\", "/"))
-    example = env_example_keys()
+    example = env_example_keys(ROOT)
     missing = [
         {
             "name": name,

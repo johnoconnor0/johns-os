@@ -26,7 +26,9 @@ from eng_common import (
     hook_additional_context,
     hook_output,
     load_hook_payload,
+    nearest_env_example,
     now_iso,
+    parse_env_example_keys,
     parse_front_matter,
     permission_output,
     placeholder_for_env,
@@ -357,14 +359,32 @@ def env_example_sync(root: Path, apply: bool = False) -> dict[str, Any]:
             if name in {"PATH", "HOME", "USER", "SHELL"}:
                 continue
             found.setdefault(name, set()).add(relpath(full, root))
-    env_path = root / ".env.example"
-    existing: set[str] = set()
-    if env_path.exists():
-        for line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-            if "=" in line and not line.strip().startswith("#"):
-                existing.add(line.split("=", 1)[0].strip())
-    missing = [{"name": name, "placeholder": f"{name}={placeholder_for_env(name)}", "seen_in": sorted(paths)} for name, paths in sorted(found.items()) if name not in existing]
+
+    # A variable is documented if it appears in the nearest .env.example above ANY
+    # file that references it (per-package resolution). This fixes the monorepo case
+    # where code in apps/cloud/src is documented in apps/cloud/.env.example, and it
+    # avoids a repo-wide union that would let one package's docs mask another's.
+    key_cache: dict[str, set[str]] = {}
+
+    def documented(name: str, rels: set[str]) -> bool:
+        for rel in rels:
+            example = nearest_env_example(root / rel, root)
+            if example is None:
+                continue
+            cache_key = str(example)
+            if cache_key not in key_cache:
+                key_cache[cache_key] = parse_env_example_keys(example)
+            if name in key_cache[cache_key]:
+                return True
+        return False
+
+    missing = [
+        {"name": name, "placeholder": f"{name}={placeholder_for_env(name)}", "seen_in": sorted(paths)}
+        for name, paths in sorted(found.items())
+        if not documented(name, paths)
+    ]
     if apply and missing:
+        env_path = nearest_env_example(root, root) or (root / ".env.example")
         with env_path.open("a", encoding="utf-8", newline="\n") as f:
             if env_path.exists() and env_path.stat().st_size:
                 f.write("\n")
@@ -687,10 +707,51 @@ def architecture_decision_detector(root: Path, text: str) -> dict[str, Any]:
     return {"decision_detected": detected, "adr_required": detected and not adr_files, "suggested_title": "ADR-record-architecture-decision" if detected else None}
 
 
+# Council triggers use word-boundary regex (not bare substring) plus an AND rule:
+# suggest the council for a strong signal on its own, OR a domain signal backed by a
+# scale signal. This catches genuinely high-stakes work ("migrate the billing database",
+# "integrate an external provider across all services") without firing on routine
+# prompts like "add an auth header".
+COUNCIL_STRONG_TRIGGERS = [
+    r"build vs\.? buy", r"\birreversible\b", r"re-?architect", r"\brewrite\b",
+    r"breaking change", r"\bmigrat(e|es|ing|ion)\b", r"new (plugin|subsystem|service|system)",
+    r"architectur\w* decision", r"high[- ]stakes", r"\btradeoff\b",
+]
+COUNCIL_DOMAIN_TRIGGERS = [
+    r"\bsecurity\b", r"\bauth(entication|orization)?\b", r"\boauth\b", r"\bprovider\b",
+    r"\bintegrat(e|es|ing|ion)\b", r"\bscal(e|es|ing|ability)\b", r"\bai model\b", r"\bllm\b",
+    r"\beval(uation)?s?\b", r"data model", r"schema change", r"deploy\w* pipeline",
+    r"external system", r"\bcompliance\b", r"\bpayment\b", r"\bbilling\b",
+]
+COUNCIL_SCALE_SIGNALS = [
+    r"cross-cutting", r"\bacross\b", r"\bmultiple\b", r"\bseveral\b", r"\bentire\b",
+    r"\bwhole\b", r"end-to-end", r"\benormous\b", r"\bcritical\b", r"\bmajor\b",
+    r"\bplugin\b", r"\bsubsystem\b", r"\bplatform\b", r"\ball (of|the)\b",
+]
+
+
+def _regex_hits(patterns: list[str], text: str) -> list[str]:
+    hits: list[str] = []
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            hits.append(match.group(0).strip())
+    return sorted(set(hits))
+
+
 def council_trigger_detector(text: str) -> dict[str, Any]:
-    triggers = ["irreversible", "security", "migration", "scaling", "build vs buy", "high cost", "ai model", "eval"]
-    hits = [item for item in triggers if item in text.lower()]
-    return {"recommend_council": bool(hits), "reason": "High-impact decision trigger detected." if hits else "No council trigger detected.", "triggers": hits}
+    low = text.lower()
+    strong = _regex_hits(COUNCIL_STRONG_TRIGGERS, low)
+    domain = _regex_hits(COUNCIL_DOMAIN_TRIGGERS, low)
+    scale = _regex_hits(COUNCIL_SCALE_SIGNALS, low)
+    recommend = bool(strong) or (bool(domain) and bool(scale))
+    triggers = sorted(set(strong + (domain if recommend else [])))
+    reason = (
+        "High-impact decision detected (" + ", ".join(triggers) + ") — an engineering council review is recommended before proceeding."
+        if recommend
+        else "No high-stakes council trigger detected."
+    )
+    return {"recommend_council": recommend, "reason": reason, "triggers": triggers, "scale_signals": scale}
 
 
 def council_input_builder(root: Path, question: str, contexts: list[str]) -> dict[str, Any]:
@@ -880,6 +941,7 @@ def run_tool(name: str, args: argparse.Namespace) -> dict[str, Any]:
             "quality": prompt_quality_score(prompt),
             "clarification": clarification_gate(prompt),
             "skill_route": skill_router(prompt),
+            "council": council_trigger_detector(prompt),
         }
         write_json(engineering_root(root) / "reports" / "intake" / f"{now_iso().replace(':', '-')}.json", result)
         return result
@@ -924,6 +986,13 @@ def render_hook(tool_name: str, result: dict[str, Any]) -> dict[str, Any] | None
         ]
         if clarification["requires_clarification"]:
             messages.append("Clarification is recommended before implementation: " + clarification["reason"])
+        council = result.get("council") or {}
+        if council.get("recommend_council"):
+            messages.append(
+                "High-stakes work detected (" + ", ".join(council.get("triggers", []))
+                + "). Consider running the run-engineering-council skill for independent review "
+                "before planning or implementing. This is a suggestion, not a block."
+            )
         return hook_additional_context("UserPromptSubmit", "\n".join(messages))
     if tool_name == "post-edit-hygiene":
         return hook_additional_context("PostToolBatch", "Post-edit hygiene checks completed. Review generated validation reports if issues are present.")

@@ -107,6 +107,12 @@ def collect_ledger(root: Path) -> dict:
     for path in sorted(base.rglob("*action-items*.json")):
         data = read_json(path, {})
         action_items.extend(data if isinstance(data, list) else data.get("action_items", []))
+    # Human tasks are the "human" half of AI + human tracking. The schema/template
+    # existed but nothing collected them until now.
+    human_tasks: list[dict] = []
+    for path in sorted(base.rglob("*human-tasks*.json")):
+        data = read_json(path, {})
+        human_tasks.extend(data if isinstance(data, list) else data.get("human_tasks", []))
     hygiene = read_json(base / "hygiene" / "hygiene-report.json", {})
     council_runs = []
     council_root = base / "council"
@@ -124,11 +130,13 @@ def collect_ledger(root: Path) -> dict:
         "workspace": rel(base, root),
         "artifacts": artifacts,
         "action_items": sorted(action_items, key=lambda item: item.get("id", "")),
+        "human_tasks": sorted(human_tasks, key=lambda item: item.get("id", "")),
         "hygiene": hygiene,
         "council_runs": council_runs,
         "summary": {
             "artifact_count": len(artifacts),
             "open_action_item_count": sum(1 for item in action_items if item.get("status") != "done"),
+            "open_human_task_count": sum(1 for item in human_tasks if item.get("status") != "done"),
             "council_run_count": len(council_runs),
         },
     }
@@ -153,6 +161,7 @@ def dashboard_data(ledger: dict) -> dict:
         },
         "missing_artifact_groups": missing,
         "open_action_items": [item for item in ledger["action_items"] if item.get("status") != "done"],
+        "open_human_tasks": [item for item in ledger.get("human_tasks", []) if item.get("status") != "done"],
         "council_runs": ledger.get("council_runs", []),
         "recent_artifacts": sorted(ledger["artifacts"], key=lambda item: item["path"])[:50],
     }
@@ -220,6 +229,16 @@ def _action_item(item) -> str:
     status = item.get("status")
     badge = ('<span class="badge badge-' + _tone(status) + '">' + e(str(status)) + "</span> ") if status else ""
     return "<li>" + badge + title + src + "</li>"
+
+
+def _human_task_item(item) -> str:
+    e = html.escape
+    title = e(str(item.get("task") or item.get("title", "Untitled")))
+    reason = str(item.get("reason", ""))
+    sub = (' <small class="sub">' + e(reason) + "</small>") if reason else ""
+    status = item.get("status")
+    badge = ('<span class="badge badge-' + _tone(status) + '">' + e(str(status)) + "</span> ") if status else ""
+    return "<li>" + badge + title + sub + "</li>"
 
 
 def _council_item(run) -> str:
@@ -348,6 +367,7 @@ def render_dashboard(data: dict) -> str:
     risks = data.get("risks", [])
     missing = data.get("missing_artifact_groups", [])
     actions = data.get("open_action_items", [])
+    human = data.get("open_human_tasks", [])
     councils = data.get("council_runs", [])
     summary = data.get("summary", {})
     stale_count = sum(1 for a in arts if a.get("freshness") == "stale")
@@ -357,6 +377,7 @@ def render_dashboard(data: dict) -> str:
     chips = "".join([
         _chip("Artifacts", summary.get("artifact_count", len(arts))),
         _chip("Open actions", summary.get("open_action_item_count", len(actions)), "warn" if actions else "muted"),
+        _chip("Human tasks", summary.get("open_human_task_count", len(human)), "warn" if human else "muted"),
         _chip("Council runs", summary.get("council_run_count", len(councils))),
         _chip("Risks", len(risks), "bad" if risks else "muted"),
         _chip("Missing groups", len(missing), "warn" if missing else "muted"),
@@ -365,6 +386,7 @@ def render_dashboard(data: dict) -> str:
     risks_html = "".join(_risk_item(r) for r in risks) or '<li class="empty">No risks recorded.</li>'
     missing_html = "".join(_missing_item(g) for g in missing) or '<li class="empty">All expected artifact groups present.</li>'
     actions_html = "".join(_action_item(a) for a in actions) or '<li class="empty">No open action items.</li>'
+    human_html = "".join(_human_task_item(h) for h in human) or '<li class="empty">No open human tasks.</li>'
     council_html = "".join(_council_item(c) for c in councils) or '<li class="empty">No council runs.</li>'
     rows = "".join(_artifact_row(a) for a in arts) or '<tr><td colspan="7" class="empty">No artifacts.</td></tr>'
     status_filters = "".join('<button class="filter" data-dim="status" data-val="' + e(s) + '">' + e(s) + "</button>" for s in statuses)
@@ -382,6 +404,7 @@ def render_dashboard(data: dict) -> str:
         '<section class="panel"><h2>Risks</h2><ul class="clean">' + risks_html + "</ul></section>\n"
         '<section class="panel"><h2>Missing artifact groups</h2><ul class="clean">' + missing_html + "</ul></section>\n"
         '<section class="panel"><h2>Open action items</h2><ul class="clean">' + actions_html + "</ul></section>\n"
+        '<section class="panel"><h2>Open human tasks</h2><ul class="clean">' + human_html + "</ul></section>\n"
         '<section class="panel"><h2>Council runs</h2><ul class="clean">' + council_html + "</ul></section>\n"
         '<section class="panel"><h2>Recent artifacts</h2>'
         '<div class="toolbar"><input id="search" type="search" placeholder="Filter by path…" aria-label="Filter artifacts by path">'
