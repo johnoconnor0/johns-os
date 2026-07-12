@@ -4,9 +4,11 @@
 tracks their metadata, and provides deterministic commands for discovery and
 validation. It also carries parallel Codex marketplace metadata.
 
-The first registered plugin is:
+Registered plugins:
 
-- `engineering-lifecycle`: a Claude Code plugin for structured product and engineering lifecycle work (19 skills, 19 agents, lifecycle hooks).
+- `engineering-lifecycle`: structured product and engineering lifecycle work (skills, agents, lifecycle hooks).
+- `business-development`: interview-first authoring of Service Outline documents from a modular template.
+- `ai-utilities`: utility skills for authoring/vetting Claude Code extensions (`skill-creator`, `skill-review`) and closing the plan → implementation loop (`plan-completion-audit`, `audit-resolver`).
 
 ## Install (Claude Code)
 

@@ -6,7 +6,7 @@
     "email": "john@weblifter.com.au"
   },
   "description": "John's plugin marketplace for Claude Code — structured engineering lifecycle tooling and related developer plugins.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "plugins": [
     {
       "name": "engineering-lifecycle",
@@ -51,6 +51,29 @@
         "proposals",
         "sales",
         "documentation"
+      ]
+    },
+    {
+      "name": "ai-utilities",
+      "displayName": "AI Utilities",
+      "source": "./ai-utilities",
+      "description": "Utility skills for building and vetting Claude Code extensions (skill-creator, skill-review) and for closing the plan-to-implementation loop (plan-completion-audit, audit-resolver).",
+      "version": "0.1.0",
+      "author": {
+        "name": "John O'Connor",
+        "email": "john@weblifter.com.au"
+      },
+      "repository": "https://github.com/johnoconnor0/johns-os",
+      "license": "MIT",
+      "category": "Developer Tools",
+      "keywords": [
+        "utilities",
+        "skills",
+        "plugin-authoring",
+        "skill-review",
+        "plan-audit",
+        "audit-resolver",
+        "review"
       ]
     }
   ]

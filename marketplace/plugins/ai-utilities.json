@@ -1,0 +1,43 @@
+{
+  "id": "ai-utilities",
+  "name": "AI Utilities",
+  "summary": "Author and vet Claude Code extensions (skill-creator, skill-review) and close the plan-to-implementation loop (plan-completion-audit, audit-resolver).",
+  "status": "local",
+  "category": "developer-tools",
+  "version": "0.1.0",
+  "path": "ai-utilities",
+  "manifest": "ai-utilities/.codex-plugin/plugin.json",
+  "source": {
+    "type": "local",
+    "url": ""
+  },
+  "capabilities": [
+    "skills",
+    "commands",
+    "hooks"
+  ],
+  "tags": [
+    "utilities",
+    "skill-authoring",
+    "skill-review",
+    "plan-audit",
+    "audit-resolver",
+    "review",
+    "plugin-review"
+  ],
+  "risk": "medium",
+  "install": {
+    "type": "local-path",
+    "instructions": [
+      "Use the plugin from the local ai-utilities directory.",
+      "Codex discovers this plugin through .agents/plugins/marketplace.json at the johns-os root.",
+      "audit-resolver applies code fixes and skill-creator/plan-completion-audit run local tooling; audit-resolver gates every fix behind explicit confirmation.",
+      "Validate with python scripts/johns-os-marketplace.py validate before use."
+    ]
+  },
+  "validation": {
+    "commands": [
+      "python scripts/johns-os-marketplace.py validate"
+    ]
+  }
+}

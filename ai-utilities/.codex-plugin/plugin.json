@@ -1,0 +1,45 @@
+{
+  "name": "ai-utilities",
+  "version": "0.1.0",
+  "description": "Utility skills for building and vetting Claude Code extensions (skill-creator, skill-review) and for closing the plan-to-implementation loop (plan-completion-audit, audit-resolver).",
+  "author": {
+    "name": "John O'Connor",
+    "email": "john@weblifter.com.au"
+  },
+  "homepage": "",
+  "license": "MIT",
+  "keywords": [
+    "utilities",
+    "skills",
+    "plugin-authoring",
+    "skill-review",
+    "plan-audit",
+    "audit-resolver",
+    "review"
+  ],
+  "skills": "./skills/",
+  "commands": "./commands/",
+  "interface": {
+    "displayName": "AI Utilities",
+    "shortDescription": "Author, review, and audit Claude Code extensions and plans",
+    "longDescription": "A utility toolkit of four skills and one command. skill-creator scaffolds, rebuilds, validates, and packages Claude Code skills or plugins. skill-review runs a security, safety, and quality review of a marketplace, plugin, or skill before install. plan-completion-audit audits a project plan against the actual implementation. audit-resolver reads that audit and applies the fixes with per-finding safety gates. The audit-resolve command chains plan-completion-audit into audit-resolver.",
+    "developerName": "John O'Connor",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Edit",
+      "Bash"
+    ],
+    "websiteURL": "",
+    "privacyPolicyURL": "",
+    "termsOfServiceURL": "",
+    "defaultPrompt": [
+      "Scaffold a new Claude Code skill for this purpose.",
+      "Review this plugin or marketplace for security and quality before I install it.",
+      "Audit this plan against the implementation, then resolve the findings."
+    ],
+    "brandColor": "#7C3AED",
+    "screenshots": []
+  }
+}

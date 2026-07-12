@@ -1,0 +1,7 @@
+skill-review — Claude Code extension assurance skill
+Copyright (c) 2026 John O'Connor.
+
+Internal use. Redistribution and modification for internal tooling permitted.
+Provided "as is", without warranty of any kind. This skill performs an automated
+security/quality readiness review; it is not a legal opinion, penetration test,
+or formal certification. Human review of its findings is required before approval.

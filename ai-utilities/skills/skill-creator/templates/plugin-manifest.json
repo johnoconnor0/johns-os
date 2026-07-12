@@ -1,0 +1,14 @@
+{
+  "name": "<plugin-name>",
+  "description": "<plugin purpose and trigger context>",
+  "version": "0.1.0",
+  "author": {
+    "name": "<author>"
+  },
+  "skills": "./skills",
+  "agents": "./agents",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json",
+  "lspServers": "./.lsp.json",
+  "userConfig": {}
+}

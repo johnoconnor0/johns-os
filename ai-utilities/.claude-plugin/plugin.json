@@ -1,0 +1,20 @@
+{
+  "name": "ai-utilities",
+  "displayName": "AI Utilities",
+  "version": "0.1.0",
+  "description": "Utility skills for building and vetting Claude Code extensions (skill-creator, skill-review) and for closing the plan-to-implementation loop (plan-completion-audit, audit-resolver).",
+  "author": {
+    "name": "John O'Connor",
+    "email": "john@weblifter.com.au"
+  },
+  "license": "MIT",
+  "keywords": [
+    "utilities",
+    "skills",
+    "plugin-authoring",
+    "skill-review",
+    "plan-audit",
+    "audit-resolver",
+    "review"
+  ]
+}

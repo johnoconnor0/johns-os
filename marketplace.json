@@ -27,6 +27,18 @@
         "authentication": "ON_INSTALL"
       },
       "category": "Business"
+    },
+    {
+      "name": "ai-utilities",
+      "source": {
+        "source": "local",
+        "path": "./ai-utilities"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
     }
   ]
 }

@@ -1,0 +1,35 @@
+skill: skill-creator
+description: Eval suite for Claude Code skill/plugin creator rebuild.
+
+test_cases:
+  - id: create-focused-skill
+    kind: functional
+    user_input: "Create a skill that turns incident notes into postmortems"
+    expected_activation: true
+    judge_criteria:
+      - "Chooses a focused skill rather than an overbuilt plugin."
+      - "Includes SKILL.md, templates, examples, and validation steps."
+      - "Does not fabricate official validation unless run."
+  - id: create-plugin-with-agents-hooks
+    kind: functional
+    user_input: "Create a plugin with skills, subagents, hooks, MCP and LSP support for software audits"
+    expected_activation: true
+    judge_criteria:
+      - "Chooses plugin architecture."
+      - "Includes manifest, skills, agents, hooks, MCP/LSP compatibility, references, scripts, and validation plan."
+      - "Treats MCP/LSP as optional unless specified."
+  - id: update-existing-archive
+    kind: functional
+    user_input: "Rebuild this uploaded skill archive with current Claude plugin conventions"
+    expected_activation: true
+    judge_criteria:
+      - "Inspects archive before asking questions."
+      - "Preserves useful existing content."
+      - "Returns complete repackaged deliverable."
+  - id: conversational-skills-question
+    kind: edge
+    user_input: "What is the difference between Claude skills and plugins?"
+    expected_activation: true
+    judge_criteria:
+      - "Answers directly without scaffolding files unless requested."
+      - "Explains focused workflow vs installable bundle distinction."
