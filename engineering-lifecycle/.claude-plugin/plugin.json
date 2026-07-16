@@ -1,7 +1,7 @@
 {
   "name": "engineering-lifecycle",
   "displayName": "Engineering Lifecycle",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Move software products through a structured engineering lifecycle from discovery to maintenance.",
   "author": {
     "name": "John O'Connor",

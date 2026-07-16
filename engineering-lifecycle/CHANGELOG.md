@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.0 - 2026-07-16
+
+### Changed
+- **Artifact validation is stricter — existing artifacts may now fail.** `validate-artifact.py` now enforces the section contracts the skills already documented: `prd` requires all 10 sections (adds `Users`, `Permissions And Data Handling`, `Edge Cases`) and `release-plan` requires all 8 (adds `Post-Release Validation`, `Open Questions`). Only 7 and 6 were enforced before, so PRDs and release plans that previously passed may fail until the missing sections are added.
+- Skills now declare scoped `allowed-tools`. 17 of 20 skills carry a minimal allowlist. `sync-linear-tasks`, `build-ui-prototype` and `implement-feature-safely` are intentionally left unrestricted: the first drives Linear MCP tools whose server name is install-specific and cannot be allowlisted, and the other two run open-ended project validation commands that cannot be enumerated.
+- `sync-linear-tasks` push safety is now a hard gate rather than advice: every push confirms first, batches creating or updating more than 5 issues require explicit approval of the full plan, and descriptions must be redacted before upload.
+
+### Fixed
+- Skill workflows invoked plugin scripts by a plugin-root-relative path (`python scripts/validate-artifact.py`), which only resolved when the working directory happened to be the plugin root — so documented validation steps could silently skip. All 22 invocations across 17 skills are now anchored to `${CLAUDE_PLUGIN_ROOT}`, matching `hooks.json`.
+- The `create-ux-flow` eval asserted output containing "Happy Path", which no template or example emits (the canonical section is `Journeys`) and which contradicted the eval's own judge criteria.
+- `review-change` did not document the `empty-argument` and `no-diff` edge behaviour that its evals assert; both are now specified.
+- Removed a dangling `task-tracker` agent reference from `sync-linear-tasks`.
+
+### Removed
+- The generated runtime workspace under `.project/` is no longer tracked. It is session-hook output rather than source, nothing referenced it, and it is now gitignored.
+
 ## 0.4.0 - 2026-07-10
 
 ### Added
