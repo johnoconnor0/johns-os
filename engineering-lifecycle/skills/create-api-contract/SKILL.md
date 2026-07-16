@@ -1,5 +1,6 @@
 ---
 name: create-api-contract
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(python:*)
 description: Use to define REST, RPC, GraphQL, webhook, event, service, frontend-backend, or external integration contracts.
 ---
 
@@ -27,7 +28,7 @@ Use when the user asks for request/response shapes, service boundaries, webhooks
 3. Define endpoints, messages, events, webhooks, request/response shapes, error model, pagination, rate limits, and idempotency where applicable.
 4. Mark breaking changes explicitly and provide compatibility or migration notes.
 5. Record unknown provider behavior or missing integration documentation as open questions.
-6. Validate generated artifacts with `python scripts/validate-artifact.py <artifact paths>`.
+6. Validate generated artifacts with `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate-artifact.py" <artifact paths>`.
 
 ## Outputs
 

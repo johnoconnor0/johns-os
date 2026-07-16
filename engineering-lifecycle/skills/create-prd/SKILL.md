@@ -1,5 +1,6 @@
 ---
 name: create-prd
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(python:*)
 description: Use to produce a practical product requirements document with functional requirements, non-functional requirements, user stories, and acceptance criteria.
 ---
 
@@ -28,7 +29,7 @@ Use when the user asks for requirements, acceptance criteria, user stories, prod
 3. Write acceptance criteria as testable outcomes tied to user-visible behavior or operational constraints.
 4. Split must-have scope from later enhancements and record explicit out-of-scope decisions.
 5. Capture open questions whose answers would change scope, acceptance criteria, or release risk.
-6. Validate the artifact with `python scripts/validate-artifact.py .project/.engineering/initiatives/<initiative-id>/requirements/prd.md`.
+6. Validate the artifact with `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate-artifact.py" .project/.engineering/initiatives/<initiative-id>/requirements/prd.md`.
 
 ## Outputs
 

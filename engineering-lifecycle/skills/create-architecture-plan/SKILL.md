@@ -1,5 +1,6 @@
 ---
 name: create-architecture-plan
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(python:*)
 description: Use to turn product and system understanding into an implementable architecture plan, module boundaries, tradeoffs, and ADR candidates.
 ---
 
@@ -29,7 +30,7 @@ Use when the user asks for architecture, technical direction, module boundaries,
 4. Record alternatives considered and why they were rejected.
 5. Create ADR candidates for decisions that affect durable architecture or operations.
 6. Convene `run-engineering-council` for high-stakes, irreversible, or cross-cutting decisions before finalizing (the prompt intake also flags these and suggests it).
-7. Run `python scripts/validate-artifact.py .project/.engineering/initiatives/<initiative-id>/architecture/architecture-plan.md`.
+7. Run `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate-artifact.py" .project/.engineering/initiatives/<initiative-id>/architecture/architecture-plan.md`.
 
 ## Outputs
 

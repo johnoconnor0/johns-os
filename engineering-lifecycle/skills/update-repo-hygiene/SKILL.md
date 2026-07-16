@@ -1,5 +1,6 @@
 ---
 name: update-repo-hygiene
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(git:*), Bash(python:*)
 description: Use to inspect and intentionally update repository hygiene files such as .gitignore, .env.example, docs, changelog, and generated artifact reports.
 ---
 
@@ -30,7 +31,7 @@ Use when the user asks to update hygiene files, inspect generated files, sync en
 4. Apply `.gitignore` additions only for safe generated/local patterns.
 5. Suggest README, CHANGELOG, CLAUDE.md, or Docker ignore changes by default unless the user asked for docs/support-file edits.
 6. Write or refresh `.project/.engineering/hygiene/hygiene-report.md`.
-7. Run `python scripts/sync-ledger.py`.
+7. Run `python "${CLAUDE_PLUGIN_ROOT}/scripts/sync-ledger.py"`.
 
 ## Outputs
 

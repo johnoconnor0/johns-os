@@ -1,5 +1,6 @@
 ---
 name: create-implementation-plan
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(python:*)
 description: Use to break approved product and architecture artifacts into sequenced, testable, low-risk implementation work.
 ---
 
@@ -28,7 +29,7 @@ Use when the user asks how to build, sequence, scope, split, estimate, or safely
 4. Separate required work from optional follow-ups.
 5. Emit action items for unresolved questions, blocked dependencies, manual QA, and release prerequisites.
 6. For a high-stakes, irreversible, or cross-cutting change, convene `run-engineering-council` before committing to the sequence.
-7. Run `python scripts/validate-artifact.py .project/.engineering/initiatives/<initiative-id>/implementation/implementation-plan.md`.
+7. Run `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate-artifact.py" .project/.engineering/initiatives/<initiative-id>/implementation/implementation-plan.md`.
 
 ## Outputs
 

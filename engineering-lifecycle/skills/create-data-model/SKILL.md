@@ -1,5 +1,6 @@
 ---
 name: create-data-model
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(python:*)
 description: Use to design entities, relationships, ownership, sensitive data handling, retention, audit needs, and migration risks.
 ---
 
@@ -29,7 +30,7 @@ Use when the user asks for entities, schema shape, ERD, storage boundaries, data
 4. Identify migration, backfill, rollback, and data integrity risks before proposing schema changes.
 5. Render the entity model and ERD with unknowns marked explicitly.
 6. For an irreversible or high-blast-radius migration, convene `run-engineering-council` before proposing the change.
-7. Validate generated artifacts with `python scripts/validate-artifact.py <artifact paths>`.
+7. Validate generated artifacts with `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate-artifact.py" <artifact paths>`.
 
 ## Outputs
 

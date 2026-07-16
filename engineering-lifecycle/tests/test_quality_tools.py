@@ -77,9 +77,12 @@ class QualityToolTests(unittest.TestCase):
             "# Product Requirements Document\n\n"
             "## Problem\n\nCheckout lacks reliable audit exports.\n\n"
             "## Goals\n\nProvide exportable audit events.\n\n"
+            "## Users\n\nTenant admins who reconcile audit events.\n\n"
             "## Functional Requirements\n\n- Export filtered audit events.\n\n"
             "## Non-Functional Requirements\n\n- Preserve tenant boundaries.\n\n"
+            "## Permissions And Data Handling\n\nExports are scoped to the caller's tenant.\n\n"
             "## Acceptance Criteria\n\n- Given a tenant admin, export contains only tenant events.\n\n"
+            "## Edge Cases\n\n- An empty range yields an empty export rather than an error.\n\n"
             "## Out Of Scope\n\n- Cross-tenant reporting.\n\n"
             "## Open Questions\n\n- Confirm retention period.\n\n"
             f"{extra}"
@@ -395,7 +398,7 @@ class QualityToolTests(unittest.TestCase):
 
     def test_gitignore_covers_generated_and_secret_noise(self) -> None:
         text = (ROOT / ".gitignore").read_text(encoding="utf-8")
-        for pattern in ["__pycache__/", "*.py[cod]", ".env", "!.env.example", ".project/.engineering/reports/intake/*.json"]:
+        for pattern in ["__pycache__/", "*.py[cod]", ".env", "!.env.example", ".project/"]:
             self.assertIn(pattern, text)
 
     def test_test_parser_and_completion_contract(self) -> None:

@@ -13,7 +13,7 @@ from eng_common import REQUIRED_FRONT_MATTER, parse_front_matter, repo_root
 
 REQUIRED_SECTIONS = {
     "discovery-brief": ["Problem", "Users", "Evidence", "Goals And Success Signals", "Assumptions", "Risks", "MVP Boundary", "Open Questions"],
-    "prd": ["Problem", "Goals", "Functional Requirements", "Non-Functional Requirements", "Acceptance Criteria", "Out Of Scope", "Open Questions"],
+    "prd": ["Problem", "Goals", "Users", "Functional Requirements", "Non-Functional Requirements", "Permissions And Data Handling", "Acceptance Criteria", "Edge Cases", "Out Of Scope", "Open Questions"],
     "ux-flow": ["Users", "Journeys", "Screens", "States", "Edge Cases", "Accessibility", "Open Questions"],
     "system-map": ["Product Context", "Components", "Data Flow", "Missing Information"],
     "architecture-plan": ["Decision Summary", "Alternatives Considered", "Risks"],
@@ -23,7 +23,7 @@ REQUIRED_SECTIONS = {
     "implementation-log": ["Plan Followed", "Changes Made", "Tests Run", "Hygiene Updates", "Residual Risk"],
     "change-review": ["Findings", "Tests", "Residual Risk"],
     "test-strategy": ["Coverage", "Scenarios", "Manual QA"],
-    "release-plan": ["Scope", "Preconditions", "Rollout", "Monitoring", "Rollback", "Support"],
+    "release-plan": ["Scope", "Preconditions", "Rollout", "Monitoring", "Rollback", "Support", "Post-Release Validation", "Open Questions"],
     "repo-hygiene-report": ["Environment Variables", "Gitignore Candidates", "Support File Updates", "Risks", "Applied Changes"],
     "council-report": ["Question", "Evidence", "Advisor Positions", "Recommendation", "Dissent Log", "Decision", "Confidence"],
     "synthesis": ["Question", "Council Status", "Evidence", "Advisor Positions", "Blind Peer Review Summary", "Recommendation", "Dissent Log", "Decision", "Confidence"],

@@ -35,7 +35,7 @@ test_cases:
       - kind: file_created
         path_glob: "*ux-flow.md"
       - kind: contains
-        text: "Happy Path"
+        text: "Journeys"
     judge_criteria:
       - "Screen inventory, state matrix, and accessibility considerations are explicit and cover empty/loading/error/success/permission states"
       - "Required Sections present: Users, Journeys, Screens, States, Edge Cases, Accessibility, Open Questions"

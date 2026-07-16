@@ -1,5 +1,6 @@
 ---
 name: review-change
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(git:*), Bash(python:*)
 description: Use to review a branch, pull request, diff, or uncommitted change for correctness, architecture, security, tests, migrations, and maintainability.
 ---
 
@@ -29,7 +30,12 @@ Use when the user asks for a code review, PR review, diff review, architecture r
 4. Put findings first, ordered by severity, with concrete file references.
 5. State tests actually run separately from recommended tests.
 6. When the review surfaces a high-stakes, irreversible, or cross-cutting decision, recommend `run-engineering-council` before merge.
-7. Write the review artifact and validate it with `python scripts/validate-artifact.py <review artifact>`.
+7. Write the review artifact and validate it with `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate-artifact.py" <review artifact>`.
+
+## Edge Handling
+
+- **Empty input** (no diff, PR, branch, or files named): ask the user for the diff, PR, or branch to review before proceeding (`empty-argument`) — do not invent a change to review.
+- **No changes to inspect** (the diff/PR/branch resolves to nothing): report that there is nothing to review rather than fabricating findings (`no-diff`).
 
 ## Outputs
 

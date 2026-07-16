@@ -1,5 +1,6 @@
 ---
 name: create-design-system
+allowed-tools: Read, Grep, Glob, Write, Edit
 description: Use when the user asks to plan, document, create, audit, or implement a design system, UI kit, component system, design tokens, typography, colours, spacing, accessibility rules, or reusable frontend component standards.
 ---
 

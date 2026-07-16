@@ -41,10 +41,9 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Generated plugin runtime workspace
-.project/.engineering/reports/intake/*.json
-.project/.engineering/reports/session-events.jsonl
-.project/.engineering/ledger/ledger-log.jsonl
+# Generated plugin runtime workspace — pure local runtime state, never committed.
+# Recreated on demand by the plugin's SessionStart hook.
+.project/
 
 
 ../NOTES.md

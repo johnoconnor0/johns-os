@@ -1,5 +1,6 @@
 ---
 name: create-release-plan
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(python:*)
 description: Use to plan rollout, migration, feature flags, rollback, monitoring, support notes, changelog, and post-release validation.
 ---
 
@@ -28,7 +29,7 @@ Use when the user asks how to ship, roll out, migrate, monitor, rollback, or pre
 4. Define rollback or disablement steps that are specific enough to execute.
 5. Separate required release gates from optional hardening follow-ups.
 6. For a high-risk or hard-to-reverse release, convene `run-engineering-council` before scheduling it.
-7. Validate the artifact with `python scripts/validate-artifact.py .project/.engineering/initiatives/<initiative-id>/release/release-plan.md`.
+7. Validate the artifact with `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate-artifact.py" .project/.engineering/initiatives/<initiative-id>/release/release-plan.md`.
 
 ## Outputs
 

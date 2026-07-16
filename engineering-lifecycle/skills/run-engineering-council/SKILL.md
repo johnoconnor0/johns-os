@@ -1,5 +1,6 @@
 ---
 name: run-engineering-council
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(python:*), Agent
 description: Convene an independent multi-perspective engineering council before high-stakes or hard-to-reverse work — major architecture, a new plugin or subsystem, external integrations, risky migrations, security-sensitive or AI-system design, or build-vs-buy. Invoke proactively when a change is large, cross-cutting, or costly to undo, not only when explicitly asked; skip it for routine bug fixes and simple docs.
 ---
 
@@ -31,8 +32,8 @@ Use proactively before starting an enormous, irreversible, or cross-cutting chan
 3. **Subagent council (default — real multi-perspective analysis).** Spawn the five advisor subagents IN PARALLEL, each with the same question and context: `council-contrarian`, `council-first-principles`, `council-expansionist`, `council-outsider`, `council-executor`. Each returns a Markdown draft with the sections `Position`, `Evidence Reviewed`, `Analysis`, `Evidence Gaps`, `Recommendation`. Write each to `.project/.engineering/council/<run-id>/advisor-drafts/<role>.md`.
 4. Anonymize the drafts (strip role labels) into `anonymized-drafts/advisor-N.md`, run a blind peer-review pass over the anonymized set, and write `peer-reviews/`.
 5. Spawn `council-chairperson` with the advisor drafts and peer reviews to synthesize `synthesis.md`, preserving meaningful dissent. Enforce quorum: require at least three advisor drafts; if fewer, write artifacts with `quorum-failed` status and do not present the recommendation as final.
-6. **Deterministic / CI fallback.** When subagents are unavailable (headless, offline, or fixture/CI runs), use `python scripts/council.py ask --question "<question>" --context <path>` (deterministic local) or `... --mode live-model --adapter command|anthropic|openai ...` (external adapters). Same artifact boundary as the subagent path.
-7. Validate the synthesis with `python scripts/validate-artifact.py .project/.engineering/council/<run-id>/synthesis.md`.
+6. **Deterministic / CI fallback.** When subagents are unavailable (headless, offline, or fixture/CI runs), use `python "${CLAUDE_PLUGIN_ROOT}/scripts/council.py" ask --question "<question>" --context <path>` (deterministic local) or `... --mode live-model --adapter command|anthropic|openai ...` (external adapters). Same artifact boundary as the subagent path.
+7. Validate the synthesis with `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate-artifact.py" .project/.engineering/council/<run-id>/synthesis.md`.
 
 ## Outputs
 

@@ -1,5 +1,6 @@
 ---
 name: create-system-map
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(python:*)
 description: Use to map actors, workflows, components, data flow, external systems, responsibility boundaries, failure points, security, and deployment shape.
 ---
 
@@ -29,7 +30,7 @@ Use when the user asks to understand architecture, map a system, identify compon
 3. Mark each claim as confirmed from inspected evidence or inference.
 4. Produce `system-map.md`, `context-diagram.mmd`, and `container-diagram.mmd`.
 5. Emit action items for missing diagrams, unknown owners, unclear security boundaries, or undocumented external dependencies.
-6. Run `python scripts/validate-artifact.py .project/.engineering/initiatives/<initiative-id>/system-map/system-map.md`.
+6. Run `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate-artifact.py" .project/.engineering/initiatives/<initiative-id>/system-map/system-map.md`.
 
 ## Outputs
 

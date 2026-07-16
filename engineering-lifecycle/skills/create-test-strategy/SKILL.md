@@ -1,5 +1,6 @@
 ---
 name: create-test-strategy
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(python:*)
 description: Use to define the correct automated and manual test plan for a product, feature, change, migration, release, or risk area.
 ---
 
@@ -27,7 +28,7 @@ Use when the user asks what to test, how to verify a feature, which test types a
 3. Tie every recommended test to a user-facing behavior, failure mode, or implementation slice.
 4. Identify which checks are required before merge, before release, and after release.
 5. Record unautomated manual QA and why automation is not practical yet.
-6. Run `python scripts/validate-artifact.py .project/.engineering/initiatives/<initiative-id>/testing/test-strategy.md`.
+6. Run `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate-artifact.py" .project/.engineering/initiatives/<initiative-id>/testing/test-strategy.md`.
 
 ## Outputs
 

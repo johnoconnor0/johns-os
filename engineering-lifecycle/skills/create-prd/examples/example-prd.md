@@ -51,6 +51,15 @@ I actually buy this?" and analytics show a high drop-off on the cart screen.
 - No card numbers, CVCs, or full PANs are ever written to our database or logs.
 - Checkout availability target is 99.9% measured monthly.
 
+## Permissions And Data Handling
+
+- Only the authenticated owner of a cart can start checkout for it; a cart is
+  never checkoutable by another user.
+- Card capture happens solely on the provider's hosted page. We store only the
+  provider's session and order identifiers — never card numbers or CVCs.
+- Orders and payment records inherit the originating cart's tenant boundary and
+  are readable only by that tenant's support and finance roles.
+
 ## Acceptance Criteria
 
 - Given a valid saved cart, when the user selects Checkout, then they reach the
@@ -59,6 +68,15 @@ I actually buy this?" and analytics show a high drop-off on the cart screen.
   actionable error and remain on the cart screen.
 - Given a confirmed payment webhook, when it is processed twice, then exactly
   one paid order exists for that cart.
+
+## Edge Cases
+
+- The cart is emptied or an item is removed between opening the cart and
+  selecting Checkout: the session is refused with an actionable message.
+- The provider webhook arrives before the browser redirect completes: the order
+  reconciles exactly once regardless of event ordering.
+- The payment provider is unavailable at session creation: checkout fails fast
+  with a retry-later message and no partial order is created.
 
 ## Out Of Scope
 

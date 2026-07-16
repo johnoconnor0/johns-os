@@ -1,5 +1,6 @@
 ---
 name: profile-product-system
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(python:*)
 description: Use at the start of product or repo work to understand the product, users, stack, integrations, constraints, and development maturity.
 ---
 
@@ -26,12 +27,12 @@ Use when the user asks to understand a product, repo, stack, project context, in
 
 ## Workflow
 
-1. Run or emulate `python scripts/profile-repo.py --print` to collect factual repo shape.
+1. Run or emulate `python "${CLAUDE_PLUGIN_ROOT}/scripts/profile-repo.py" --print` to collect factual repo shape.
 2. Inspect README, docs, package manifests, deployment config, and existing `.project/.engineering/profile` artifacts.
 3. Separate confirmed facts from product assumptions. Mark unknown users, workflows, integrations, constraints, and ownership explicitly.
 4. Write the three profile outputs using the template fields and stable YAML keys.
 5. Emit action items for missing critical facts such as unknown deploy target, owner, secrets policy, or primary user.
-6. Validate generated Markdown/JSON with `python scripts/validate-artifact.py <artifact paths>`.
+6. Validate generated Markdown/JSON with `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate-artifact.py" <artifact paths>`.
 
 ## Outputs
 

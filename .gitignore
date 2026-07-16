@@ -1,8 +1,8 @@
 # Engineering Lifecycle plugin — generated runtime workspace for this repo.
 # Created by the plugin's SessionStart hook; pure runtime state, not source.
-# (The committed example workspace under engineering-lifecycle/.project/ is
-# intentional and governed by engineering-lifecycle/.gitignore — do not ignore
-# it here; the leading slash anchors this rule to the repo root only.)
+# (The plugin's own workspace under engineering-lifecycle/.project/ is ignored
+# by engineering-lifecycle/.gitignore. The leading slash anchors this rule to
+# the repo root only.)
 /.project/
 
 # Python bytecode and tool caches

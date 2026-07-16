@@ -1,5 +1,6 @@
 ---
 name: create-ux-flow
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(python:*)
 description: Use to map user journeys, screens, states, interaction flows, accessibility considerations, and screen inventory for a product or feature.
 ---
 
@@ -28,7 +29,7 @@ Use when the user asks for user journeys, screen flow, UI states, interaction de
 3. Define screen inventory, state matrix, key interactions, empty/loading/error/success/permission states, and accessibility considerations.
 4. Mark any visual, content, or design-system claim as confirmed only when inspected.
 5. Record unresolved UX decisions as open questions with the downstream implementation impact.
-6. Validate generated UX artifacts with `python scripts/validate-artifact.py <artifact paths>`.
+6. Validate generated UX artifacts with `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate-artifact.py" <artifact paths>`.
 
 ## Outputs
 

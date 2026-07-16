@@ -1,5 +1,6 @@
 ---
 name: map-product-lifecycle
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(python:*)
 description: Use to identify where a product or initiative sits in the engineering lifecycle and which artifacts are missing.
 ---
 
@@ -29,7 +30,7 @@ Use when the user asks what should happen next, which planning artifacts are mis
 3. Identify missing artifacts, stale artifacts, unresolved blockers, and risks that affect the next lifecycle step.
 4. Recommend exactly one primary next skill plus optional follow-up skills when needed.
 5. Write lifecycle map, lifecycle state, and missing-artifacts sidecar data when requested.
-6. Validate generated artifacts with `python scripts/validate-artifact.py <artifact paths>` and `python scripts/validate-schemas.py`.
+6. Validate generated artifacts with `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate-artifact.py" <artifact paths>` and `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate-schemas.py"`.
 
 ## Outputs
 
