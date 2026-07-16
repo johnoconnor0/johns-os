@@ -18,6 +18,8 @@
 
 ## 0.4.0 - 2026-07-10
 
+Supersedes 0.3.0, which was tagged the same day carrying this identical content and re-versioned minutes later as part of a marketplace-wide release. 0.3.0 shipped nothing separately, so it has no entry of its own.
+
 ### Added
 - Linear task tracking: the `sync-linear-tasks` skill plus a deterministic `linear-sync.py` engine (idempotent push, status-only pull), an intake reminder when tasks are unsynced, and an `eng-life linear-sync` subcommand.
 - Human-task ingestion: the ledger and dashboard now aggregate `human-tasks.json` alongside action items.
@@ -27,10 +29,19 @@
 ### Fixed
 - Environment-example detection ignored app/package-level templates; discovery is now centralized in `eng_common` (ancestor-walk) and applied to both detectors and the apply side.
 
-## Unreleased
+## 0.2.0 - 2026-06-30
 
-- Completed runtime scaffolding for lifecycle phases 2-6.
-- Added conservative hygiene detection, ledger sync, dashboard generation, and deterministic council artifacts.
-- Hardened hook command resolution, CLI target-root handling, schema validation, prompt trigger evals, and live council adapter support.
+### Added
+- Production-oriented lifecycle examples, stronger templates, and repository `.gitignore` hygiene.
+
+### Changed
 - Rewrote specialist and council agent prompts with evidence rules, boundaries, and structured output contracts.
-- Added production-oriented lifecycle examples, stronger templates, and repository `.gitignore` hygiene.
+
+### Fixed
+- Hardened hook command resolution, CLI target-root handling, schema validation, prompt trigger evals, and live council adapter support.
+
+## 0.1.0 - 2026-06-27
+
+### Added
+- Initial release: runtime scaffolding for lifecycle phases 2-6.
+- Conservative hygiene detection, ledger sync, dashboard generation, and deterministic council artifacts.
