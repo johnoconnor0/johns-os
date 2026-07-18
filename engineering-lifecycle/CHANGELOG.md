@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.0 - 2026-07-18
+
+### Changed
+- **The `.project/.engineering` workspace is now opt-in per repo and never auto-created.** Previously every session start ran `init-workspace.py`, and several `PostToolUse`/`Stop` hooks created the workspace as a side effect of writing reports — so `.project` appeared unbidden in any repo (and, because those hooks anchored to `Path.cwd()`, in random subfolders too). The workspace is now created only by an explicit action: the new `/project-init` command, `eng-life init`, or a lifecycle skill writing its first artifact. Until then the plugin stays dormant.
+- SessionStart no longer initializes the workspace. When none exists, the new `session-start-context.py` hook asks — via `AskUserQuestion` — whether to run `/project-init`, and never creates `.project` itself. `detect-stack` still runs but only persists `stack.json` once the workspace exists.
+- All workspace-writing hooks now anchor to the **repo root** (via `engineering_root`/`repo_root`) instead of `Path.cwd()`, so a hook firing while the working directory is a subfolder can no longer drop a stray `.project` there. Affected: `capture-session-summary`, `detect-new-env-vars`, `suggest-gitignore-updates`, `validate-generated-artifacts`.
+
+### Added
+- **`/project-init` command** — the explicit, idempotent way to create the workspace. Defaults to the repo root; `/project-init here` targets the current subfolder (via a new `--here` flag on `init-workspace.py`) for deliberate nested-package layouts.
+- `eng_common.workspace_exists()` — single source of truth for whether a repo has opted in; every automatic hook gates on it.
+- Regression test asserting no hook wired into `hooks.json` creates `.project` (at the repo root or in a subfolder) when the workspace is absent.
+
+### Removed
+- `hooks/scripts/session-start-context.sh` (replaced by the repo-root-aware, opt-in-respecting `session-start-context.py`).
+
 ## 0.5.0 - 2026-07-16
 
 ### Changed
