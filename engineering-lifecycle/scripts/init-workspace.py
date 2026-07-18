@@ -38,11 +38,19 @@ def init_workspace(root: Path) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", default=".", help="Repository root to initialize")
+    parser.add_argument("--root", default=".", help="Directory to initialize from (default: current directory)")
+    parser.add_argument(
+        "--here",
+        action="store_true",
+        help="Initialize the workspace in --root exactly, without walking up to the git/plugin root. "
+        "Use to place .project in a subfolder deliberately (e.g. a nested package).",
+    )
     args = parser.parse_args()
-    root = repo_root(Path(args.root))
+    base = Path(args.root).resolve()
+    root = base if args.here else repo_root(base)
     manifest = init_workspace(root)
-    print(f"initialized {manifest['workspace']}")
+    location = str(root).replace("\\", "/")
+    print(f"initialized {manifest['workspace']} at {location}")
     return 0
 
 

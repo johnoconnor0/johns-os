@@ -4,14 +4,23 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from datetime import datetime, timezone
 
-ROOT = Path.cwd()
-LOG = ROOT / ".project" / ".engineering" / "reports" / "session-events.jsonl"
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from eng_common import engineering_root, repo_root, workspace_exists
+
+ROOT = repo_root()
+LOG = engineering_root(ROOT) / "reports" / "session-events.jsonl"
 
 
 def main() -> int:
+    # Dormant until the workspace is opted in: never create .project just to log
+    # a session-stop event. Anchored to the repo root so a Stop firing from a
+    # subfolder cannot drop a stray .project there.
+    if not workspace_exists(ROOT):
+        return 0
     LOG.parent.mkdir(parents=True, exist_ok=True)
     event = {"at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(), "event": "session_stop"}
     with LOG.open("a", encoding="utf-8", newline="\n") as f:

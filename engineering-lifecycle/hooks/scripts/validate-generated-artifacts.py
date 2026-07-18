@@ -7,12 +7,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path.cwd()
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from eng_common import engineering_root, repo_root
+
+ROOT = repo_root()
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "validate-artifact.py"
 
 
 def main() -> int:
-    base = ROOT / ".project" / ".engineering"
+    # Anchored to the repo root: only ever validate the repo-root workspace, and
+    # stay dormant (no creation) when it does not exist.
+    base = engineering_root(ROOT)
     if not base.exists():
         return 0
     artifacts = [str(path) for path in base.rglob("*") if path.suffix.lower() in {".md", ".json"}]

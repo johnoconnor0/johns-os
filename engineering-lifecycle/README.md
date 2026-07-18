@@ -80,6 +80,26 @@ Rules:
 
 See `references/workspace-contract.md` for the full contract.
 
+### Workspace initialization (opt-in)
+
+The workspace is **opt-in per repo**. Nothing creates `.project` automatically —
+not session start, not post-tool hooks, not stop hooks. It is created only by an
+explicit action:
+
+- **`/project-init`** — the recommended way. Creates `.project/.engineering` at the
+  **repo root**. Run `/project-init here` from a subfolder to place it there instead
+  (e.g. a nested package).
+- **`eng-life init`** — the CLI equivalent.
+- **Running a lifecycle skill** — a skill writing its first artifact creates the
+  workspace on demand (also at the repo root).
+
+Until then the plugin stays **dormant**: automatic hooks run but do not write, so
+no `.project` directory appears. When a session starts in a repo without a
+workspace, the SessionStart hook asks (via `AskUserQuestion`) whether to run
+`/project-init` — it never creates the directory on its own. Every workspace write
+is anchored to the repo root, so a hook firing while the working directory is a
+subfolder can never drop a stray `.project` there.
+
 ## Lifecycle Stages
 
 The canonical lifecycle is:
@@ -154,18 +174,32 @@ Council agents:
 
 Agents are specialists, not duplicates of skills. Delegate when isolated expert judgment, independent review, or focused analysis would improve the result.
 
+## Commands
+
+- `/project-init` — initialize the Engineering Lifecycle workspace for a repo (repo
+  root by default; `/project-init here` for the current subfolder). This is the
+  intended, explicit way to opt a repo into the workspace. See
+  [Workspace initialization](#workspace-initialization-opt-in).
+
 ## Hooks
 
 Hook behavior is conservative, deterministic, and rooted through `CLAUDE_PLUGIN_ROOT` so installed plugin hooks can run from a target project.
 
-- `SessionStart`: fast repo and context detection only.
+- `SessionStart`: fast repo and context detection only. If no workspace exists it
+  offers `/project-init` via `AskUserQuestion` — it never creates `.project`.
 - `PreToolUse`: dangerous command, production command, generated-file, sensitive-file, edit-scope, and secret-exfiltration guards.
 - `PostToolUse`: hygiene drift detection after edits.
 - `Stop`: completion and hygiene reminders.
 
+Workspace-writing hooks (`SessionStart` stack detection, `PostToolUse` hygiene/ledger,
+`Stop` capture/completion) are **dormant until the workspace exists** and always
+anchor to the repo root, so they never auto-create `.project` or scatter it across
+subfolders. Guard hooks (dangerous/secret/sensitive/scope) run regardless — they
+only inspect and block, they never write.
+
 Canonical hook scripts:
 
-- `session-start-context.sh`
+- `session-start-context.py`
 - `block-dangerous-bash.sh`
 - `block-secret-exfil.sh`
 - `detect-new-env-vars.py`

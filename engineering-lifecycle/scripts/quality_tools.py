@@ -36,6 +36,7 @@ from eng_common import (
     relpath,
     repo_root,
     slugify,
+    workspace_exists,
     write_json,
     write_text,
 )
@@ -301,7 +302,11 @@ def detect_stack(root: Path) -> dict[str, Any]:
         "database": database,
         "test_commands": test_commands,
     }
-    write_json(engineering_root(root) / "context" / "stack.json", result)
+    # Detection is always safe to run and report; persisting it is a workspace
+    # write, so gate it on an initialized workspace. Running on SessionStart must
+    # never create .project — it only refreshes stack.json once opted in.
+    if workspace_exists(root):
+        write_json(engineering_root(root) / "context" / "stack.json", result)
     return result
 
 
@@ -981,7 +986,11 @@ def run_tool(name: str, args: argparse.Namespace) -> dict[str, Any]:
             "council": {**council_trigger_detector(prompt), "enforcement": council_enforcement(root)},
             "linear": linear_pending(root),
         }
-        write_json(engineering_root(root) / "reports" / "intake" / f"{now_iso().replace(':', '-')}.json", result)
+        # Always emit intake context (intent, quality, council, linear), but only
+        # persist the intake log once the workspace exists. A UserPromptSubmit hook
+        # must never create .project just because the user typed a prompt.
+        if workspace_exists(root):
+            write_json(engineering_root(root) / "reports" / "intake" / f"{now_iso().replace(':', '-')}.json", result)
         return result
     raise SystemExit(f"unknown tool: {name}")
 

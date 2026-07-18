@@ -9,10 +9,15 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from eng_common import env_example_keys
+from eng_common import engineering_root, env_example_keys, repo_root, workspace_exists
 
-ROOT = Path.cwd()
-REPORT = ROOT / ".project" / ".engineering" / "hygiene" / "hygiene-report.json"
+# Scan the working directory (so a monorepo package's own .env.example is honored
+# by the ancestor-walk), but write the report into the repo-root workspace so
+# .project only ever lives at the repo root — never in whatever subfolder a hook
+# happened to fire from.
+CWD = Path.cwd()
+ROOT = repo_root(CWD)
+REPORT = engineering_root(ROOT) / "hygiene" / "hygiene-report.json"
 ENV_RE = re.compile(r"(?:process\.env\.|os\.environ(?:\.get)?\(['\"]|getenv\(['\"])([A-Z][A-Z0-9_]{2,})")
 SAFE_EXTS = {".js", ".jsx", ".ts", ".tsx", ".py", ".rb", ".php", ".go", ".rs", ".java", ".cs", ".sh", ".env.example"}
 
@@ -20,7 +25,7 @@ SAFE_EXTS = {".js", ".jsx", ".ts", ".tsx", ".py", ".rb", ".php", ".go", ".rs", "
 def tracked_files() -> list[Path]:
     return [
         p
-        for p in ROOT.rglob("*")
+        for p in CWD.rglob("*")
         if p.is_file()
         and ".git" not in p.parts
         and ".project" not in p.parts
@@ -30,12 +35,17 @@ def tracked_files() -> list[Path]:
 
 
 def main() -> int:
+    # Dormant until the workspace is opted in. `--ensure-workspace` (passed by the
+    # explicit `eng-hygiene detect` CLI) creates it on demand; the automatic
+    # PostToolUse hook passes nothing and stays dormant.
+    if not workspace_exists(ROOT) and "--ensure-workspace" not in sys.argv:
+        return 0
     found: dict[str, set[str]] = {}
     for path in tracked_files():
         text = path.read_text(encoding="utf-8", errors="ignore")
         for name in ENV_RE.findall(text):
-            found.setdefault(name, set()).add(str(path.relative_to(ROOT)).replace("\\", "/"))
-    example = env_example_keys(ROOT)
+            found.setdefault(name, set()).add(str(path.relative_to(CWD)).replace("\\", "/"))
+    example = env_example_keys(CWD)
     missing = [
         {
             "name": name,

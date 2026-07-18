@@ -7,10 +7,18 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from eng_common import workspace_exists
+
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "sync-ledger.py"
 
 
 def main() -> int:
+    # Dormant until the workspace is opted in. The explicit CLI path
+    # (`eng-life sync-ledger`) invokes scripts/sync-ledger.py directly and still
+    # creates the workspace on demand; this automatic PostToolUse wrapper must not.
+    if not workspace_exists():
+        return 0
     proc = subprocess.run([sys.executable, str(SCRIPT)], text=True, capture_output=True, check=False)
     if proc.stdout.strip():
         print(proc.stdout.strip())

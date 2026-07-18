@@ -180,15 +180,19 @@ class QualityToolTests(unittest.TestCase):
                 "const a = process.env.FOO_KEY;\nconst b = process.env.UNDOCUMENTED_KEY;\n",
                 encoding="utf-8",
             )
-            # cwd-scoped detector, run from the nested src dir
+            # cwd-scoped detector, run from the nested src dir. --ensure-workspace
+            # is the explicit opt-in (as the eng-hygiene CLI passes); without it the
+            # hook stays dormant. The report is written to the REPO-ROOT workspace,
+            # never a stray .project under the nested src dir.
             subprocess.run(
-                [sys.executable, str(ROOT / "hooks" / "scripts" / "detect-new-env-vars.py")],
+                [sys.executable, str(ROOT / "hooks" / "scripts" / "detect-new-env-vars.py"), "--ensure-workspace"],
                 cwd=str(src),
                 text=True,
                 capture_output=True,
                 check=True,
             )
-            report = json.loads((src / ".project" / ".engineering" / "hygiene" / "hygiene-report.json").read_text(encoding="utf-8"))
+            self.assertFalse((src / ".project").exists(), "workspace must never land in the subfolder")
+            report = json.loads((root / ".project" / ".engineering" / "hygiene" / "hygiene-report.json").read_text(encoding="utf-8"))
             names = {item["name"] for item in report["new_env_vars"]}
             self.assertNotIn("FOO_KEY", names)           # documented one dir up
             self.assertIn("UNDOCUMENTED_KEY", names)      # genuinely missing
@@ -200,6 +204,42 @@ class QualityToolTests(unittest.TestCase):
             sync_missing = {m["name"] for m in sync["missing"]}
             self.assertNotIn("FOO_KEY", sync_missing)
             self.assertIn("UNDOCUMENTED_KEY", sync_missing)
+
+    def test_automatic_hooks_never_autocreate_workspace(self) -> None:
+        # The workspace is opt-in per repo. Every hook wired into hooks.json must
+        # stay dormant when no workspace exists: it must NOT create `.project` at
+        # the repo root, and must NOT drop a stray `.project` in whatever subfolder
+        # it happens to fire from. This is the regression guard for `.project`
+        # directories auto-generating randomly across repos.
+        automatic_hooks = [
+            ("hooks/scripts/session-start-context.py", {}),
+            ("scripts/detect-stack.py", {}),
+            ("hooks/scripts/user-prompt-intake.py", {"prompt": "review the checkout flow"}),
+            ("hooks/scripts/detect-new-env-vars.py", {"tool_name": "Write", "tool_input": {"file_path": "app.py"}}),
+            ("hooks/scripts/suggest-gitignore-updates.py", {"tool_name": "Write", "tool_input": {"file_path": "app.py"}}),
+            ("hooks/scripts/sync-ledger.py", {"tool_name": "Write", "tool_input": {"file_path": "app.py"}}),
+            ("hooks/scripts/post-edit-hygiene.py", {"tool_name": "Write", "tool_input": {"file_path": "app.py"}}),
+            ("hooks/scripts/capture-session-summary.py", {}),
+            ("hooks/scripts/stop-completion-check.py", {"prompt": "done"}),
+        ]
+        for script, payload in automatic_hooks:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / ".git").mkdir()  # marks the repo root
+                (root / "app.py").write_text("import os\nK=os.getenv('SECRET_TOKEN')\n", encoding="utf-8")
+                sub = root / "packages" / "svc"
+                sub.mkdir(parents=True)
+                proc = subprocess.run(
+                    [sys.executable, str(ROOT / script)],
+                    cwd=str(sub),  # fire from a subfolder, as a real session often does
+                    input=json.dumps(payload),
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(proc.returncode, 0, f"{script} exited nonzero: {proc.stderr}")
+                self.assertFalse((root / ".project").exists(), f"{script} auto-created .project at repo root")
+                self.assertFalse((sub / ".project").exists(), f"{script} dropped a stray .project in the subfolder")
 
     def test_ledger_ingests_human_tasks(self) -> None:
         # AI + human tracking: the ledger must aggregate human-tasks.json, not only

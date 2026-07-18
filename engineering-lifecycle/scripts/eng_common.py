@@ -41,6 +41,19 @@ def engineering_root(root: Path | None = None) -> Path:
     return (root or repo_root()) / WORKSPACE
 
 
+def workspace_exists(root: Path | None = None) -> bool:
+    """True once the Engineering Lifecycle workspace exists for this repo.
+
+    The workspace is opt-in per repo: it is created only by explicit user action
+    (the /project-init command, ``eng-life init``, or a lifecycle skill writing its
+    first artifact) — never by automatic session/post-tool/stop hooks. Until it
+    exists, those hooks stay dormant and must not create it. Anchored to the repo
+    root via ``engineering_root`` so a hook firing from a subfolder never drops a
+    stray ``.project`` in that subfolder.
+    """
+    return engineering_root(root).exists()
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 

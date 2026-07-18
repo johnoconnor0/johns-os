@@ -24,8 +24,10 @@ def main() -> int:
     args = parser.parse_args()
     root = Path(args.root).resolve() if args.root else Path.cwd().resolve()
     if args.command == "detect":
-        code = run("hooks/scripts/detect-new-env-vars.py", root)
-        code = run("hooks/scripts/suggest-gitignore-updates.py", root) or code
+        # Explicit CLI request: create the repo-root workspace on demand. The same
+        # scripts stay dormant when fired as automatic PostToolUse hooks (no flag).
+        code = run("hooks/scripts/detect-new-env-vars.py", root, "--ensure-workspace")
+        code = run("hooks/scripts/suggest-gitignore-updates.py", root, "--ensure-workspace") or code
         return code
     if args.command == "apply-env":
         return run("hooks/scripts/update-env-example.py", root, "--apply")
