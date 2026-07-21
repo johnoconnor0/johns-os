@@ -534,6 +534,11 @@ class QualityToolTests(unittest.TestCase):
         self.assertGreaterEqual(audit["prompt_case_count"], 17)
 
     def test_cli_uses_target_root_for_workspace_outputs(self) -> None:
+        plugin_workspace = ROOT / ".project" / ".engineering" / "workspace.json"
+        # Sampled before the run: since 0.6.0 the workspace is opt-in, so the
+        # plugin's own is normally absent. The assertion must hold either way,
+        # and must never create it — that is the behaviour 0.6.0 removed.
+        existed = plugin_workspace.exists()
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp)
             proc = subprocess.run(
@@ -544,7 +549,14 @@ class QualityToolTests(unittest.TestCase):
             )
             self.assertIn(".project", proc.stdout)
             self.assertTrue((target / ".project" / ".engineering" / "workspace.json").exists())
-            self.assertFalse((ROOT / ".project" / ".engineering" / "workspace.json").read_text(encoding="utf-8").find(str(target)) >= 0)
+            # Either way, `--root` must leave the plugin's own workspace alone.
+            if existed:
+                self.assertNotIn(str(target), plugin_workspace.read_text(encoding="utf-8"))
+            else:
+                self.assertFalse(
+                    plugin_workspace.exists(),
+                    "--root run created the plugin's own workspace",
+                )
 
     def test_bin_commands_validate_sync_hygiene_and_council(self) -> None:
         validate = subprocess.run(
