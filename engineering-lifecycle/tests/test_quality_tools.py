@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
+import eng_common
 import quality_tools
 
 
@@ -844,6 +845,84 @@ class QualityToolTests(unittest.TestCase):
             proc = self.run_artifact_validator(target, unresolved)
             self.assertNotEqual(proc.returncode, 0)
             self.assertIn("unresolved placeholder", proc.stdout)
+
+
+class BoundedScanTests(unittest.TestCase):
+    """Outside a git repo the file listing must stay bounded.
+
+    Regression cover for a SessionStart hang: `git_files` fell back to an
+    unpruned `rglob("*")` over whatever `repo_root` resolved to, so starting a
+    session in a non-repo directory walked the entire tree beneath it.
+    """
+
+    def make_tree(self, tmp: str) -> Path:
+        root = Path(tmp) / "project"
+        (root / "apps" / "api" / "prisma").mkdir(parents=True)
+        (root / "node_modules" / "pkg").mkdir(parents=True)
+        (root / "__pycache__").mkdir(parents=True)
+        (root / "package.json").write_text("{}", encoding="utf-8")
+        (root / "apps" / "api" / "prisma" / "schema.prisma").write_text("", encoding="utf-8")
+        (root / "node_modules" / "pkg" / "index.js").write_text("", encoding="utf-8")
+        (root / "__pycache__" / "stale.pyc").write_text("", encoding="utf-8")
+        return root
+
+    def test_scan_prunes_dependency_and_cache_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.make_tree(tmp)
+            found = {str(path).replace("\\", "/") for path in eng_common.scan_files(root)}
+            self.assertIn("package.json", found)
+            self.assertIn("apps/api/prisma/schema.prisma", found)
+            self.assertFalse(any("node_modules" in item for item in found))
+            self.assertFalse(any("__pycache__" in item for item in found))
+
+    def test_scan_honours_depth_and_file_caps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "deep"
+            buried = root.joinpath(*[f"d{i}" for i in range(10)])
+            buried.mkdir(parents=True)
+            (root / "top.txt").write_text("", encoding="utf-8")
+            (buried / "buried.txt").write_text("", encoding="utf-8")
+
+            shallow = [str(path) for path in eng_common.scan_files(root, max_depth=3)]
+            self.assertTrue(any("top.txt" in item for item in shallow))
+            self.assertFalse(any("buried.txt" in item for item in shallow))
+
+            self.assertEqual(len(eng_common.scan_files(root, max_files=1)), 1)
+
+    def test_roots_that_are_never_a_project_are_refused(self) -> None:
+        home = Path.home().resolve()
+        self.assertFalse(eng_common.is_scannable_root(home))
+        self.assertFalse(eng_common.is_scannable_root(Path(home.anchor).resolve()))
+        # An agent config tree vendors plugin caches and one clone per
+        # marketplace; scanning it is never useful and is ruinously expensive.
+        self.assertFalse(eng_common.is_scannable_root(home / ".claude"))
+        self.assertFalse(eng_common.is_scannable_root(home / ".claude" / "plugins" / "x"))
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertTrue(eng_common.is_scannable_root(Path(tmp).resolve()))
+
+    def test_git_files_returns_empty_for_refused_root(self) -> None:
+        self.assertEqual(eng_common.git_files(Path.home().resolve()), [])
+
+    def test_detect_stack_reads_markers_without_listing_the_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.make_tree(tmp)
+            (root / "pnpm-lock.yaml").write_text("", encoding="utf-8")
+            (root / "package.json").write_text('{"dependencies": {"react": "18"}}', encoding="utf-8")
+
+            def fail(*_args: object, **_kwargs: object) -> list[Path]:
+                raise AssertionError("detect_stack must not list the tree")
+
+            original = quality_tools.git_files
+            quality_tools.git_files = fail  # type: ignore[assignment]
+            try:
+                stack = quality_tools.detect_stack(root)
+            finally:
+                quality_tools.git_files = original  # type: ignore[assignment]
+
+            self.assertEqual(stack["package_manager"], "pnpm")
+            self.assertIn("React", stack["frameworks"])
+            # Monorepo layout: prisma sits under apps/api, not at the root.
+            self.assertEqual(stack["database"], ["Prisma"])
 
 
 if __name__ == "__main__":

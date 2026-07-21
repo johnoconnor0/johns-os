@@ -13,6 +13,23 @@ from typing import Any
 
 
 WORKSPACE = Path(".project") / ".engineering"
+
+# Directories the fallback scan never descends into. Pruned during traversal —
+# filtering them out of the results afterwards still pays the full walk cost.
+# These are the trees `git ls-files` would omit anyway (VCS internals, vendored
+# dependencies, build output, caches), so pruning keeps the fallback closer to
+# the git path it stands in for.
+SCAN_PRUNE_DIRS = frozenset(
+    {
+        ".git", ".hg", ".svn", ".project",
+        "node_modules", "vendor", "__pycache__", ".venv", "venv", ".tox",
+        ".mypy_cache", ".pytest_cache", ".ruff_cache", ".cache",
+        "dist", "build", "target", "coverage", ".next", ".turbo", ".gradle",
+    }
+)
+SCAN_MAX_FILES = 20_000
+SCAN_MAX_DEPTH = 12
+
 REQUIRED_FRONT_MATTER = [
     "initiative_id",
     "skill",
@@ -98,16 +115,62 @@ def git(args: list[str], cwd: Path | None = None) -> tuple[int, str, str]:
     return proc.returncode, proc.stdout, proc.stderr
 
 
+def is_scannable_root(root: Path) -> bool:
+    """True when `root` plausibly holds a single project's sources.
+
+    ``repo_root`` falls back to the cwd when it finds no ``.git`` or plugin
+    manifest above it, so outside a repo this can be handed a home directory, a
+    filesystem root, or an agent config tree. ``~/.claude`` in particular
+    vendors plugin caches and one git clone per installed marketplace — walking
+    it costs hundreds of thousands of files and yields nothing a stack detector
+    or context pack can use. Refuse those roots instead of scanning them.
+    """
+    if root.parent == root:  # filesystem or drive root
+        return False
+    try:
+        if root == Path.home().resolve():
+            return False
+    except (OSError, RuntimeError):  # home undefined in some sandboxes
+        pass
+    return ".claude" not in root.parts
+
+
+def scan_files(
+    root: Path,
+    max_files: int = SCAN_MAX_FILES,
+    max_depth: int = SCAN_MAX_DEPTH,
+) -> list[Path]:
+    """Bounded, pruned stand-in for ``git ls-files`` when `root` is not a repo.
+
+    Bounded in three independent ways — refused roots, pruned directories, and
+    hard depth/file caps — so a mis-resolved root degrades to a partial listing
+    rather than an unbounded walk. Truncation is silent by design: every caller
+    treats the listing as best-effort evidence, and a hook is not a place to
+    emit diagnostics.
+    """
+    root = root.resolve()
+    if not is_scannable_root(root):
+        return []
+    found: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        relative = Path(dirpath).relative_to(root)
+        if len(relative.parts) >= max_depth:
+            dirnames[:] = []
+        else:
+            dirnames[:] = sorted(name for name in dirnames if name not in SCAN_PRUNE_DIRS)
+        for name in filenames:
+            found.append(relative / name)
+            if len(found) >= max_files:
+                return sorted(found)
+    return sorted(found)
+
+
 def git_files(root: Path | None = None) -> list[Path]:
+    """Files tracked by git under `root`, or a bounded scan when it is not a repo."""
     root = root or repo_root()
     code, out, _ = git(["ls-files"], root)
     if code != 0:
-        ignored = {".git", ".project", "node_modules", "__pycache__"}
-        return sorted(
-            p.relative_to(root)
-            for p in root.rglob("*")
-            if p.is_file() and not any(part in ignored for part in p.relative_to(root).parts)
-        )
+        return scan_files(root)
     return [Path(line) for line in out.splitlines() if line.strip()]
 
 

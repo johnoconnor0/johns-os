@@ -15,6 +15,7 @@ from typing import Any
 
 from eng_common import (
     ENV_VAR_RE,
+    SCAN_PRUNE_DIRS,
     WORKSPACE,
     append_jsonl,
     changed_files,
@@ -252,23 +253,67 @@ def skill_router(prompt: str) -> dict[str, Any]:
     }
 
 
+def has_prisma_schema(root: Path, max_depth: int = 3, max_dirs: int = 2_000) -> bool:
+    """A ``prisma/schema.prisma`` at `root` or in a nearby workspace package.
+
+    Breadth-first and bounded rather than a full listing: the monorepo layout
+    this needs to catch (``apps/api/prisma/schema.prisma``) sits a couple of
+    levels down, so a capped walk finds it without the cost of enumerating the
+    tree — which on a mis-resolved root never terminated in useful time.
+    """
+    frontier = [root]
+    visited = 0
+    for _ in range(max_depth + 1):
+        if not frontier:
+            break
+        nxt: list[Path] = []
+        for directory in frontier:
+            if (directory / "prisma" / "schema.prisma").exists():
+                return True
+            visited += 1
+            if visited >= max_dirs:
+                return False
+            try:
+                nxt.extend(
+                    child
+                    for child in directory.iterdir()
+                    if child.is_dir() and child.name not in SCAN_PRUNE_DIRS
+                )
+            except OSError:  # unreadable directory: keep scanning the rest
+                continue
+        frontier = nxt
+    return False
+
+
 def detect_stack(root: Path) -> dict[str, Any]:
-    files = {str(path).replace("\\", "/") for path in git_files(root)}
+    """Identify the project's stack from the marker files at `root`.
+
+    Every marker below is meaningful only at the repo root, so this stats the
+    fixed set of candidates instead of listing the tree. The listing it replaces
+    was the whole cost of this tool: outside a git repo it degraded to an
+    unbounded filesystem walk that could peg a core indefinitely on SessionStart.
+    Statting also detects a marker that exists but is untracked or ignored,
+    which the previous ``git ls-files`` lookup missed on a fresh checkout.
+    """
+
+    def has(name: str) -> bool:
+        return (root / name).exists()
+
     package_manager = None
-    if "pnpm-lock.yaml" in files or "pnpm-workspace.yaml" in files:
+    if has("pnpm-lock.yaml") or has("pnpm-workspace.yaml"):
         package_manager = "pnpm"
-    elif "yarn.lock" in files:
+    elif has("yarn.lock"):
         package_manager = "yarn"
-    elif "package-lock.json" in files or "package.json" in files:
+    elif has("package-lock.json") or has("package.json"):
         package_manager = "npm"
-    elif "pyproject.toml" in files:
+    elif has("pyproject.toml"):
         package_manager = "python"
     frameworks: list[str] = []
-    if "next.config.js" in files or "next.config.mjs" in files or "next.config.ts" in files:
+    if has("next.config.js") or has("next.config.mjs") or has("next.config.ts"):
         frameworks.append("Next.js")
-    if "vite.config.ts" in files or "vite.config.js" in files:
+    if has("vite.config.ts") or has("vite.config.js"):
         frameworks.append("Vite")
-    if "package.json" in files:
+    if has("package.json"):
         package_json = root / "package.json"
         try:
             data = json.loads(package_json.read_text(encoding="utf-8"))
@@ -282,12 +327,12 @@ def detect_stack(root: Path) -> dict[str, Any]:
             # but let unexpected errors (e.g. bugs) surface instead of hiding.
             pass
     backend = []
-    if "requirements.txt" in files or "pyproject.toml" in files:
+    if has("requirements.txt") or has("pyproject.toml"):
         backend.append("Python")
-    if "go.mod" in files:
+    if has("go.mod"):
         backend.append("Go")
     database = []
-    if any("prisma/schema.prisma" in item for item in files):
+    if has_prisma_schema(root):
         database.append("Prisma")
     test_commands = {}
     if package_manager in {"pnpm", "yarn", "npm"}:
