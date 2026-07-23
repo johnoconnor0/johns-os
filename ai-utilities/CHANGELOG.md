@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Public website metadata and repository-level quality/release documentation.
+
 ## 0.1.0 - 2026-07-12
 
 ### Added

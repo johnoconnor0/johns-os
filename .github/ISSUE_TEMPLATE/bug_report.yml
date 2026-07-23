@@ -1,0 +1,26 @@
+name: Bug report
+description: Report a reproducible problem with a plugin, marketplace entry, validator, or documented workflow.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: input
+    id: plugin
+    attributes:
+      label: Plugin or area
+      description: Name the plugin, marketplace surface, or repository command involved.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Include the command, expected result, actual result, and relevant version.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Remove credentials and sensitive information before posting.
+    validations:
+      required: false

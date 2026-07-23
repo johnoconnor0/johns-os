@@ -6,7 +6,7 @@
     "name": "John O'Connor",
     "email": "john@weblifter.com.au"
   },
-  "homepage": "",
+  "homepage": "https://weblifter.com.au",
   "license": "MIT",
   "keywords": [
     "utilities",
@@ -31,7 +31,7 @@
       "Edit",
       "Bash"
     ],
-    "websiteURL": "",
+    "websiteURL": "https://weblifter.com.au",
     "privacyPolicyURL": "",
     "termsOfServiceURL": "",
     "defaultPrompt": [

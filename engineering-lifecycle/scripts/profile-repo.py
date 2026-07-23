@@ -9,7 +9,6 @@ from pathlib import Path
 
 from eng_common import git, git_files, repo_root, write_json
 
-
 MANIFEST_NAMES = {
     "package.json",
     "pnpm-workspace.yaml",

@@ -23,7 +23,9 @@ def main() -> int:
     artifacts = [str(path) for path in base.rglob("*") if path.suffix.lower() in {".md", ".json"}]
     if not artifacts:
         return 0
-    proc = subprocess.run([sys.executable, str(SCRIPT), *artifacts], cwd=ROOT, text=True, capture_output=True, check=False)
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT), *artifacts], cwd=ROOT, text=True, capture_output=True, check=False
+    )
     if proc.stdout.strip():
         print(proc.stdout.strip())
     if proc.stderr.strip():

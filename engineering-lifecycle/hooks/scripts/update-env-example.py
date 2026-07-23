@@ -20,7 +20,9 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true", help="Actually update .env.example")
     args = parser.parse_args()
     data = json.loads(REPORT.read_text(encoding="utf-8")) if REPORT.exists() and REPORT.stat().st_size else {}
-    additions = [item["recommended_placeholder"] for item in data.get("new_env_vars", []) if not item.get("in_env_example")]
+    additions = [
+        item["recommended_placeholder"] for item in data.get("new_env_vars", []) if not item.get("in_env_example")
+    ]
     if not args.apply:
         print("\n".join(additions) if additions else "no .env.example additions")
         return 0

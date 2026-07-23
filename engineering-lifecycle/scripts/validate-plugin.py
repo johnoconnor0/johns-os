@@ -10,7 +10,6 @@ from pathlib import Path
 
 from eng_common import parse_front_matter, plugin_root
 
-
 REQUIRED_DIRS = ["skills", "agents", "hooks", "scripts", "schemas", "references", "evals"]
 REQUIRED_FILES = [
     ".claude-plugin/plugin.json",
@@ -50,6 +49,9 @@ def validate_hooks(root: Path) -> list[str]:
     except Exception as exc:
         return [f"{path}: invalid JSON: {exc}"]
     errors: list[str] = []
+    unsupported = sorted(set(data) - {"description", "hooks"})
+    for key in unsupported:
+        errors.append(f"{path}: unsupported top-level hook config field: {key}")
     for entries in data.get("hooks", {}).values():
         for entry in entries:
             for hook in entry.get("hooks", []):
@@ -57,10 +59,7 @@ def validate_hooks(root: Path) -> list[str]:
                 if not command:
                     continue
                 plugin_root_match = re.search(r"\$\{CLAUDE_PLUGIN_ROOT\}/([^\"'\s]+)", command)
-                if plugin_root_match:
-                    target = root / plugin_root_match.group(1)
-                else:
-                    target = root / command
+                target = root / plugin_root_match.group(1) if plugin_root_match else root / command
                 if not target.exists():
                     errors.append(f"{path}: hook command missing: {command}")
     return errors

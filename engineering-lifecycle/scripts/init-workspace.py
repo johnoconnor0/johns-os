@@ -8,7 +8,6 @@ from pathlib import Path
 
 from eng_common import WORKSPACE, engineering_root, now_iso, repo_root, write_json
 
-
 DIRS = [
     "profile",
     "lifecycle",

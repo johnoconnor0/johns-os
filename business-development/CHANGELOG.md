@@ -3,6 +3,12 @@
 All notable changes to the Business Development plugin are documented here.
 The format is based on Keep a Changelog, and this project adheres to semantic versioning.
 
+## [Unreleased]
+
+### Added
+
+- Public website metadata and repository-level quality/release documentation.
+
 ## [0.2.0] - 2026-07-10
 
 ### Added

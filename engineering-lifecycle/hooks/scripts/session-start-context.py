@@ -34,9 +34,9 @@ def main() -> int:
             "The plugin is dormant here and will NOT create `.project` automatically.\n\n"
             "Before starting lifecycle work this session, use AskUserQuestion to ask whether to "
             "initialize it:\n"
-            "  - Question: \"Initialize the Engineering Lifecycle workspace (.project/.engineering) "
-            "at the repo root for this project?\"\n"
-            "  - Options: \"Initialize now\" (run the /project-init command) and \"Not now\" "
+            '  - Question: "Initialize the Engineering Lifecycle workspace (.project/.engineering) '
+            'at the repo root for this project?"\n'
+            '  - Options: "Initialize now" (run the /project-init command) and "Not now" '
             "(stay dormant this session).\n\n"
             "Rules:\n"
             "  - Never create `.project` unless the user chooses to initialize.\n"

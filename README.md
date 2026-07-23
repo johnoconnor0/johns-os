@@ -1,90 +1,93 @@
 # johns-os
 
-`johns-os` is a Claude Code plugin marketplace. It indexes installable plugins,
-tracks their metadata, and provides deterministic commands for discovery and
-validation. It also carries parallel Codex marketplace metadata.
+`johns-os` is a public-ready Claude Code and Codex plugin marketplace for practical software delivery, business development, and AI-assisted repository work.
 
-Registered plugins:
+Website: [weblifter.com.au](https://weblifter.com.au)
+Repository: [github.com/johnoconnor0/johns-os](https://github.com/johnoconnor0/johns-os)
 
-- `engineering-lifecycle`: structured product and engineering lifecycle work (skills, agents, lifecycle hooks).
-- `business-development`: interview-first authoring of Service Outline documents from a modular template.
-- `ai-utilities`: utility skills for authoring/vetting Claude Code extensions (`skill-creator`, `skill-review`) and closing the plan → implementation loop (`plan-completion-audit`, `audit-resolver`).
+## Active plugins
 
-## Install (Claude Code)
+- `engineering-lifecycle`: structured discovery, requirements, UX, architecture, implementation, testing, release, and repository-hygiene workflows.
+- `business-development`: interview-first Service Outline generation and updating.
+- `ai-utilities`: Claude Code extension authoring/review and plan-completion auditing utilities.
 
-The authoritative Claude Code marketplace manifest lives at
-`.claude-plugin/marketplace.json`. Add the marketplace and install a plugin:
+Plugin candidates under `_unreleased/` are intentionally excluded from active marketplace metadata until they are reviewed and promoted.
+
+## Installation
+
+### Claude Code
 
 ```text
 /plugin marketplace add johnoconnor0/johns-os
 /plugin install engineering-lifecycle@johns-os
 ```
 
-For local development against a clone, point the marketplace at the path:
+Install `business-development` or `ai-utilities` by substituting the plugin name. For local development:
 
 ```text
 /plugin marketplace add ./johns-os
 ```
 
-Update later with:
+### Codex
 
-```text
-/plugin marketplace update johns-os
-```
+The Codex marketplace manifests are `marketplace.json` and `.agents/plugins/marketplace.json`. Use the marketplace discovery flow supported by your Codex installation against a clone of this repository.
 
-## Marketplace metadata
+## Repository architecture
 
-| File | Consumer |
-|------|----------|
-| `.claude-plugin/marketplace.json` | Claude Code (authoritative) |
-| `marketplace.json`, `.agents/plugins/marketplace.json` | Codex |
-| `marketplace/catalog.json`, `marketplace/plugins/` | `scripts/johns-os-marketplace.py` (discovery/validation) |
+| Surface | Location | Role |
+| --- | --- | --- |
+| Claude Code marketplace | `.claude-plugin/marketplace.json` | Authoritative Claude marketplace metadata. |
+| Codex marketplace | `marketplace.json`, `.agents/plugins/marketplace.json` | Codex discovery metadata. |
+| Local catalog | `marketplace/catalog.json`, `marketplace/plugins/` | Deterministic repository discovery and validation. |
+| Active plugins | `engineering-lifecycle/`, `business-development/`, `ai-utilities/` | Self-contained plugin source and manifests. |
+| Public docs | `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md` | Contribution, safety, and support guidance. |
+| Generated lifecycle state | `.project/` | Local-only state; ignored and not required for installation. |
 
-## Commands
+## Development setup
 
-List marketplace plugins:
-
-```powershell
-python scripts/johns-os-marketplace.py list
-```
-
-Search plugins:
+Requires Python 3.12 or newer and Git.
 
 ```powershell
-python scripts/johns-os-marketplace.py search lifecycle
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-dev.txt
+pre-commit install --install-hooks
 ```
 
-Show one plugin:
+On macOS/Linux, activate the environment with `source .venv/bin/activate`.
+
+## Quality checks
+
+Run the complete deterministic suite from the repository root:
 
 ```powershell
-python scripts/johns-os-marketplace.py show engineering-lifecycle
+pre-commit run --all-files
+python scripts/validate-repo.py
 ```
 
-Validate marketplace records and local plugin manifests:
+Individual checks:
 
 ```powershell
+ruff check .
+ruff format --check .
+yamllint .
 python scripts/johns-os-marketplace.py validate
+python engineering-lifecycle/bin/eng-life validate
+python -m unittest discover -s tests
+python -m unittest discover -s engineering-lifecycle/tests
+python -m compileall -q .
 ```
 
-## Layout
+The deterministic suite does not require API keys or external services. Optional live council adapters are configured through local environment variables described in `.env.example`; never commit real values.
 
-```text
-.claude-plugin/
-  marketplace.json          # Claude Code marketplace manifest (authoritative)
-marketplace.json            # Codex marketplace manifest
-marketplace/
-  catalog.json
-  plugins/
-    engineering-lifecycle.json
-  schemas/
-    catalog.schema.json
-    plugin.schema.json
-.agents/
-  plugins/
-    marketplace.json        # Codex marketplace manifest
-scripts/
-  johns-os-marketplace.py
-engineering-lifecycle/
-  .claude-plugin/plugin.json
-  .codex-plugin/plugin.json
-```
+## Documentation and support
+
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Support](SUPPORT.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Changelog](CHANGELOG.md)
+
+## Licence
+
+This repository is released under the MIT licence. See [LICENSE](LICENSE).

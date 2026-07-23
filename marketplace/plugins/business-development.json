@@ -5,6 +5,7 @@
   "status": "local",
   "category": "business",
   "version": "0.2.0",
+  "homepage": "https://weblifter.com.au",
   "path": "business-development",
   "manifest": "business-development/.codex-plugin/plugin.json",
   "source": {

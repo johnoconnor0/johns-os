@@ -7,7 +7,7 @@ import argparse
 import html
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from eng_common import engineering_root, now_iso, parse_front_matter, read_json, repo_root, write_json, write_text
@@ -76,7 +76,7 @@ def artifact_record(path: Path, root: Path) -> dict:
         "freshness": freshness(stat.st_mtime),
         "skill": None,
         "initiative_id": None,
-        "updated_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).replace(microsecond=0).isoformat(),
+        "updated_at": datetime.fromtimestamp(stat.st_mtime, UTC).replace(microsecond=0).isoformat(),
     }
     if path.suffix.lower() == ".md":
         fm, _ = parse_front_matter(path.read_text(encoding="utf-8"))
@@ -145,7 +145,10 @@ def collect_ledger(root: Path) -> dict:
 def dashboard_data(ledger: dict) -> dict:
     missing = []
     for required in ["profile", "lifecycle", "hygiene"]:
-        if not any(f"/{required}/" in item["path"] or item["path"].endswith(f"/{required}.json") for item in ledger["artifacts"]):
+        if not any(
+            f"/{required}/" in item["path"] or item["path"].endswith(f"/{required}.json")
+            for item in ledger["artifacts"]
+        ):
             missing.append(required)
     hygiene = ledger.get("hygiene") or {}
     risks = hygiene.get("risks", []) if isinstance(hygiene, dict) else []
@@ -157,7 +160,9 @@ def dashboard_data(ledger: dict) -> dict:
             "status": hygiene.get("status") if isinstance(hygiene, dict) else None,
             "risk_count": len(risks),
             "new_env_vars": len(hygiene.get("new_env_vars", []) or []) if isinstance(hygiene, dict) else 0,
-            "gitignore_candidates": len(hygiene.get("gitignore_candidates", []) or []) if isinstance(hygiene, dict) else 0,
+            "gitignore_candidates": len(hygiene.get("gitignore_candidates", []) or [])
+            if isinstance(hygiene, dict)
+            else 0,
         },
         "missing_artifact_groups": missing,
         "open_action_items": [item for item in ledger["action_items"] if item.get("status") != "done"],
@@ -169,11 +174,27 @@ def dashboard_data(ledger: dict) -> dict:
 
 # Map a status keyword to a visual tone (CSS badge class suffix).
 _STATUS_TONE = {
-    "valid": "ok", "current": "ok", "done": "ok", "complete": "ok", "completed": "ok", "approved": "ok",
-    "invalid": "bad", "error": "bad", "failed": "bad", "blocked": "bad",
-    "stale": "warn", "warning": "warn", "pending": "warn",
-    "draft": "info", "in-progress": "info", "in_progress": "info", "council": "info", "review": "info",
-    "generated": "muted", "log": "muted", "unknown": "muted",
+    "valid": "ok",
+    "current": "ok",
+    "done": "ok",
+    "complete": "ok",
+    "completed": "ok",
+    "approved": "ok",
+    "invalid": "bad",
+    "error": "bad",
+    "failed": "bad",
+    "blocked": "bad",
+    "stale": "warn",
+    "warning": "warn",
+    "pending": "warn",
+    "draft": "info",
+    "in-progress": "info",
+    "in_progress": "info",
+    "council": "info",
+    "review": "info",
+    "generated": "muted",
+    "log": "muted",
+    "unknown": "muted",
 }
 
 # Guidance shown next to each missing artifact group.
@@ -192,13 +213,20 @@ def _rel_link(path: str) -> str:
     """Convert a workspace-root-relative path to one relative to the dashboards/ dir."""
     p = str(path).replace("\\", "/")
     prefix = ".project/.engineering/"
-    return "../" + p[len(prefix):] if p.startswith(prefix) else p
+    return "../" + p[len(prefix) :] if p.startswith(prefix) else p
 
 
 def _chip(label, value, tone: str = "muted") -> str:
     e = html.escape
-    return ('<div class="chip chip-' + tone + '"><div class="chip-val">' + e(str(value))
-            + '</div><div class="chip-lbl">' + e(str(label)) + '</div></div>')
+    return (
+        '<div class="chip chip-'
+        + tone
+        + '"><div class="chip-val">'
+        + e(str(value))
+        + '</div><div class="chip-lbl">'
+        + e(str(label))
+        + "</div></div>"
+    )
 
 
 def _risk_item(risk) -> str:
@@ -209,7 +237,7 @@ def _risk_item(risk) -> str:
         if not title:
             title = json.dumps(risk, sort_keys=True)
         tone = {"high": "bad", "critical": "bad", "medium": "warn", "low": "info"}.get(sev.lower(), "muted")
-        badge = ('<span class="badge badge-' + tone + '">' + e(sev) + '</span> ') if sev else ""
+        badge = ('<span class="badge badge-' + tone + '">' + e(sev) + "</span> ") if sev else ""
         return "<li>" + badge + e(title) + "</li>"
     return "<li>" + e(str(risk)) + "</li>"
 
@@ -264,7 +292,15 @@ def _artifact_row(item) -> str:
     updated = str(item.get("updated_at", ""))
     fresh_tone = "warn" if fresh == "stale" else "muted"
     return (
-        '<tr data-path="' + e(path) + '" data-kind="' + e(kind) + '" data-status="' + e(status) + '" data-fresh="' + e(fresh) + '">'
+        '<tr data-path="'
+        + e(path)
+        + '" data-kind="'
+        + e(kind)
+        + '" data-status="'
+        + e(status)
+        + '" data-fresh="'
+        + e(fresh)
+        + '">'
         '<td><a href="' + e(_rel_link(path)) + '"><code>' + e(path) + "</code></a></td>"
         "<td>" + e(kind) + "</td>"
         '<td><span class="badge badge-' + _tone(status) + '">' + e(status) + "</span></td>"
@@ -374,24 +410,34 @@ def render_dashboard(data: dict) -> str:
     statuses = sorted({str(a.get("status", "unknown")) for a in arts})
     kinds = sorted({str(a.get("kind", "")) for a in arts if a.get("kind")})
 
-    chips = "".join([
-        _chip("Artifacts", summary.get("artifact_count", len(arts))),
-        _chip("Open actions", summary.get("open_action_item_count", len(actions)), "warn" if actions else "muted"),
-        _chip("Human tasks", summary.get("open_human_task_count", len(human)), "warn" if human else "muted"),
-        _chip("Council runs", summary.get("council_run_count", len(councils))),
-        _chip("Risks", len(risks), "bad" if risks else "muted"),
-        _chip("Missing groups", len(missing), "warn" if missing else "muted"),
-        _chip("Stale", stale_count, "warn" if stale_count else "muted"),
-    ])
+    chips = "".join(
+        [
+            _chip("Artifacts", summary.get("artifact_count", len(arts))),
+            _chip("Open actions", summary.get("open_action_item_count", len(actions)), "warn" if actions else "muted"),
+            _chip("Human tasks", summary.get("open_human_task_count", len(human)), "warn" if human else "muted"),
+            _chip("Council runs", summary.get("council_run_count", len(councils))),
+            _chip("Risks", len(risks), "bad" if risks else "muted"),
+            _chip("Missing groups", len(missing), "warn" if missing else "muted"),
+            _chip("Stale", stale_count, "warn" if stale_count else "muted"),
+        ]
+    )
     risks_html = "".join(_risk_item(r) for r in risks) or '<li class="empty">No risks recorded.</li>'
-    missing_html = "".join(_missing_item(g) for g in missing) or '<li class="empty">All expected artifact groups present.</li>'
+    missing_html = (
+        "".join(_missing_item(g) for g in missing) or '<li class="empty">All expected artifact groups present.</li>'
+    )
     actions_html = "".join(_action_item(a) for a in actions) or '<li class="empty">No open action items.</li>'
     human_html = "".join(_human_task_item(h) for h in human) or '<li class="empty">No open human tasks.</li>'
     council_html = "".join(_council_item(c) for c in councils) or '<li class="empty">No council runs.</li>'
     rows = "".join(_artifact_row(a) for a in arts) or '<tr><td colspan="7" class="empty">No artifacts.</td></tr>'
-    status_filters = "".join('<button class="filter" data-dim="status" data-val="' + e(s) + '">' + e(s) + "</button>" for s in statuses)
-    kind_filters = "".join('<button class="filter" data-dim="kind" data-val="' + e(k) + '">' + e(k) + "</button>" for k in kinds)
-    stale_badge = ' &middot; <span class="badge badge-warn">' + str(stale_count) + " stale</span>" if stale_count else ""
+    status_filters = "".join(
+        '<button class="filter" data-dim="status" data-val="' + e(s) + '">' + e(s) + "</button>" for s in statuses
+    )
+    kind_filters = "".join(
+        '<button class="filter" data-dim="kind" data-val="' + e(k) + '">' + e(k) + "</button>" for k in kinds
+    )
+    stale_badge = (
+        ' &middot; <span class="badge badge-warn">' + str(stale_count) + " stale</span>" if stale_count else ""
+    )
 
     return (
         '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
@@ -423,7 +469,12 @@ def sync(root: Path) -> dict:
     log_path = base / "ledger" / "ledger-log.jsonl"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a", encoding="utf-8", newline="\n") as f:
-        f.write(json.dumps({"event": "ledger_synced", "at": ledger["generated_at"], "summary": ledger["summary"]}, sort_keys=True) + "\n")
+        f.write(
+            json.dumps(
+                {"event": "ledger_synced", "at": ledger["generated_at"], "summary": ledger["summary"]}, sort_keys=True
+            )
+            + "\n"
+        )
     data = dashboard_data(ledger)
     write_json(base / "dashboards" / "dashboard-data.json", data)
     write_text(base / "dashboards" / "project-dashboard.html", render_dashboard(data))

@@ -1,5 +1,8 @@
 # Business Development
 
+Website: https://weblifter.com.au
+Repository: https://github.com/johnoconnor0/johns-os
+
 A Claude Code + Codex plugin for authoring professional **Service Outline** documents from a
 modular, service-type-aware template. Built to grow — the first skill is `service-outline`;
 proposals, statements of work, and case studies are candidate future skills.

@@ -6,10 +6,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-
 
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG = ROOT / "marketplace" / "catalog.json"
@@ -59,7 +58,7 @@ def plugin_summary(plugin: dict[str, Any]) -> dict[str, Any]:
         "status": plugin.get("status"),
         "category": plugin.get("category"),
         "risk": plugin.get("risk"),
-        "path": plugin.get("path")
+        "path": plugin.get("path"),
     }
 
 
@@ -71,7 +70,7 @@ def matches(plugin: dict[str, Any], query: str) -> bool:
             str(plugin.get("summary", "")),
             str(plugin.get("category", "")),
             " ".join(plugin.get("tags", [])),
-            " ".join(plugin.get("capabilities", []))
+            " ".join(plugin.get("capabilities", [])),
         ]
     ).lower()
     return query.lower() in haystack
@@ -117,7 +116,22 @@ def validate_catalog_shape(data: dict[str, Any]) -> list[str]:
 
 
 def validate_plugin(plugin: dict[str, Any], record_path: Path) -> list[str]:
-    required = ["id", "name", "summary", "status", "category", "version", "path", "manifest", "source", "capabilities", "tags", "risk", "install", "validation"]
+    required = [
+        "id",
+        "name",
+        "summary",
+        "status",
+        "category",
+        "version",
+        "path",
+        "manifest",
+        "source",
+        "capabilities",
+        "tags",
+        "risk",
+        "install",
+        "validation",
+    ]
     errors = require_keys(record_path, plugin, required)
     plugin_path = ROOT / str(plugin.get("path", ""))
     manifest_path = ROOT / str(plugin.get("manifest", ""))
@@ -131,15 +145,68 @@ def validate_plugin(plugin: dict[str, Any], record_path: Path) -> list[str]:
             errors.append(f"{record_path}: manifest name does not match plugin id")
         if manifest.get("version") != plugin.get("version"):
             errors.append(f"{record_path}: manifest version does not match plugin version")
+        if manifest.get("homepage") != plugin.get("homepage"):
+            errors.append(f"{record_path}: manifest homepage does not match plugin homepage")
     for key in ["capabilities", "tags"]:
         if not isinstance(plugin.get(key), list):
             errors.append(f"{record_path}: {key} must be an array")
     return errors
 
 
+def validate_platform_surfaces(catalog_data: dict[str, Any]) -> list[str]:
+    """Ensure platform marketplace manifests expose the same active plugins."""
+
+    errors: list[str] = []
+    expected = {
+        entry.get("id")
+        for entry in catalog_data.get("plugins", [])
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+    }
+
+    for path in [ROOT / "marketplace.json", ROOT / ".agents" / "plugins" / "marketplace.json"]:
+        data = load_json(path)
+        plugins = data.get("plugins", [])
+        names = {entry.get("name") for entry in plugins if isinstance(entry, dict)}
+        if names != expected:
+            errors.append(f"{path}: plugin names do not match local catalog")
+        for entry in plugins:
+            if not isinstance(entry, dict):
+                continue
+            source = entry.get("source")
+            relative_path = source.get("path") if isinstance(source, dict) else None
+            if not isinstance(relative_path, str) or not (ROOT / relative_path).is_dir():
+                errors.append(f"{path}: plugin source path is missing for {entry.get('name')}")
+
+    claude_path = ROOT / ".claude-plugin" / "marketplace.json"
+    claude_data = load_json(claude_path)
+    claude_plugins = claude_data.get("plugins", [])
+    claude_names = {entry.get("name") for entry in claude_plugins if isinstance(entry, dict)}
+    if claude_names != expected:
+        errors.append(f"{claude_path}: plugin names do not match local catalog")
+    for entry in claude_plugins:
+        if not isinstance(entry, dict):
+            continue
+        plugin_id = entry.get("name")
+        source = entry.get("source")
+        source_path = ROOT / source if isinstance(source, str) else None
+        if source_path is None or not source_path.is_dir():
+            errors.append(f"{claude_path}: plugin source path is missing for {plugin_id}")
+            continue
+        manifest_path = source_path / ".claude-plugin" / "plugin.json"
+        if not manifest_path.is_file():
+            errors.append(f"{claude_path}: Claude manifest is missing for {plugin_id}")
+            continue
+        manifest = load_json(manifest_path)
+        for key in ["version", "homepage"]:
+            if entry.get(key) != manifest.get(key):
+                errors.append(f"{claude_path}: {key} does not match manifest for {plugin_id}")
+    return errors
+
+
 def command_validate(_: argparse.Namespace) -> int:
     data = catalog()
     errors = validate_catalog_shape(data)
+    errors.extend(validate_platform_surfaces(data))
     for entry in data.get("plugins", []):
         if not isinstance(entry, dict) or not isinstance(entry.get("record"), str):
             continue
@@ -183,17 +250,17 @@ def command_bump_version(args: argparse.Namespace) -> int:
     record = load_json(ROOT / record_rel)
     plugin_path = str(record.get("path", ""))
 
-    _set_version(ROOT / record_rel, version, errors)                                # catalog record
+    _set_version(ROOT / record_rel, version, errors)  # catalog record
     _set_version(ROOT / plugin_path / ".claude-plugin" / "plugin.json", version, errors)
     _set_version(ROOT / plugin_path / ".codex-plugin" / "plugin.json", version, errors)
-    mp = ROOT / ".claude-plugin" / "marketplace.json"                               # Claude marketplace entry
+    mp = ROOT / ".claude-plugin" / "marketplace.json"  # Claude marketplace entry
     if mp.is_file():
         mp_data = load_json(mp)
         for entry in mp_data.get("plugins", []):
             if entry.get("name") == plugin_id:
                 entry["version"] = version
         _write_json(mp, mp_data)
-    data["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00Z")  # refresh timestamp
+    data["updated_at"] = datetime.now(UTC).strftime("%Y-%m-%dT00:00:00Z")  # refresh timestamp
     _write_json(CATALOG, data)
 
     if errors:

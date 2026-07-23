@@ -1,5 +1,8 @@
 # AI Utilities
 
+Website: https://weblifter.com.au
+Repository: https://github.com/johnoconnor0/johns-os
+
 A Claude Code + Codex plugin bundling utility skills for **building and vetting Claude Code
 extensions** and for **closing the plan → implementation loop**. It consolidates two former
 plugins (`skill-ops` and `plan-review`) into a single `ai-utilities` namespace.

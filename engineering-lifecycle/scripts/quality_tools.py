@@ -8,21 +8,17 @@ import hashlib
 import json
 import os
 import re
-import shutil
-import subprocess
 from pathlib import Path
 from typing import Any
 
 from eng_common import (
     ENV_VAR_RE,
     SCAN_PRUNE_DIRS,
-    WORKSPACE,
     append_jsonl,
     changed_files,
     classify_file_path,
     emit_json,
     engineering_root,
-    git,
     git_files,
     hook_additional_context,
     hook_output,
@@ -42,19 +38,81 @@ from eng_common import (
     write_text,
 )
 
-
 INTENT_KEYWORDS = {
-    "profile": ["profile", "understand this repo", "product system", "repo profile", "current stack", "engineering maturity"],
+    "profile": [
+        "profile",
+        "understand this repo",
+        "product system",
+        "repo profile",
+        "current stack",
+        "engineering maturity",
+    ],
     "lifecycle": ["lifecycle", "what should happen next", "missing artifacts", "current stage", "next skill"],
     "system-map": ["system map", "map the system", "external systems", "data flow", "failure points", "component map"],
-    "api-contract": ["api contract", "request shape", "response shape", "webhook", "event contract", "pagination", "rate limit"],
-    "dashboard": ["dashboard", "status view", "project status", "initiative summary", "engineering state", "action items", "recent artifacts", "release readiness"],
-    "design-system": ["design system", "ui kit", "component system", "design tokens", "tokens", "colours", "colors", "typography", "spacing", "component standards", "accessibility rules"],
-    "ui-prototype": ["ui prototype", "clickable prototype", "prototype", "mvp shell", "app shell", "mock data", "demo-ready", "frontend proof-of-concept"],
+    "api-contract": [
+        "api contract",
+        "request shape",
+        "response shape",
+        "webhook",
+        "event contract",
+        "pagination",
+        "rate limit",
+    ],
+    "dashboard": [
+        "dashboard",
+        "status view",
+        "project status",
+        "initiative summary",
+        "engineering state",
+        "action items",
+        "recent artifacts",
+        "release readiness",
+    ],
+    "design-system": [
+        "design system",
+        "ui kit",
+        "component system",
+        "design tokens",
+        "tokens",
+        "colours",
+        "colors",
+        "typography",
+        "spacing",
+        "component standards",
+        "accessibility rules",
+    ],
+    "ui-prototype": [
+        "ui prototype",
+        "clickable prototype",
+        "prototype",
+        "mvp shell",
+        "app shell",
+        "mock data",
+        "demo-ready",
+        "frontend proof-of-concept",
+    ],
     "review": ["review", "audit", "find bugs", "security scan"],
     "testing": ["test", "failing", "coverage", "qa", "regression"],
-    "implementation-plan": ["implementation plan", "break this", "approved design", "sequence", "sequenced", "slices", "dependencies", "rollback"],
-    "implementation": ["implement", "safe implementation", "verified slices", "fix", "build", "add", "change", "refactor"],
+    "implementation-plan": [
+        "implementation plan",
+        "break this",
+        "approved design",
+        "sequence",
+        "sequenced",
+        "slices",
+        "dependencies",
+        "rollback",
+    ],
+    "implementation": [
+        "implement",
+        "safe implementation",
+        "verified slices",
+        "fix",
+        "build",
+        "add",
+        "change",
+        "refactor",
+    ],
     "architecture": ["architecture", "system map", "boundary", "adr", "design"],
     "data-model": ["schema", "database", "entity", "migration", "model"],
     "ux-design": ["ux", "screen", "flow", "wireframe", "user journey"],
@@ -63,7 +121,18 @@ INTENT_KEYWORDS = {
     "repo-hygiene": ["hygiene", "gitignore", "env.example", "cleanup"],
     "council-decision": ["council", "tradeoff", "build vs buy", "high-stakes"],
     "linear-sync": ["linear", "sync tasks", "push tasks to linear", "task tracker", "reconcile issues"],
-    "discovery": ["discover", "discovery", "clarify", "product idea", "assumptions", "open questions", "mvp boundary", "explore", "research", "brief"],
+    "discovery": [
+        "discover",
+        "discovery",
+        "clarify",
+        "product idea",
+        "assumptions",
+        "open questions",
+        "mvp boundary",
+        "explore",
+        "research",
+        "brief",
+    ],
 }
 
 SKILL_BY_INTENT = {
@@ -168,7 +237,11 @@ def file_from_payload(payload: dict[str, Any]) -> str:
 def text_from_payload(payload: dict[str, Any]) -> str:
     tool_input = payload.get("tool_input") or payload.get("input") or payload.get("toolInput") or {}
     if isinstance(tool_input, dict):
-        values = [str(tool_input.get(key, "")) for key in ("content", "new_string", "old_string", "text") if tool_input.get(key)]
+        values = [
+            str(tool_input.get(key, ""))
+            for key in ("content", "new_string", "old_string", "text")
+            if tool_input.get(key)
+        ]
         return "\n".join(values)
     return ""
 
@@ -191,14 +264,26 @@ def classify_user_intent(prompt: str) -> dict[str, Any]:
 
 def prompt_quality_score(prompt: str) -> dict[str, Any]:
     checks = {
-        "clear objective": bool(re.search(r"\b(add|build|fix|review|plan|create|implement|validate|check)\b", prompt, re.I)),
-        "target repo/module/file": bool(re.search(r"([A-Za-z]:\\|/|\.md|\.py|\.ts|repo|module|file|folder|directory)", prompt, re.I)),
-        "expected output": bool(re.search(r"\b(plan|patch|summary|report|script|tests?|implementation)\b", prompt, re.I)),
+        "clear objective": bool(
+            re.search(r"\b(add|build|fix|review|plan|create|implement|validate|check)\b", prompt, re.I)
+        ),
+        "target repo/module/file": bool(
+            re.search(r"([A-Za-z]:\\|/|\.md|\.py|\.ts|repo|module|file|folder|directory)", prompt, re.I)
+        ),
+        "expected output": bool(
+            re.search(r"\b(plan|patch|summary|report|script|tests?|implementation)\b", prompt, re.I)
+        ),
         "constraints": bool(re.search(r"\b(do not|must|only|preserve|avoid|without|constraint)\b", prompt, re.I)),
-        "success criteria": bool(re.search(r"\b(done|complete|success|acceptance|criteria|passes|working)\b", prompt, re.I)),
-        "whether edits are allowed": bool(re.search(r"\b(implement|edit|change|write|patch|plan only|review only)\b", prompt, re.I)),
+        "success criteria": bool(
+            re.search(r"\b(done|complete|success|acceptance|criteria|passes|working)\b", prompt, re.I)
+        ),
+        "whether edits are allowed": bool(
+            re.search(r"\b(implement|edit|change|write|patch|plan only|review only)\b", prompt, re.I)
+        ),
         "whether tests should be run": bool(re.search(r"\b(test|validate|check|verify|run)\b", prompt, re.I)),
-        "whether external systems are involved": bool(re.search(r"\b(api|deploy|prod|github|slack|stripe|supabase|vercel|external)\b", prompt, re.I)),
+        "whether external systems are involved": bool(
+            re.search(r"\b(api|deploy|prod|github|slack|stripe|supabase|vercel|external)\b", prompt, re.I)
+        ),
     }
     present = sum(1 for value in checks.values() if value)
     score = round(present / len(checks) * 100)
@@ -219,7 +304,11 @@ def ambiguity_patterns(prompt: str) -> dict[str, Any]:
     question = None
     if matches:
         kind = matches[0]["ambiguity_type"]
-        question = "Should I scope this to the whole repo or a specific feature/module?" if kind == "scope" else "What exact outcome should be considered complete?"
+        question = (
+            "Should I scope this to the whole repo or a specific feature/module?"
+            if kind == "scope"
+            else "What exact outcome should be considered complete?"
+        )
     return {"ambiguous": bool(matches), "matches": matches, "suggested_question": question}
 
 
@@ -229,14 +318,31 @@ def clarification_gate(prompt: str) -> dict[str, Any]:
     ambiguity = ambiguity_patterns(prompt)
     questions: list[dict[str, Any]] = []
     if intent["intent"] == "unknown":
-        questions.append({"question": "What lifecycle mode should this use?", "options": ["Plan only", "Implement with edits", "Review existing code only"]})
+        questions.append(
+            {
+                "question": "What lifecycle mode should this use?",
+                "options": ["Plan only", "Implement with edits", "Review existing code only"],
+            }
+        )
     if quality["score"] < 60:
-        questions.append({"question": "What outcome should count as complete?", "options": ["Working code and validation", "A decision-ready plan", "A review report"]})
+        questions.append(
+            {
+                "question": "What outcome should count as complete?",
+                "options": ["Working code and validation", "A decision-ready plan", "A review report"],
+            }
+        )
     if ambiguity["suggested_question"]:
-        questions.append({"question": ambiguity["suggested_question"], "options": ["Specific target", "Whole repo", "Decide from inspected context"]})
+        questions.append(
+            {
+                "question": ambiguity["suggested_question"],
+                "options": ["Specific target", "Whole repo", "Decide from inspected context"],
+            }
+        )
     return {
         "requires_clarification": bool(questions),
-        "reason": "Prompt is ambiguous or missing high-impact execution details." if questions else "Prompt has enough detail to start.",
+        "reason": "Prompt is ambiguous or missing high-impact execution details."
+        if questions
+        else "Prompt has enough detail to start.",
         "questions": questions,
     }
 
@@ -275,9 +381,7 @@ def has_prisma_schema(root: Path, max_depth: int = 3, max_dirs: int = 2_000) -> 
                 return False
             try:
                 nxt.extend(
-                    child
-                    for child in directory.iterdir()
-                    if child.is_dir() and child.name not in SCAN_PRUNE_DIRS
+                    child for child in directory.iterdir() if child.is_dir() and child.name not in SCAN_PRUNE_DIRS
                 )
             except OSError:  # unreadable directory: keep scanning the rest
                 continue
@@ -362,14 +466,27 @@ def repo_context_pack(root: Path) -> dict[str, Any]:
         "generated_at": now_iso(),
         "repo_root": str(root),
         "stack": stack,
-        "manifests": [relpath(root / p, root) for p in files if p.name in {"package.json", "pyproject.toml", "go.mod", "Cargo.toml", "Dockerfile"}],
+        "manifests": [
+            relpath(root / p, root)
+            for p in files
+            if p.name in {"package.json", "pyproject.toml", "go.mod", "Cargo.toml", "Dockerfile"}
+        ],
         "docs": [relpath(root / p, root) for p in files if p.suffix.lower() in {".md", ".mdx"}][:50],
         "tests": [relpath(root / p, root) for p in files if classify_file_path(p) == "test"][:50],
         "ci": [relpath(root / p, root) for p in files if ".github/workflows" in str(p).replace("\\", "/")],
     }
     base = engineering_root(root) / "context"
     write_json(base / "repo-context.json", profile)
-    md = ["# Repo Context", "", f"Generated: {profile['generated_at']}", "", "## Stack", json.dumps(stack, indent=2), "", "## Manifests"]
+    md = [
+        "# Repo Context",
+        "",
+        f"Generated: {profile['generated_at']}",
+        "",
+        "## Stack",
+        json.dumps(stack, indent=2),
+        "",
+        "## Manifests",
+    ]
     md.extend(f"- `{item}`" for item in profile["manifests"])
     write_text(base / "repo-context.md", "\n".join(md) + "\n")
     return profile
@@ -378,7 +495,12 @@ def repo_context_pack(root: Path) -> dict[str, Any]:
 def load_project_memory(root: Path) -> dict[str, Any]:
     base = engineering_root(root)
     paths = ["profile", "decisions", "ledger"]
-    loaded = {name: [relpath(path, root) for path in sorted((base / name).rglob("*")) if path.is_file()] if (base / name).exists() else [] for name in paths}
+    loaded = {
+        name: [relpath(path, root) for path in sorted((base / name).rglob("*")) if path.is_file()]
+        if (base / name).exists()
+        else []
+        for name in paths
+    }
     loaded["loaded_at"] = now_iso()
     return loaded
 
@@ -387,8 +509,14 @@ def active_initiative_resolver(root: Path, prompt: str) -> dict[str, Any]:
     initiatives = engineering_root(root) / "initiatives"
     candidates = [p.name for p in initiatives.iterdir() if p.is_dir()] if initiatives.exists() else []
     text = prompt.lower()
-    chosen = next((item for item in candidates if item.lower() in text), candidates[0] if len(candidates) == 1 else None)
-    return {"initiative_id": chosen, "confidence": "high" if chosen and chosen.lower() in text else "medium" if chosen else "low", "candidates": candidates}
+    chosen = next(
+        (item for item in candidates if item.lower() in text), candidates[0] if len(candidates) == 1 else None
+    )
+    return {
+        "initiative_id": chosen,
+        "confidence": "high" if chosen and chosen.lower() in text else "medium" if chosen else "low",
+        "candidates": candidates,
+    }
 
 
 def classify_changed(root: Path, explicit: list[str] | None = None) -> dict[str, Any]:
@@ -469,7 +597,11 @@ def gitignore_sync(root: Path, apply: bool = False) -> dict[str, Any]:
 
 def schema_validator(root: Path) -> dict[str, Any]:
     errors: list[str] = []
-    for path in sorted((root / "schemas").glob("*.json")) + sorted((engineering_root(root)).rglob("*.json")) + sorted((root / "evals").rglob("*.json")):
+    for path in (
+        sorted((root / "schemas").glob("*.json"))
+        + sorted((engineering_root(root)).rglob("*.json"))
+        + sorted((root / "evals").rglob("*.json"))
+    ):
         try:
             json.loads(path.read_text(encoding="utf-8"))
         except Exception as exc:
@@ -512,7 +644,10 @@ def test_command_resolver(root: Path, files: list[str] | None = None) -> dict[st
         commands.extend(["python -m pytest", "python -m compileall ."])
     else:
         commands.append("python scripts/validate-plugin.py")
-    return {"recommended_commands": commands, "reason": "Commands selected from detected stack and changed-file categories."}
+    return {
+        "recommended_commands": commands,
+        "reason": "Commands selected from detected stack and changed-file categories.",
+    }
 
 
 def test_result_parser(text: str, command: str = "") -> dict[str, Any]:
@@ -525,10 +660,25 @@ def test_result_parser(text: str, command: str = "") -> dict[str, Any]:
 
 
 def plan_quality_gate(text: str) -> dict[str, Any]:
-    required = ["objective", "assumptions", "affected files", "risks", "rollback", "tests", "acceptance", "security", "migration", "docs"]
+    required = [
+        "objective",
+        "assumptions",
+        "affected files",
+        "risks",
+        "rollback",
+        "tests",
+        "acceptance",
+        "security",
+        "migration",
+        "docs",
+    ]
     lower = text.lower()
     missing = [item for item in required if item not in lower]
-    return {"complete": not missing, "missing": missing, "score": round((len(required) - len(missing)) / len(required) * 100)}
+    return {
+        "complete": not missing,
+        "missing": missing,
+        "score": round((len(required) - len(missing)) / len(required) * 100),
+    }
 
 
 def completion_contract_check(root: Path, text: str = "") -> dict[str, Any]:
@@ -563,7 +713,11 @@ def definition_of_done_check(root: Path, task_type: str, final_text: str = "") -
 
 
 def final_answer_structure_check(task_type: str, text: str) -> dict[str, Any]:
-    required = ["summary", "files", "validation", "risks"] if task_type == "implementation" else ["recommendation", "rationale", "trade", "structure", "sequence"]
+    required = (
+        ["summary", "files", "validation", "risks"]
+        if task_type == "implementation"
+        else ["recommendation", "rationale", "trade", "structure", "sequence"]
+    )
     lower = text.lower()
     missing = [item for item in required if item not in lower]
     return {"valid": not missing, "missing": missing}
@@ -587,23 +741,41 @@ def artifact_completeness_score(root: Path, files: list[str]) -> dict[str, Any]:
         if re.search(r"TODO|TBD|<replace-me>", text, re.I):
             missing.append("resolved placeholders")
         score = max(0, 100 - len(missing) * 30)
-        results.append({"artifact": relpath(path, root), "score": score, "missing_sections": missing, "recommendation": "Revise before marking complete." if missing else "Ready."})
+        results.append(
+            {
+                "artifact": relpath(path, root),
+                "score": score,
+                "missing_sections": missing,
+                "recommendation": "Revise before marking complete." if missing else "Ready.",
+            }
+        )
     result = {"artifacts": results}
     write_json(engineering_root(root) / "reports" / "validation" / "artifact-completeness-score.json", result)
     return result
 
 
 def artifact_consistency_check(root: Path) -> dict[str, Any]:
-    artifacts = [relpath(p, root) for p in engineering_root(root).rglob("*") if p.suffix in {".md", ".json", ".yaml", ".yml"}]
-    return {"checked_artifacts": artifacts, "warnings": [], "recommendation": "No deterministic cross-artifact contradictions detected."}
+    artifacts = [
+        relpath(p, root) for p in engineering_root(root).rglob("*") if p.suffix in {".md", ".json", ".yaml", ".yml"}
+    ]
+    return {
+        "checked_artifacts": artifacts,
+        "warnings": [],
+        "recommendation": "No deterministic cross-artifact contradictions detected.",
+    }
 
 
 def naming_consistency_check(root: Path) -> dict[str, Any]:
     names: dict[str, int] = {}
     for path in [p for p in engineering_root(root).rglob("*.md") if p.is_file()]:
-        for name in re.findall(r"\b[A-Z][A-Za-z0-9]+(?:[A-Z][A-Za-z0-9]+)+\b", path.read_text(encoding="utf-8", errors="ignore")):
+        for name in re.findall(
+            r"\b[A-Z][A-Za-z0-9]+(?:[A-Z][A-Za-z0-9]+)+\b", path.read_text(encoding="utf-8", errors="ignore")
+        ):
             names[name] = names.get(name, 0) + 1
-    return {"canonical_candidates": dict(sorted(names.items(), key=lambda item: (-item[1], item[0]))[:50]), "warnings": []}
+    return {
+        "canonical_candidates": dict(sorted(names.items(), key=lambda item: (-item[1], item[0]))[:50]),
+        "warnings": [],
+    }
 
 
 def diagram_sync_check(root: Path) -> dict[str, Any]:
@@ -637,7 +809,11 @@ def prompt_outcome_logger(root: Path, prompt: str, outcome: dict[str, Any] | Non
 
 def skill_trigger_audit(root: Path) -> dict[str, Any]:
     skills = [p.name for p in sorted((root / "skills").glob("*")) if (p / "SKILL.md").exists()]
-    trigger_data = json.loads((root / "evals" / "trigger-evals.json").read_text(encoding="utf-8")) if (root / "evals" / "trigger-evals.json").exists() else {}
+    trigger_data = (
+        json.loads((root / "evals" / "trigger-evals.json").read_text(encoding="utf-8"))
+        if (root / "evals" / "trigger-evals.json").exists()
+        else {}
+    )
     text = json.dumps(trigger_data)
     unused = [skill for skill in skills if skill not in text]
     prompt_cases = trigger_data.get("prompt_cases", []) if isinstance(trigger_data, dict) else []
@@ -676,7 +852,9 @@ def prompt_optimization_evaluator(root: Path) -> dict[str, Any]:
     if audit["trigger_failures"]:
         report.append(f"- {len(audit['trigger_failures'])} positive trigger case(s) route to the wrong skill.")
     if audit["negative_trigger_failures"]:
-        report.append(f"- {len(audit['negative_trigger_failures'])} negative trigger case(s) route to a forbidden skill.")
+        report.append(
+            f"- {len(audit['negative_trigger_failures'])} negative trigger case(s) route to a forbidden skill."
+        )
     if not audit["trigger_failures"] and not audit["negative_trigger_failures"]:
         report.append("- Prompt trigger cases route as expected under the deterministic router.")
     out = root / "evals" / "reports" / "prompt-optimization-report.md"
@@ -700,7 +878,11 @@ def failure_pattern_miner(root: Path) -> dict[str, Any]:
 
 def dangerous_command_guard(command: str) -> dict[str, Any]:
     hits = [pattern for pattern in DANGEROUS_COMMANDS if re.search(pattern, command, re.I)]
-    return {"blocked": bool(hits), "matches": hits, "reason": "Dangerous shell command detected." if hits else "No dangerous command detected."}
+    return {
+        "blocked": bool(hits),
+        "matches": hits,
+        "reason": "Dangerous shell command detected." if hits else "No dangerous command detected.",
+    }
 
 
 def production_environment_guard(command: str) -> dict[str, Any]:
@@ -711,28 +893,54 @@ def production_environment_guard(command: str) -> dict[str, Any]:
 def secret_exfiltration_guard(command: str = "", text: str = "", path: str = "") -> dict[str, Any]:
     sample = "\n".join([command, text, path])
     hits = [pattern for pattern in SECRET_PATTERNS if re.search(pattern, sample, re.I)]
-    return {"blocked": bool(hits), "matches": hits, "reason": "Potential secret exposure detected." if hits else "No secret exposure detected."}
+    return {
+        "blocked": bool(hits),
+        "matches": hits,
+        "reason": "Potential secret exposure detected." if hits else "No secret exposure detected.",
+    }
 
 
 def sensitive_file_policy(path: str, action: str = "read") -> dict[str, Any]:
     category = classify_file_path(Path(path))
     sensitive = category == "secret-risk"
-    decision = "block" if sensitive and action in {"print", "copy"} else "ask" if sensitive and action in {"edit", "write"} else "warn" if sensitive else "allow"
+    decision = (
+        "block"
+        if sensitive and action in {"print", "copy"}
+        else "ask"
+        if sensitive and action in {"edit", "write"}
+        else "warn"
+        if sensitive
+        else "allow"
+    )
     return {"sensitive": sensitive, "category": category, "action": decision, "path": path}
 
 
 def generated_file_guard(path: str) -> dict[str, Any]:
     generated = classify_file_path(Path(path)) == "generated"
-    return {"generated": generated, "message": "Edit the source schema/template instead and regenerate." if generated else "Not recognized as generated."}
+    return {
+        "generated": generated,
+        "message": "Edit the source schema/template instead and regenerate."
+        if generated
+        else "Not recognized as generated.",
+    }
 
 
 def dependency_risk_check(root: Path) -> dict[str, Any]:
-    package_files = [p for p in changed_files(root) if p.name in {"package.json", "requirements.txt", "pyproject.toml", "Cargo.toml", "go.mod"}]
-    return {"changed_package_files": [str(p).replace("\\", "/") for p in package_files], "requires_justification": bool(package_files)}
+    package_files = [
+        p
+        for p in changed_files(root)
+        if p.name in {"package.json", "requirements.txt", "pyproject.toml", "Cargo.toml", "go.mod"}
+    ]
+    return {
+        "changed_package_files": [str(p).replace("\\", "/") for p in package_files],
+        "requires_justification": bool(package_files),
+    }
 
 
 def migration_risk_check(root: Path, files: list[str] | None = None) -> dict[str, Any]:
-    targets = [root / f for f in files] if files else [root / p for p in changed_files(root) if "migration" in str(p).lower()]
+    targets = (
+        [root / f for f in files] if files else [root / p for p in changed_files(root) if "migration" in str(p).lower()]
+    )
     warnings = []
     for path in targets:
         if path.exists():
@@ -744,7 +952,11 @@ def migration_risk_check(root: Path, files: list[str] | None = None) -> dict[str
 
 
 def api_contract_breaking_change_check(root: Path, files: list[str] | None = None) -> dict[str, Any]:
-    targets = [root / f for f in files] if files else [root / p for p in changed_files(root) if p.suffix.lower() in {".yaml", ".yml", ".json", ".ts", ".py"}]
+    targets = (
+        [root / f for f in files]
+        if files
+        else [root / p for p in changed_files(root) if p.suffix.lower() in {".yaml", ".yml", ".json", ".ts", ".py"}]
+    )
     warnings = []
     for path in targets:
         if path.exists():
@@ -755,9 +967,19 @@ def api_contract_breaking_change_check(root: Path, files: list[str] | None = Non
 
 
 def architecture_decision_detector(root: Path, text: str) -> dict[str, Any]:
-    detected = bool(re.search(r"\b(queue|sync|database model|service boundary|provider|auth|permission|deployment)\b", text, re.I))
-    adr_files = list((engineering_root(root) / "decisions").glob("*.md")) if (engineering_root(root) / "decisions").exists() else []
-    return {"decision_detected": detected, "adr_required": detected and not adr_files, "suggested_title": "ADR-record-architecture-decision" if detected else None}
+    detected = bool(
+        re.search(r"\b(queue|sync|database model|service boundary|provider|auth|permission|deployment)\b", text, re.I)
+    )
+    adr_files = (
+        list((engineering_root(root) / "decisions").glob("*.md"))
+        if (engineering_root(root) / "decisions").exists()
+        else []
+    )
+    return {
+        "decision_detected": detected,
+        "adr_required": detected and not adr_files,
+        "suggested_title": "ADR-record-architecture-decision" if detected else None,
+    }
 
 
 # Council triggers use word-boundary regex (not bare substring) plus an AND rule:
@@ -766,20 +988,50 @@ def architecture_decision_detector(root: Path, text: str) -> dict[str, Any]:
 # "integrate an external provider across all services") without firing on routine
 # prompts like "add an auth header".
 COUNCIL_STRONG_TRIGGERS = [
-    r"build vs\.? buy", r"\birreversible\b", r"re-?architect", r"\brewrite\b",
-    r"breaking change", r"\bmigrat(e|es|ing|ion)\b", r"new (plugin|subsystem|service|system)",
-    r"architectur\w* decision", r"high[- ]stakes", r"\btradeoff\b",
+    r"build vs\.? buy",
+    r"\birreversible\b",
+    r"re-?architect",
+    r"\brewrite\b",
+    r"breaking change",
+    r"\bmigrat(e|es|ing|ion)\b",
+    r"new (plugin|subsystem|service|system)",
+    r"architectur\w* decision",
+    r"high[- ]stakes",
+    r"\btradeoff\b",
 ]
 COUNCIL_DOMAIN_TRIGGERS = [
-    r"\bsecurity\b", r"\bauth(entication|orization)?\b", r"\boauth\b", r"\bprovider\b",
-    r"\bintegrat(e|es|ing|ion)\b", r"\bscal(e|es|ing|ability)\b", r"\bai model\b", r"\bllm\b",
-    r"\beval(uation)?s?\b", r"data model", r"schema change", r"deploy\w* pipeline",
-    r"external system", r"\bcompliance\b", r"\bpayment\b", r"\bbilling\b",
+    r"\bsecurity\b",
+    r"\bauth(entication|orization)?\b",
+    r"\boauth\b",
+    r"\bprovider\b",
+    r"\bintegrat(e|es|ing|ion)\b",
+    r"\bscal(e|es|ing|ability)\b",
+    r"\bai model\b",
+    r"\bllm\b",
+    r"\beval(uation)?s?\b",
+    r"data model",
+    r"schema change",
+    r"deploy\w* pipeline",
+    r"external system",
+    r"\bcompliance\b",
+    r"\bpayment\b",
+    r"\bbilling\b",
 ]
 COUNCIL_SCALE_SIGNALS = [
-    r"cross-cutting", r"\bacross\b", r"\bmultiple\b", r"\bseveral\b", r"\bentire\b",
-    r"\bwhole\b", r"end-to-end", r"\benormous\b", r"\bcritical\b", r"\bmajor\b",
-    r"\bplugin\b", r"\bsubsystem\b", r"\bplatform\b", r"\ball (of|the)\b",
+    r"cross-cutting",
+    r"\bacross\b",
+    r"\bmultiple\b",
+    r"\bseveral\b",
+    r"\bentire\b",
+    r"\bwhole\b",
+    r"end-to-end",
+    r"\benormous\b",
+    r"\bcritical\b",
+    r"\bmajor\b",
+    r"\bplugin\b",
+    r"\bsubsystem\b",
+    r"\bplatform\b",
+    r"\ball (of|the)\b",
 ]
 
 
@@ -800,7 +1052,9 @@ def council_trigger_detector(text: str) -> dict[str, Any]:
     recommend = bool(strong) or (bool(domain) and bool(scale))
     triggers = sorted(set(strong + (domain if recommend else [])))
     reason = (
-        "High-impact decision detected (" + ", ".join(triggers) + ") — an engineering council review is recommended before proceeding."
+        "High-impact decision detected ("
+        + ", ".join(triggers)
+        + ") — an engineering council review is recommended before proceeding."
         if recommend
         else "No high-stakes council trigger detected."
     )
@@ -857,7 +1111,11 @@ def council_input_builder(root: Path, question: str, contexts: list[str]) -> dic
 
 
 def council_synthesizer(root: Path, run_dir: str | None = None, question: str = "") -> dict[str, Any]:
-    base = root / run_dir if run_dir else engineering_root(root) / "council" / (slugify(question)[:48] or "council-synthesis")
+    base = (
+        root / run_dir
+        if run_dir
+        else engineering_root(root) / "council" / (slugify(question)[:48] or "council-synthesis")
+    )
     drafts = list((base / "advisor-drafts").glob("*.md")) if (base / "advisor-drafts").exists() else []
     text = "# Council Synthesis\n\n"
     text += f"Question: {question or 'See input file.'}\n\n"
@@ -868,16 +1126,23 @@ def council_synthesizer(root: Path, run_dir: str | None = None, question: str = 
 
 
 def council_role_runner(role: str, question: str) -> dict[str, Any]:
-    return {"role": role, "question": question, "draft": f"{role} perspective: identify evidence, tradeoffs, risks, and next actions."}
+    return {
+        "role": role,
+        "question": question,
+        "draft": f"{role} perspective: identify evidence, tradeoffs, risks, and next actions.",
+    }
 
 
 def council_anonymizer(files: list[str]) -> dict[str, Any]:
-    anonymized = [{"source": item, "anonymous_id": f"advisor-{idx+1}"} for idx, item in enumerate(files)]
+    anonymized = [{"source": item, "anonymous_id": f"advisor-{idx + 1}"} for idx, item in enumerate(files)]
     return {"anonymized": anonymized}
 
 
 def council_peer_review(files: list[str]) -> dict[str, Any]:
-    return {"reviewed": files, "summary": "No deterministic contradictions detected; human or model review still required."}
+    return {
+        "reviewed": files,
+        "summary": "No deterministic contradictions detected; human or model review still required.",
+    }
 
 
 def council_fixture_recorder(root: Path, name: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -892,7 +1157,11 @@ def prompt_rewrite_suggestions(prompt: str) -> dict[str, Any]:
         "interpreted_task": prompt.strip(),
         "required_context_to_inspect": ["relevant routes/modules", "tests", "recent diffs", "docs"],
         "before_editing": ["identify expected behavior", "locate failure or target files", "map affected components"],
-        "completion_criteria": ["cause or rationale explained", "minimal change planned", "relevant validation identified"],
+        "completion_criteria": [
+            "cause or rationale explained",
+            "minimal change planned",
+            "relevant validation identified",
+        ],
         "intent": intent,
     }
 
@@ -1066,8 +1335,14 @@ def render_hook(tool_name: str, result: dict[str, Any]) -> dict[str, Any] | None
         if action == "block":
             return permission_output("PreToolUse", "deny", "Sensitive file contents must not be printed or copied.")
         if action == "ask":
-            return permission_output("PreToolUse", "ask", "This edit targets a sensitive file. Confirm the change is intentional and does not expose secrets.")
-        return hook_additional_context("PreToolUse", "Sensitive file detected. Do not expose secret values in outputs or generated artifacts.")
+            return permission_output(
+                "PreToolUse",
+                "ask",
+                "This edit targets a sensitive file. Confirm the change is intentional and does not expose secrets.",
+            )
+        return hook_additional_context(
+            "PreToolUse", "Sensitive file detected. Do not expose secret values in outputs or generated artifacts."
+        )
     if tool_name == "user-prompt-intake":
         quality = result["quality"]
         clarification = result["clarification"]
@@ -1101,7 +1376,10 @@ def render_hook(tool_name: str, result: dict[str, Any]) -> dict[str, Any] | None
             )
         return hook_additional_context("UserPromptSubmit", "\n".join(messages))
     if tool_name == "post-edit-hygiene":
-        return hook_additional_context("PostToolBatch", "Post-edit hygiene checks completed. Review generated validation reports if issues are present.")
+        return hook_additional_context(
+            "PostToolBatch",
+            "Post-edit hygiene checks completed. Review generated validation reports if issues are present.",
+        )
     if tool_name == "stop-completion-check":
         # Stop hooks must stay silent. Any output from a Stop hook is injected
         # back into the conversation as context and re-invokes the model; with
@@ -1129,7 +1407,11 @@ def cli_main(tool_name: str | None = None) -> int:
     parser.add_argument("--task-type", default="implementation")
     parser.add_argument("--action", default="read")
     parser.add_argument("--apply", action="store_true")
-    parser.add_argument("--hook", action="store_true", help="Read Claude hook payload from stdin and emit hook-shaped JSON when applicable")
+    parser.add_argument(
+        "--hook",
+        action="store_true",
+        help="Read Claude hook payload from stdin and emit hook-shaped JSON when applicable",
+    )
     args = parser.parse_args()
     # Tools wired to the Stop event must stay silent unless render_hook returns
     # an explicit payload: any stdout from a Stop hook is injected back into the

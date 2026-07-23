@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
-from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from eng_common import engineering_root, repo_root, workspace_exists
@@ -22,7 +22,7 @@ def main() -> int:
     if not workspace_exists(ROOT):
         return 0
     LOG.parent.mkdir(parents=True, exist_ok=True)
-    event = {"at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(), "event": "session_stop"}
+    event = {"at": datetime.now(UTC).replace(microsecond=0).isoformat(), "event": "session_stop"}
     with LOG.open("a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(event, sort_keys=True) + "\n")
     # No stdout: a Stop hook's output is injected back as context and re-invokes

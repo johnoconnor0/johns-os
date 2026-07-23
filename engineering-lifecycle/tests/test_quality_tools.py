@@ -43,7 +43,13 @@ class QualityToolTests(unittest.TestCase):
 
     def run_artifact_validator(self, root: Path, path: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [sys.executable, str(ROOT / "scripts" / "validate-artifact.py"), "--root", str(root), str(path.relative_to(root))],
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "validate-artifact.py"),
+                "--root",
+                str(root),
+                str(path.relative_to(root)),
+            ],
             text=True,
             capture_output=True,
             check=False,
@@ -128,7 +134,9 @@ class QualityToolTests(unittest.TestCase):
     def test_council_trigger_detector_and_intake_surface_council(self) -> None:
         # A strong signal fires on its own; a lone domain word on a routine prompt does not.
         self.assertTrue(quality_tools.council_trigger_detector("migrate auth to a new provider")["recommend_council"])
-        self.assertFalse(quality_tools.council_trigger_detector("add an auth header to the fetch call")["recommend_council"])
+        self.assertFalse(
+            quality_tools.council_trigger_detector("add an auth header to the fetch call")["recommend_council"]
+        )
         # The intake hook must SURFACE the council recommendation for high-stakes work,
         # and stay quiet for routine work.
         with tempfile.TemporaryDirectory() as tmp:
@@ -193,12 +201,14 @@ class QualityToolTests(unittest.TestCase):
                 check=True,
             )
             self.assertFalse((src / ".project").exists(), "workspace must never land in the subfolder")
-            report = json.loads((root / ".project" / ".engineering" / "hygiene" / "hygiene-report.json").read_text(encoding="utf-8"))
+            report = json.loads(
+                (root / ".project" / ".engineering" / "hygiene" / "hygiene-report.json").read_text(encoding="utf-8")
+            )
             names = {item["name"] for item in report["new_env_vars"]}
-            self.assertNotIn("FOO_KEY", names)           # documented one dir up
-            self.assertIn("UNDOCUMENTED_KEY", names)      # genuinely missing
+            self.assertNotIn("FOO_KEY", names)  # documented one dir up
+            self.assertIn("UNDOCUMENTED_KEY", names)  # genuinely missing
             inv = {i["name"]: i["in_env_example"] for i in report.get("env_var_inventory", [])}
-            self.assertTrue(inv.get("FOO_KEY"))            # inventory shows documented -> true
+            self.assertTrue(inv.get("FOO_KEY"))  # inventory shows documented -> true
             self.assertFalse(inv.get("UNDOCUMENTED_KEY"))  # inventory shows missing -> false
             # repo-wide detector agrees (per-file nearest-ancestor resolution)
             sync = quality_tools.env_example_sync(root, apply=False)
@@ -217,7 +227,10 @@ class QualityToolTests(unittest.TestCase):
             ("scripts/detect-stack.py", {}),
             ("hooks/scripts/user-prompt-intake.py", {"prompt": "review the checkout flow"}),
             ("hooks/scripts/detect-new-env-vars.py", {"tool_name": "Write", "tool_input": {"file_path": "app.py"}}),
-            ("hooks/scripts/suggest-gitignore-updates.py", {"tool_name": "Write", "tool_input": {"file_path": "app.py"}}),
+            (
+                "hooks/scripts/suggest-gitignore-updates.py",
+                {"tool_name": "Write", "tool_input": {"file_path": "app.py"}},
+            ),
             ("hooks/scripts/sync-ledger.py", {"tool_name": "Write", "tool_input": {"file_path": "app.py"}}),
             ("hooks/scripts/post-edit-hygiene.py", {"tool_name": "Write", "tool_input": {"file_path": "app.py"}}),
             ("hooks/scripts/capture-session-summary.py", {}),
@@ -254,8 +267,18 @@ class QualityToolTests(unittest.TestCase):
                     {
                         "generated_at": "2026-07-10T00:00:00+00:00",
                         "human_tasks": [
-                            {"id": "human-001", "task": "Grant production DB access", "status": "open", "reason": "needs an owner"},
-                            {"id": "human-002", "task": "Countersign the DPA", "status": "done", "reason": "legal review complete"},
+                            {
+                                "id": "human-001",
+                                "task": "Grant production DB access",
+                                "status": "open",
+                                "reason": "needs an owner",
+                            },
+                            {
+                                "id": "human-002",
+                                "task": "Countersign the DPA",
+                                "status": "done",
+                                "reason": "legal review complete",
+                            },
                         ],
                     }
                 ),
@@ -270,7 +293,9 @@ class QualityToolTests(unittest.TestCase):
             ledger = json.loads((ledger_dir / "ledger.json").read_text(encoding="utf-8"))
             self.assertEqual(len(ledger["human_tasks"]), 2)
             self.assertEqual(ledger["summary"]["open_human_task_count"], 1)
-            dashboard = json.loads((root / ".project" / ".engineering" / "dashboards" / "dashboard-data.json").read_text(encoding="utf-8"))
+            dashboard = json.loads(
+                (root / ".project" / ".engineering" / "dashboards" / "dashboard-data.json").read_text(encoding="utf-8")
+            )
             self.assertEqual(len(dashboard["open_human_tasks"]), 1)
             self.assertIn("Grant production DB access", dashboard["open_human_tasks"][0]["task"])
 
@@ -287,7 +312,14 @@ class QualityToolTests(unittest.TestCase):
                     {
                         "generated_at": "2026-07-10T00:00:00+00:00",
                         "action_items": [
-                            {"id": "action-001", "title": "Wire the API", "status": "open", "source": "plan.md", "owner": "unassigned", "priority": "high"}
+                            {
+                                "id": "action-001",
+                                "title": "Wire the API",
+                                "status": "open",
+                                "source": "plan.md",
+                                "owner": "unassigned",
+                                "priority": "high",
+                            }
                         ],
                     }
                 ),
@@ -297,7 +329,9 @@ class QualityToolTests(unittest.TestCase):
                 json.dumps(
                     {
                         "generated_at": "2026-07-10T00:00:00+00:00",
-                        "human_tasks": [{"id": "human-001", "task": "Grant DB access", "status": "open", "reason": "needs owner"}],
+                        "human_tasks": [
+                            {"id": "human-001", "task": "Grant DB access", "status": "open", "reason": "needs owner"}
+                        ],
                     }
                 ),
                 encoding="utf-8",
@@ -378,7 +412,12 @@ class QualityToolTests(unittest.TestCase):
                 json.dumps({"team": "ENG", "status_map": {}, "enforcement": "remind"}), encoding="utf-8"
             )
             (ledger / "action-items.json").write_text(
-                json.dumps({"generated_at": "t", "action_items": [{"id": "action-001", "title": "X", "status": "open", "source": "s"}]}),
+                json.dumps(
+                    {
+                        "generated_at": "t",
+                        "action_items": [{"id": "action-001", "title": "X", "status": "open", "source": "s"}],
+                    }
+                ),
                 encoding="utf-8",
             )
             self.assertEqual(quality_tools.linear_pending(root)["pending"], 1)
@@ -416,7 +455,13 @@ class QualityToolTests(unittest.TestCase):
     def test_full_lifecycle_examples_validate(self) -> None:
         for path in sorted((ROOT / "examples" / "full-lifecycle-example").glob("*.md")):
             proc = subprocess.run(
-                [sys.executable, str(ROOT / "scripts" / "validate-artifact.py"), "--root", str(ROOT), str(path.relative_to(ROOT))],
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "validate-artifact.py"),
+                    "--root",
+                    str(ROOT),
+                    str(path.relative_to(ROOT)),
+                ],
                 text=True,
                 capture_output=True,
                 check=False,
@@ -430,7 +475,13 @@ class QualityToolTests(unittest.TestCase):
         self.assertTrue(examples, "expected per-skill example artifacts to exist")
         for path in examples:
             proc = subprocess.run(
-                [sys.executable, str(ROOT / "scripts" / "validate-artifact.py"), "--root", str(ROOT), str(path.relative_to(ROOT))],
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "validate-artifact.py"),
+                    "--root",
+                    str(ROOT),
+                    str(path.relative_to(ROOT)),
+                ],
                 text=True,
                 capture_output=True,
                 check=False,
@@ -445,7 +496,9 @@ class QualityToolTests(unittest.TestCase):
     def test_test_parser_and_completion_contract(self) -> None:
         parsed = quality_tools.test_result_parser("FAILED test_auth.py::test_login\nAssertionError", "pytest")
         self.assertEqual(parsed["status"], "failed")
-        completion = quality_tools.completion_contract_check(ROOT, "Implemented. Tests not run because this is a docs-only change.")
+        completion = quality_tools.completion_contract_check(
+            ROOT, "Implemented. Tests not run because this is a docs-only change."
+        )
         self.assertTrue(completion["complete_enough"])
 
     def test_hook_wrappers_emit_hook_output(self) -> None:
@@ -569,6 +622,11 @@ class QualityToolTests(unittest.TestCase):
         self.assertIn("plugin scaffold is valid", validate.stdout)
         self.assertIn("schemas and JSON artifacts are valid", validate.stdout)
 
+    def test_hook_config_uses_supported_top_level_fields(self) -> None:
+        config = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        self.assertTrue(set(config).issubset({"description", "hooks"}))
+        self.assertIn("hooks", config)
+
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp)
             (target / "app.py").write_text("import os\nTOKEN=os.getenv('STRIPE_SECRET_KEY')\n", encoding="utf-8")
@@ -588,7 +646,9 @@ class QualityToolTests(unittest.TestCase):
                 check=True,
             )
             self.assertIn("env var hygiene:", hygiene.stdout)
-            hygiene_report = json.loads((target / ".project" / ".engineering" / "hygiene" / "hygiene-report.json").read_text(encoding="utf-8"))
+            hygiene_report = json.loads(
+                (target / ".project" / ".engineering" / "hygiene" / "hygiene-report.json").read_text(encoding="utf-8")
+            )
             self.assertEqual(hygiene_report["new_env_vars"][0]["name"], "STRIPE_SECRET_KEY")
 
             context = target / "context.md"
@@ -677,7 +737,9 @@ class QualityToolTests(unittest.TestCase):
             self.assertTrue((run_dir / "advisor-drafts" / "contrarian.md").exists())
             self.assertTrue((run_dir / "anonymized-drafts" / "advisor-1.md").exists())
             self.assertTrue((run_dir / "peer-reviews" / "executor.md").exists())
-            self.assertIn("Live adapter response", (run_dir / "advisor-drafts" / "executor.md").read_text(encoding="utf-8"))
+            self.assertIn(
+                "Live adapter response", (run_dir / "advisor-drafts" / "executor.md").read_text(encoding="utf-8")
+            )
             report = json.loads((run_dir / "council-report.json").read_text(encoding="utf-8"))
             self.assertEqual(report["mode"], "live-model")
             self.assertEqual(report["adapter"], "command")
@@ -716,7 +778,7 @@ class QualityToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp)
             adapter = target / "slow_adapter.py"
-            adapter.write_text("import time\ntime.sleep(3)\nprint('{\"content\":\"late\"}')\n", encoding="utf-8")
+            adapter.write_text('import time\ntime.sleep(3)\nprint(\'{"content":"late"}\')\n', encoding="utf-8")
             env = {**os.environ, "ENGINEERING_COUNCIL_ADAPTER_COMMAND": f"{sys.executable} {adapter}"}
             proc = subprocess.run(
                 [
@@ -819,13 +881,23 @@ class QualityToolTests(unittest.TestCase):
         self.assert_schema_rejects(
             "council-report.schema.json",
             ".project/.engineering/council/run/council-report.json",
-            {"run_id": "run", "question": "?", "status": "bad", "advisor_count": "five", "context": [], "synthesis": "synthesis.md"},
+            {
+                "run_id": "run",
+                "question": "?",
+                "status": "bad",
+                "advisor_count": "five",
+                "context": [],
+                "synthesis": "synthesis.md",
+            },
             "value 'bad' is not one of",
         )
         self.assert_schema_rejects(
             "action-items.schema.json",
             ".project/.engineering/ledger/action-items.json",
-            {"generated_at": "2026-06-27T00:00:00+00:00", "action_items": [{"id": "", "title": "Fix", "status": "unknown", "source": "test"}]},
+            {
+                "generated_at": "2026-06-27T00:00:00+00:00",
+                "action_items": [{"id": "", "title": "Fix", "status": "unknown", "source": "test"}],
+            },
             "string is shorter than minLength 1",
         )
         self.assert_schema_rejects(
@@ -838,22 +910,32 @@ class QualityToolTests(unittest.TestCase):
     def test_artifact_validator_negative_cases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp)
-            missing_frontmatter = self.write_prd_artifact(target, "missing-frontmatter-prd.md", self.valid_prd_body(), include_frontmatter=False)
+            missing_frontmatter = self.write_prd_artifact(
+                target, "missing-frontmatter-prd.md", self.valid_prd_body(), include_frontmatter=False
+            )
             proc = self.run_artifact_validator(target, missing_frontmatter)
             self.assertNotEqual(proc.returncode, 0)
             self.assertIn("missing front matter keys", proc.stdout)
 
-            missing_sections = self.write_prd_artifact(target, "missing-sections-prd.md", "# Product Requirements Document\n\n## Problem\n\nOnly one section.\n")
+            missing_sections = self.write_prd_artifact(
+                target,
+                "missing-sections-prd.md",
+                "# Product Requirements Document\n\n## Problem\n\nOnly one section.\n",
+            )
             proc = self.run_artifact_validator(target, missing_sections)
             self.assertNotEqual(proc.returncode, 0)
             self.assertIn("missing section 'Goals'", proc.stdout)
 
-            missing_source = self.write_prd_artifact(target, "missing-source-prd.md", self.valid_prd_body(), ["docs/source.md"])
+            missing_source = self.write_prd_artifact(
+                target, "missing-source-prd.md", self.valid_prd_body(), ["docs/source.md"]
+            )
             proc = self.run_artifact_validator(target, missing_source)
             self.assertNotEqual(proc.returncode, 0)
             self.assertIn("source artifact does not exist: docs/source.md", proc.stdout)
 
-            unresolved = self.write_prd_artifact(target, "unresolved-placeholder-prd.md", self.valid_prd_body("\nTODO: replace this placeholder.\n"))
+            unresolved = self.write_prd_artifact(
+                target, "unresolved-placeholder-prd.md", self.valid_prd_body("\nTODO: replace this placeholder.\n")
+            )
             proc = self.run_artifact_validator(target, unresolved)
             self.assertNotEqual(proc.returncode, 0)
             self.assertIn("unresolved placeholder", proc.stdout)

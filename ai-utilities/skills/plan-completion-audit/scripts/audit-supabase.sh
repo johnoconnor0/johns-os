@@ -53,10 +53,10 @@ echo ""
 # --- Table listing ---
 echo "--- All Tables (public schema) ---"
 supabase db execute "
-  SELECT table_name, 
+  SELECT table_name,
          (SELECT count(*) FROM information_schema.columns c WHERE c.table_name = t.table_name AND c.table_schema = 'public') as column_count
   FROM information_schema.tables t
-  WHERE table_schema = 'public' 
+  WHERE table_schema = 'public'
     AND table_type = 'BASE TABLE'
   ORDER BY table_name;
 " 2>&1 || echo "FAIL: Could not list tables"
@@ -77,9 +77,9 @@ echo "--- Primary Keys ---"
 supabase db execute "
   SELECT tc.table_name, kcu.column_name
   FROM information_schema.table_constraints tc
-  JOIN information_schema.key_column_usage kcu 
+  JOIN information_schema.key_column_usage kcu
     ON tc.constraint_name = kcu.constraint_name
-  WHERE tc.table_schema = 'public' 
+  WHERE tc.table_schema = 'public'
     AND tc.constraint_type = 'PRIMARY KEY'
   ORDER BY tc.table_name;
 " 2>&1 || echo "FAIL: Could not get primary keys"
@@ -88,14 +88,14 @@ echo ""
 # --- Foreign keys ---
 echo "--- Foreign Keys ---"
 supabase db execute "
-  SELECT tc.table_name, kcu.column_name, 
+  SELECT tc.table_name, kcu.column_name,
          ccu.table_name AS referenced_table, ccu.column_name AS referenced_column
   FROM information_schema.table_constraints tc
-  JOIN information_schema.key_column_usage kcu 
+  JOIN information_schema.key_column_usage kcu
     ON tc.constraint_name = kcu.constraint_name
-  JOIN information_schema.constraint_column_usage ccu 
+  JOIN information_schema.constraint_column_usage ccu
     ON tc.constraint_name = ccu.constraint_name
-  WHERE tc.table_schema = 'public' 
+  WHERE tc.table_schema = 'public'
     AND tc.constraint_type = 'FOREIGN KEY'
   ORDER BY tc.table_name;
 " 2>&1 || echo "FAIL: Could not get foreign keys"

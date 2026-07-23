@@ -15,7 +15,6 @@ from typing import Any
 
 from eng_common import engineering_root, now_iso, repo_root, slugify, write_json, write_text
 
-
 ROLES = [
     ("contrarian", "Challenge weak assumptions and identify downside risk."),
     ("first-principles", "Reduce the decision to constraints, invariants, and necessary tradeoffs."),
@@ -153,7 +152,9 @@ Rules:
 """
 
 
-def render_synthesis_prompt(question: str, files: list[str], advisor_texts: list[str], peer_texts: list[str], quorum: bool) -> str:
+def render_synthesis_prompt(
+    question: str, files: list[str], advisor_texts: list[str], peer_texts: list[str], quorum: bool
+) -> str:
     advisors = "\n\n".join(advisor_texts) or "No advisor drafts."
     peers = "\n\n".join(peer_texts) or "No peer reviews."
     return f"""You are the engineering council chairperson.
@@ -392,7 +393,11 @@ def call_anthropic_adapter(prompt: str, timeout: int) -> str:
     data = post_json(
         os.environ.get("ENGINEERING_COUNCIL_ANTHROPIC_URL", "https://api.anthropic.com/v1/messages"),
         {"x-api-key": key, "anthropic-version": os.environ.get("ANTHROPIC_VERSION", "2023-06-01")},
-        {"model": model, "max_tokens": int(os.environ.get("ENGINEERING_COUNCIL_MAX_TOKENS", "1600")), "messages": [{"role": "user", "content": prompt}]},
+        {
+            "model": model,
+            "max_tokens": int(os.environ.get("ENGINEERING_COUNCIL_MAX_TOKENS", "1600")),
+            "messages": [{"role": "user", "content": prompt}],
+        },
         timeout,
     )
     parts = data.get("content", [])
@@ -412,7 +417,10 @@ def call_openai_adapter(prompt: str, timeout: int) -> str:
         {
             "model": model,
             "messages": [
-                {"role": "system", "content": "You are a rigorous engineering council advisor. Return concise Markdown."},
+                {
+                    "role": "system",
+                    "content": "You are a rigorous engineering council advisor. Return concise Markdown.",
+                },
                 {"role": "user", "content": prompt},
             ],
             "max_tokens": int(os.environ.get("ENGINEERING_COUNCIL_MAX_TOKENS", "1600")),
@@ -482,7 +490,9 @@ def ask(
         "max_context_chars": max_context_chars,
     }
     write_json(base / "input.json", input_payload)
-    event(events, "input_recorded", {"run_id": run_id, "mode": mode, "adapter": adapter if mode == "live-model" else None})
+    event(
+        events, "input_recorded", {"run_id": run_id, "mode": mode, "adapter": adapter if mode == "live-model" else None}
+    )
 
     advisor_dir = base / "advisor-drafts"
     anonymized_dir = base / "anonymized-drafts"
@@ -516,11 +526,16 @@ def ask(
         advisor_texts.append(draft)
         anonymous_id = f"advisor-{idx}"
         anonymous_ids.append(anonymous_id)
-        write_text(anonymized_dir / f"{anonymous_id}.md", make_anonymized(anonymous_id, str(advisor_path.relative_to(base)).replace("\\", "/"), draft))
+        write_text(
+            anonymized_dir / f"{anonymous_id}.md",
+            make_anonymized(anonymous_id, str(advisor_path.relative_to(base)).replace("\\", "/"), draft),
+        )
         event(events, "advisor_draft_written", {"role": role, "mode": mode})
 
     quorum = len(list(advisor_dir.glob("*.md"))) >= quorum_min
-    anonymous_texts = [(anonymized_dir / f"{anonymous_id}.md").read_text(encoding="utf-8") for anonymous_id in anonymous_ids]
+    anonymous_texts = [
+        (anonymized_dir / f"{anonymous_id}.md").read_text(encoding="utf-8") for anonymous_id in anonymous_ids
+    ]
     peer_texts: list[str] = []
     for role in roles:
         fallback = make_deterministic_peer_review(role, anonymous_ids, files, run_id)
@@ -590,13 +605,29 @@ def main() -> int:
     ask_parser.add_argument("--context", action="append", default=[])
     ask_parser.add_argument("--run-id")
     ask_parser.add_argument("--root", default=".")
-    ask_parser.add_argument("--mode", choices=["deterministic-local", "live-model"], default=os.environ.get("ENGINEERING_COUNCIL_MODE", "deterministic-local"))
-    ask_parser.add_argument("--adapter", choices=["command", "anthropic", "openai"], default=os.environ.get("ENGINEERING_COUNCIL_ADAPTER", "command"))
-    ask_parser.add_argument("--fallback-on-error", action="store_true", help="Use deterministic output when a live adapter fails")
-    ask_parser.add_argument("--max-context-chars", type=int, default=int(os.environ.get("ENGINEERING_COUNCIL_MAX_CONTEXT_CHARS", "24000")))
-    ask_parser.add_argument("--timeout", type=int, default=int(os.environ.get("ENGINEERING_COUNCIL_TIMEOUT_SECONDS", "120")))
+    ask_parser.add_argument(
+        "--mode",
+        choices=["deterministic-local", "live-model"],
+        default=os.environ.get("ENGINEERING_COUNCIL_MODE", "deterministic-local"),
+    )
+    ask_parser.add_argument(
+        "--adapter",
+        choices=["command", "anthropic", "openai"],
+        default=os.environ.get("ENGINEERING_COUNCIL_ADAPTER", "command"),
+    )
+    ask_parser.add_argument(
+        "--fallback-on-error", action="store_true", help="Use deterministic output when a live adapter fails"
+    )
+    ask_parser.add_argument(
+        "--max-context-chars", type=int, default=int(os.environ.get("ENGINEERING_COUNCIL_MAX_CONTEXT_CHARS", "24000"))
+    )
+    ask_parser.add_argument(
+        "--timeout", type=int, default=int(os.environ.get("ENGINEERING_COUNCIL_TIMEOUT_SECONDS", "120"))
+    )
     ask_parser.add_argument("--role", action="append", choices=[role for role, _ in ROLES], dest="roles")
-    ask_parser.add_argument("--quorum-min", type=int, default=int(os.environ.get("ENGINEERING_COUNCIL_QUORUM_MIN", "3")))
+    ask_parser.add_argument(
+        "--quorum-min", type=int, default=int(os.environ.get("ENGINEERING_COUNCIL_QUORUM_MIN", "3"))
+    )
     args = parser.parse_args()
     root = repo_root(Path(args.root))
     if args.command == "ask":

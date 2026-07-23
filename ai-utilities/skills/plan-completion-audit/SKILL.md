@@ -62,7 +62,7 @@ If a dependency is missing, the corresponding step degrades to a warning rather 
    - **Supabase CLI** (preferred): Check if `supabase` CLI is available and a project is linked (`supabase status`)
    - **Supabase MCP**: Check if a Supabase MCP server/connector is available in the current environment
    - **Supabase Management API**: Use as last resort if CLI and MCP are unavailable
-   
+
    If none are available, note it and perform the backend audit using local migration files and type definitions only.
 
 ## Audit Phases
@@ -82,7 +82,7 @@ Execute every phase in order. Report findings per phase using the format in the 
    - ðŸŸ¡ **PARTIAL** — Code exists but is incomplete, stubbed out, or missing key functionality described in the plan
    - âŒ **NOT STARTED** — No implementation found anywhere in the codebase
    - âš ï¸ **DEVIATES** — Implemented but differently than the plan specified (describe the deviation)
-   
+
    Read the actual code to determine status — do not just confirm a file or function name exists. A file with a placeholder return, an empty function body, or a TODO comment inside it is PARTIAL, not COMPLETE.
 4. Items marked NOT STARTED or PARTIAL are **CRITICAL** findings. List every one explicitly with a description of what is missing or incomplete.
 5. Scan for unfinished work markers:

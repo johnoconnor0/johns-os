@@ -1,0 +1,19 @@
+extends: relaxed
+
+ignore: |
+  .project/
+  _unreleased/
+
+rules:
+  braces: disable
+  brackets: disable
+  colons: disable
+  commas: disable
+  comments: disable
+  comments-indentation: disable
+  document-start: disable
+  indentation: disable
+  line-length: disable
+  new-line-at-end-of-file: enable
+  trailing-spaces: enable
+  truthy: disable

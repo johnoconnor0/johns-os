@@ -5,6 +5,7 @@
   "status": "local",
   "category": "developer-tools",
   "version": "0.1.0",
+  "homepage": "https://weblifter.com.au",
   "path": "ai-utilities",
   "manifest": "ai-utilities/.codex-plugin/plugin.json",
   "source": {

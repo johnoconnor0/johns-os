@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest an improvement to a plugin, marketplace, workflow, or public documentation.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or maintainer problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Describe the smallest useful change and any alternatives considered.
+    validations:
+      required: true

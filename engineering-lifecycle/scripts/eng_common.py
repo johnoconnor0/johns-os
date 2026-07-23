@@ -7,10 +7,9 @@ import json
 import os
 import re
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-
 
 WORKSPACE = Path(".project") / ".engineering"
 
@@ -21,10 +20,27 @@ WORKSPACE = Path(".project") / ".engineering"
 # the git path it stands in for.
 SCAN_PRUNE_DIRS = frozenset(
     {
-        ".git", ".hg", ".svn", ".project",
-        "node_modules", "vendor", "__pycache__", ".venv", "venv", ".tox",
-        ".mypy_cache", ".pytest_cache", ".ruff_cache", ".cache",
-        "dist", "build", "target", "coverage", ".next", ".turbo", ".gradle",
+        ".git",
+        ".hg",
+        ".svn",
+        ".project",
+        "node_modules",
+        "vendor",
+        "__pycache__",
+        ".venv",
+        "venv",
+        ".tox",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".cache",
+        "dist",
+        "build",
+        "target",
+        "coverage",
+        ".next",
+        ".turbo",
+        ".gradle",
     }
 )
 SCAN_MAX_FILES = 20_000
@@ -72,7 +88,7 @@ def workspace_exists(root: Path | None = None) -> bool:
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 def read_json(path: Path, default: Any = None) -> Any:
@@ -219,9 +235,7 @@ def parse_front_matter(text: str) -> tuple[dict[str, Any], str]:
             key = key.strip()
             value = value.strip()
             current_key = key
-            if value == "[]":
-                data[key] = []
-            elif value == "":
+            if value == "[]" or value == "":
                 data[key] = []
             elif value.lower() in {"true", "false"}:
                 data[key] = value.lower() == "true"
@@ -277,7 +291,9 @@ def classify_file_path(path: Path) -> str:
     text = str(path).replace("\\", "/").lower()
     if name.startswith(".env") or suffix in {".pem", ".key", ".p12"} or "credential" in name or "secret" in name:
         return "secret-risk"
-    if any(part in parts for part in {"tests", "test", "__tests__", "spec", "specs"}) or name.endswith((".test.ts", ".test.js", ".spec.ts", ".spec.js", "_test.py")):
+    if any(part in parts for part in {"tests", "test", "__tests__", "spec", "specs"}) or name.endswith(
+        (".test.ts", ".test.js", ".spec.ts", ".spec.js", "_test.py")
+    ):
         return "test"
     if suffix in {".md", ".mdx", ".rst"}:
         return "docs"

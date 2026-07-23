@@ -6,7 +6,18 @@
 - **Starting a session in a directory that is not a git repository no longer hangs.** `git_files()` falls back to a manual listing when `git ls-files` fails, and that fallback used an unpruned `rglob("*")`: the ignored set filtered the results but never stopped the traversal, so it still descended into `node_modules`, `__pycache__` and every vendored `.git`. Since `repo_root()` returns the working directory when it finds no repo above it, a session started in `~/.claude` walked the plugin cache and one clone per installed marketplace — pegging a CPU core and growing memory until the process was killed by hand. The fallback is now bounded three independent ways: roots that are never a project tree (a home directory, a filesystem root, an agent config tree) are refused outright, dependency and build directories are pruned during traversal instead of filtered after it, and both depth and file count are capped. `profile-repo`, `repo-context-pack` and changed-file classification share that fallback and are fixed with it.
 - `detect-stack` no longer lists the repository at all. Every marker it tests is meaningful only at the repo root, so it stats that fixed set directly, and the one check that genuinely needed recursion — `prisma/schema.prisma` — uses a depth-bounded search that still finds the monorepo layout. It now also detects markers that exist but are untracked, which the `git ls-files` lookup missed on a fresh checkout. Measured on `~/.claude`: `git_files()` 19ms and the SessionStart hook 276ms, against no termination at all before.
 - The catalog record and the Claude marketplace entry still advertised 0.5.0. The 0.6.0 release bumped only the two plugin manifests and the changelog, leaving `marketplace/plugins/engineering-lifecycle.json` and `.claude-plugin/marketplace.json` two releases behind and `johns-os-marketplace.py validate` failing on version drift. Releases now go through `bump-version`, which moves all four surfaces in lockstep.
-- `test_cli_uses_target_root_for_workspace_outputs` failed on every run. To prove a `--root` run had not polluted the plugin's own workspace it read `ROOT/.project/.engineering/workspace.json` unconditionally — an assumption 0.6.0 invalidated by making the workspace opt-in and never auto-created. The test now samples whether that workspace exists before the run and asserts on both outcomes, and never creates it.
+ - `test_cli_uses_target_root_for_workspace_outputs` failed on every run. To prove a `--root` run had not polluted the plugin's own workspace it read `ROOT/.project/.engineering/workspace.json` unconditionally — an assumption 0.6.0 invalidated by making the workspace opt-in and never auto-created. The test now samples whether that workspace exists before the run and asserts on both outcomes, and never creates it.
+
+## Unreleased
+
+### Added
+
+- Public website metadata and cross-surface marketplace consistency validation.
+- Root repository linting, pre-commit, CI, and public-release documentation.
+
+### Fixed
+
+- Removed the unsupported `$schema` field from `hooks/hooks.json` so the plugin hook loader accepts the configuration.
 
 ## 0.6.0 - 2026-07-18
 

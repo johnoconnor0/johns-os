@@ -4,10 +4,10 @@
 This is intentionally conservative and dependency-free. It catches common
 structure and frontmatter mistakes but does not replace `claude plugin validate`.
 """
+
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -24,7 +24,7 @@ def split_frontmatter(path: Path):
     if end == -1:
         return None, text, "unterminated YAML frontmatter"
     raw = text[4:end].strip()
-    body = text[end+4:]
+    body = text[end + 4 :]
     data = {}
     for line in raw.splitlines():
         if not line.strip() or line.strip().startswith("#"):
@@ -154,6 +154,7 @@ def main(argv):
         return 1
     print("\nPASS: no static validation errors")
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv))

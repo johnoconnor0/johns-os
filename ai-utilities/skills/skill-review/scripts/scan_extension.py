@@ -13,6 +13,7 @@ Usage:
 Exit codes: 0 = scan completed (findings may still exist), 2 = bad usage/path.
 This is a signal generator, NOT a verdict. The model applies the rubric.
 """
+
 from __future__ import annotations
 
 import json
@@ -25,8 +26,24 @@ SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 URL = re.compile(r"https?://[^\s\"'`)>\]]+", re.I)
 
 # Files worth scanning for code-level signals.
-CODE_EXT = {".py", ".js", ".ts", ".mjs", ".cjs", ".sh", ".bash", ".zsh",
-            ".ps1", ".rb", ".go", ".json", ".md", ".yaml", ".yml", ".toml"}
+CODE_EXT = {
+    ".py",
+    ".js",
+    ".ts",
+    ".mjs",
+    ".cjs",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".ps1",
+    ".rb",
+    ".go",
+    ".json",
+    ".md",
+    ".yaml",
+    ".yml",
+    ".toml",
+}
 
 # Dangerous code patterns → (rule_id, gate, description). Gate maps to framework hard-fails.
 DANGER_PATTERNS = [
@@ -39,7 +56,12 @@ DANGER_PATTERNS = [
     (re.compile(r"\b(pip|pip3)\s+install\b", re.I), "RUNTIME_PIP", "G2", "runtime pip install (pin & vet source)"),
     (re.compile(r"\bnpm\s+(install|i)\b", re.I), "RUNTIME_NPM", "G2", "runtime npm install (pin & vet source)"),
     (re.compile(r"import\s*\(\s*[\"'`]https?://", re.I), "DYNAMIC_URL_IMPORT", "G2", "dynamic import from URL"),
-    (re.compile(r"base64\.\w*decode\w*\([^)]*\)\s*\)?\s*(?:\.decode\(\))?\s*", re.I), "BASE64_DECODE", "none", "base64 decode — inspect what is decoded"),
+    (
+        re.compile(r"base64\.\w*decode\w*\([^)]*\)\s*\)?\s*(?:\.decode\(\))?\s*", re.I),
+        "BASE64_DECODE",
+        "none",
+        "base64 decode — inspect what is decoded",
+    ),
     (re.compile(r"\brm\s+-rf\b", re.I), "RM_RF", "G4", "rm -rf — destructive"),
     (re.compile(r"\b(DROP|TRUNCATE|DELETE)\s+(TABLE|FROM)\b", re.I), "SQL_DESTRUCTIVE", "G4", "destructive SQL"),
     (re.compile(r"169\.254\.169\.254"), "METADATA_IP", "none", "cloud metadata endpoint reference"),
@@ -55,12 +77,22 @@ SECRET_PATTERNS = [
     (re.compile(r"\bghp_[A-Za-z0-9]{30,}\b"), "GITHUB_PAT", "GitHub personal access token"),
     (re.compile(r"\bxox[baprs]-[A-Za-z0-9\-]{10,}\b"), "SLACK_TOKEN", "Slack token"),
     (re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b"), "GOOGLE_API_KEY", "Google API key"),
-    (re.compile(r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b"), "JWT", "JWT (may be a live token)"),
-    (re.compile(r"(?i)(api[_-]?key|secret|password|passwd|token)\s*[:=]\s*[\"'][^\"'\s]{8,}[\"']"), "GENERIC_SECRET", "assigned secret-like literal"),
+    (
+        re.compile(r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b"),
+        "JWT",
+        "JWT (may be a live token)",
+    ),
+    (
+        re.compile(r"(?i)(api[_-]?key|secret|password|passwd|token)\s*[:=]\s*[\"'][^\"'\s]{8,}[\"']"),
+        "GENERIC_SECRET",
+        "assigned secret-like literal",
+    ),
 ]
 
 # Assignment-context guards to reduce false positives on obvious placeholders.
-PLACEHOLDER = re.compile(r"(?i)(your[_-]?|example|placeholder|dummy|xxxx|<[^>]+>|\.\.\.|changeme|redacted|\bENV\b|process\.env|os\.environ)")
+PLACEHOLDER = re.compile(
+    r"(?i)(your[_-]?|example|placeholder|dummy|xxxx|<[^>]+>|\.\.\.|changeme|redacted|\bENV\b|process\.env|os\.environ)"
+)
 
 IGNORE_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build"}
 
@@ -106,13 +138,13 @@ def scan_file_signals(p: Path, rel: str):
     for i, line in enumerate(lines, 1):
         for rx, rule, gate, desc in DANGER_PATTERNS:
             if rx.search(line):
-                dangers.append({"rule": rule, "gate": gate, "desc": desc,
-                                "ref": f"{rel}:{i}", "line": line.strip()[:200]})
+                dangers.append(
+                    {"rule": rule, "gate": gate, "desc": desc, "ref": f"{rel}:{i}", "line": line.strip()[:200]}
+                )
         for rx, rule, desc in SECRET_PATTERNS:
             m = rx.search(line)
             if m and not PLACEHOLDER.search(line):
-                secrets.append({"rule": rule, "desc": desc, "ref": f"{rel}:{i}",
-                                "match": m.group(0)[:12] + "…"})
+                secrets.append({"rule": rule, "desc": desc, "ref": f"{rel}:{i}", "match": m.group(0)[:12] + "…"})
     for m in URL.finditer(text):
         endpoints.append(m.group(0).rstrip(".,);"))
     return dangers, secrets, endpoints
@@ -131,9 +163,16 @@ def collect_files(root: Path):
 def scan_skill(skill_dir: Path, root: Path):
     md = skill_dir / "SKILL.md"
     rel = str(md.relative_to(root)) if md.is_relative_to(root) else str(md)
-    entry = {"type": "skill", "path": str(skill_dir), "skill_md": rel,
-             "name": None, "description": None, "allowed_tools": [],
-             "argument_hint": None, "issues": []}
+    entry = {
+        "type": "skill",
+        "path": str(skill_dir),
+        "skill_md": rel,
+        "name": None,
+        "description": None,
+        "allowed_tools": [],
+        "argument_hint": None,
+        "issues": [],
+    }
     if not md.exists():
         entry["issues"].append("missing SKILL.md")
         return entry
@@ -163,8 +202,15 @@ def scan_skill(skill_dir: Path, root: Path):
 
 def scan_plugin(plugin_root: Path, root: Path):
     manifest = plugin_root / ".claude-plugin" / "plugin.json"
-    entry = {"type": "plugin", "path": str(plugin_root), "name": None,
-             "version": None, "mcp_servers": [], "components": {}, "issues": []}
+    entry = {
+        "type": "plugin",
+        "path": str(plugin_root),
+        "name": None,
+        "version": None,
+        "mcp_servers": [],
+        "components": {},
+        "issues": [],
+    }
     try:
         data = json.loads(read_text(manifest))
     except Exception as e:
@@ -204,8 +250,7 @@ def scan_marketplace(mp_path: Path):
             if isinstance(pl, dict):
                 src = pl.get("source") or pl.get("url") or pl.get("path") or ""
                 mutable = bool(re.search(r"(latest|main|master|@)\b", str(src))) and "#" not in str(src)
-                entry["plugins"].append({"name": pl.get("name"), "source": src,
-                                         "mutable_source": mutable})
+                entry["plugins"].append({"name": pl.get("name"), "source": src, "mutable_source": mutable})
                 if mutable:
                     entry["issues"].append(f"mutable/unpinned source for {pl.get('name')}: {src}")
     else:
@@ -223,8 +268,16 @@ def main(argv):
         print(f"ERROR: path does not exist: {root}", file=sys.stderr)
         return 2
 
-    result = {"root": str(root), "marketplaces": [], "plugins": [], "skills": [],
-              "dangers": [], "secrets": [], "endpoints": [], "summary": {}}
+    result = {
+        "root": str(root),
+        "marketplaces": [],
+        "plugins": [],
+        "skills": [],
+        "dangers": [],
+        "secrets": [],
+        "endpoints": [],
+        "summary": {},
+    }
 
     # Marketplaces
     for mp in list(root.rglob("marketplace.json")):
@@ -262,8 +315,7 @@ def main(argv):
         "gate_hits": sorted({d["gate"] for d in result["dangers"] if d["gate"] != "none"}),
         "secret_candidates": len(result["secrets"]),
         "unique_endpoints": len(result["endpoints"]),
-        "manifest_issues": sum(len(x["issues"]) for x in
-                               result["marketplaces"] + result["plugins"] + result["skills"]),
+        "manifest_issues": sum(len(x["issues"]) for x in result["marketplaces"] + result["plugins"] + result["skills"]),
     }
 
     if "--json" in argv:
@@ -272,9 +324,11 @@ def main(argv):
         s = result["summary"]
         print(f"Scanned: {root}")
         print(f"  marketplaces={s['marketplaces']} plugins={s['plugins']} skills={s['skills']}")
-        print(f"  danger_hits={s['danger_hits']} gates={s['gate_hits']} "
-              f"secret_candidates={s['secret_candidates']} endpoints={s['unique_endpoints']} "
-              f"manifest_issues={s['manifest_issues']}")
+        print(
+            f"  danger_hits={s['danger_hits']} gates={s['gate_hits']} "
+            f"secret_candidates={s['secret_candidates']} endpoints={s['unique_endpoints']} "
+            f"manifest_issues={s['manifest_issues']}"
+        )
         if result["dangers"]:
             print("\nDanger patterns:")
             for d in result["dangers"][:50]:

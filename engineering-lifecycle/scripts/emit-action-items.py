@@ -4,12 +4,10 @@
 from __future__ import annotations
 
 import argparse
-import json
 import re
 from pathlib import Path
 
-from eng_common import engineering_root, now_iso, read_json, repo_root, slugify, write_json
-
+from eng_common import now_iso, read_json, repo_root, slugify, write_json
 
 ACTION_RE = re.compile(r"^\s*[-*]\s+\[(?P<state>[ xX])\]\s+(?P<title>.+)$")
 

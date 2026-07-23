@@ -4,6 +4,8 @@
 # by engineering-lifecycle/.gitignore. The leading slash anchors this rule to
 # the repo root only.)
 /.project/
+/docs/
+/NOTES.md
 
 # Python bytecode and tool caches
 __pycache__/
@@ -11,6 +13,24 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.hypothesis/
+.venv/
+venv/
+.coverage
+coverage/
+dist/
+build/
+*.egg-info/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials.json
+service-account.json
 
 # OS / editor noise
 .DS_Store

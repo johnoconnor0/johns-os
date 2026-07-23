@@ -27,7 +27,7 @@ This repository is shaped as a Claude Code plugin. Claude Code should discover p
 
 The manifest intentionally avoids over-specifying component paths unless future validation shows that explicit paths are required.
 
-The repository URL is not declared in the manifest yet because the final public URL is not known in this scaffold. Add it only when the new repository URL is confirmed.
+The plugin website is declared in the manifests as https://weblifter.com.au.
 
 ## Quick Start Workflow
 

@@ -44,6 +44,3 @@ Thumbs.db
 # Generated plugin runtime workspace — pure local runtime state, never committed.
 # Recreated on demand by the plugin's SessionStart hook.
 .project/
-
-
-../NOTES.md

@@ -5,6 +5,7 @@
   "status": "local",
   "category": "engineering",
   "version": "0.6.1",
+  "homepage": "https://weblifter.com.au",
   "path": "engineering-lifecycle",
   "manifest": "engineering-lifecycle/.codex-plugin/plugin.json",
   "source": {

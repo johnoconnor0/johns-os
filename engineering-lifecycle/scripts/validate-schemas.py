@@ -57,9 +57,7 @@ def type_matches(value: object, schema_type: object) -> bool:
         return True
     if "number" in names and isinstance(value, (int, float)) and not isinstance(value, bool):
         return True
-    if "boolean" in names and isinstance(value, bool):
-        return True
-    return False
+    return "boolean" in names and isinstance(value, bool)
 
 
 def validate_value(value: object, schema: dict[str, Any], label: str) -> list[str]:
@@ -73,7 +71,12 @@ def validate_value(value: object, schema: dict[str, Any], label: str) -> list[st
         errors.append(f"{label}: value {value!r} is not one of {schema['enum']!r}")
     if isinstance(value, str) and "minLength" in schema and len(value) < int(schema["minLength"]):
         errors.append(f"{label}: string is shorter than minLength {schema['minLength']}")
-    if isinstance(value, int) and not isinstance(value, bool) and "minimum" in schema and value < int(schema["minimum"]):
+    if (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and "minimum" in schema
+        and value < int(schema["minimum"])
+    ):
         errors.append(f"{label}: value is below minimum {schema['minimum']}")
     if isinstance(value, dict):
         required = schema.get("required", [])
