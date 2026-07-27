@@ -8,12 +8,13 @@ import hashlib
 import json
 import os
 import re
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from eng_common import (
     ENV_VAR_RE,
-    SCAN_PRUNE_DIRS,
     append_jsonl,
     changed_files,
     classify_file_path,
@@ -30,12 +31,47 @@ from eng_common import (
     permission_output,
     placeholder_for_env,
     read_json,
+    read_json_safe,
     relpath,
     repo_root,
     slugify,
     workspace_exists,
     write_json,
     write_text,
+)
+
+# Three concerns were extracted from this file once it passed 2,400 lines. They
+# are re-exported here so every existing caller - 44 dispatcher shims, the hook
+# wrappers, council.py and the test suite - keeps working unchanged.
+from initiatives import (  # noqa: F401  (re-exported for backwards compatibility)
+    active_initiative_resolver,
+    initiative_command,
+    initiative_dirs,
+    initiative_drift_detector,
+    load_initiative_registry,
+    registry_path,
+    save_initiative_registry,
+)
+from questions import (  # noqa: F401  (re-exported for backwards compatibility)
+    QUESTION_KINDS,
+    QUESTION_STATUSES,
+    answer_question,
+    capture_asked_questions,
+    extract_open_questions,
+    load_open_questions,
+    question_id,
+    questions_path,
+    record_questions,
+    render_questions_digest,
+    scan_artifact_questions,
+    sync_open_questions,
+)
+from stack_detection import (  # noqa: F401  (re-exported for backwards compatibility)
+    detect_stack,
+    find_markers,
+    has_prisma_schema,
+    workspace_globs,
+    workspace_manifests,
 )
 
 INTENT_KEYWORDS = {
@@ -57,16 +93,6 @@ INTENT_KEYWORDS = {
         "event contract",
         "pagination",
         "rate limit",
-    ],
-    "dashboard": [
-        "dashboard",
-        "status view",
-        "project status",
-        "initiative summary",
-        "engineering state",
-        "action items",
-        "recent artifacts",
-        "release readiness",
     ],
     "design-system": [
         "design system",
@@ -120,7 +146,6 @@ INTENT_KEYWORDS = {
     "release": ["release", "deploy", "rollback", "launch"],
     "repo-hygiene": ["hygiene", "gitignore", "env.example", "cleanup"],
     "council-decision": ["council", "tradeoff", "build vs buy", "high-stakes"],
-    "linear-sync": ["linear", "sync tasks", "push tasks to linear", "task tracker", "reconcile issues"],
     "discovery": [
         "discover",
         "discovery",
@@ -140,21 +165,19 @@ SKILL_BY_INTENT = {
     "lifecycle": "map-product-lifecycle",
     "system-map": "create-system-map",
     "api-contract": "create-api-contract",
-    "dashboard": "build-project-dashboard",
     "design-system": "create-design-system",
     "ui-prototype": "build-ui-prototype",
     "review": "review-change",
     "testing": "create-test-strategy",
-    "implementation-plan": "create-implementation-plan",
+    "implementation-plan": "create-engineering-plan",
     "implementation": "implement-feature-safely",
-    "architecture": "create-architecture-plan",
+    "architecture": "create-technical-design-document",
     "data-model": "create-data-model",
     "ux-design": "create-ux-flow",
     "requirements": "create-prd",
     "release": "create-release-plan",
     "repo-hygiene": "update-repo-hygiene",
     "council-decision": "run-engineering-council",
-    "linear-sync": "sync-linear-tasks",
     "discovery": "create-discovery-brief",
 }
 
@@ -359,106 +382,6 @@ def skill_router(prompt: str) -> dict[str, Any]:
     }
 
 
-def has_prisma_schema(root: Path, max_depth: int = 3, max_dirs: int = 2_000) -> bool:
-    """A ``prisma/schema.prisma`` at `root` or in a nearby workspace package.
-
-    Breadth-first and bounded rather than a full listing: the monorepo layout
-    this needs to catch (``apps/api/prisma/schema.prisma``) sits a couple of
-    levels down, so a capped walk finds it without the cost of enumerating the
-    tree — which on a mis-resolved root never terminated in useful time.
-    """
-    frontier = [root]
-    visited = 0
-    for _ in range(max_depth + 1):
-        if not frontier:
-            break
-        nxt: list[Path] = []
-        for directory in frontier:
-            if (directory / "prisma" / "schema.prisma").exists():
-                return True
-            visited += 1
-            if visited >= max_dirs:
-                return False
-            try:
-                nxt.extend(
-                    child for child in directory.iterdir() if child.is_dir() and child.name not in SCAN_PRUNE_DIRS
-                )
-            except OSError:  # unreadable directory: keep scanning the rest
-                continue
-        frontier = nxt
-    return False
-
-
-def detect_stack(root: Path) -> dict[str, Any]:
-    """Identify the project's stack from the marker files at `root`.
-
-    Every marker below is meaningful only at the repo root, so this stats the
-    fixed set of candidates instead of listing the tree. The listing it replaces
-    was the whole cost of this tool: outside a git repo it degraded to an
-    unbounded filesystem walk that could peg a core indefinitely on SessionStart.
-    Statting also detects a marker that exists but is untracked or ignored,
-    which the previous ``git ls-files`` lookup missed on a fresh checkout.
-    """
-
-    def has(name: str) -> bool:
-        return (root / name).exists()
-
-    package_manager = None
-    if has("pnpm-lock.yaml") or has("pnpm-workspace.yaml"):
-        package_manager = "pnpm"
-    elif has("yarn.lock"):
-        package_manager = "yarn"
-    elif has("package-lock.json") or has("package.json"):
-        package_manager = "npm"
-    elif has("pyproject.toml"):
-        package_manager = "python"
-    frameworks: list[str] = []
-    if has("next.config.js") or has("next.config.mjs") or has("next.config.ts"):
-        frameworks.append("Next.js")
-    if has("vite.config.ts") or has("vite.config.js"):
-        frameworks.append("Vite")
-    if has("package.json"):
-        package_json = root / "package.json"
-        try:
-            data = json.loads(package_json.read_text(encoding="utf-8"))
-            deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
-            if "react" in deps and "React" not in frameworks:
-                frameworks.append("React")
-            if "vue" in deps:
-                frameworks.append("Vue")
-        except (OSError, ValueError):
-            # Malformed or unreadable package.json: skip framework detection,
-            # but let unexpected errors (e.g. bugs) surface instead of hiding.
-            pass
-    backend = []
-    if has("requirements.txt") or has("pyproject.toml"):
-        backend.append("Python")
-    if has("go.mod"):
-        backend.append("Go")
-    database = []
-    if has_prisma_schema(root):
-        database.append("Prisma")
-    test_commands = {}
-    if package_manager in {"pnpm", "yarn", "npm"}:
-        prefix = package_manager
-        test_commands = {"unit": f"{prefix} test", "lint": f"{prefix} lint", "typecheck": f"{prefix} typecheck"}
-    elif package_manager == "python":
-        test_commands = {"unit": "python -m pytest", "lint": "python -m ruff check ."}
-    result = {
-        "package_manager": package_manager,
-        "frameworks": frameworks,
-        "backend": backend,
-        "database": database,
-        "test_commands": test_commands,
-    }
-    # Detection is always safe to run and report; persisting it is a workspace
-    # write, so gate it on an initialized workspace. Running on SessionStart must
-    # never create .project — it only refreshes stack.json once opted in.
-    if workspace_exists(root):
-        write_json(engineering_root(root) / "context" / "stack.json", result)
-    return result
-
-
 def repo_context_pack(root: Path) -> dict[str, Any]:
     files = git_files(root)
     stack = detect_stack(root)
@@ -492,31 +415,122 @@ def repo_context_pack(root: Path) -> dict[str, Any]:
     return profile
 
 
+_MEMORY_MAX_DECISIONS = 20
+_MEMORY_MAX_INITIATIVES = 12
+_MEMORY_SUMMARY_CHARS = 280
+
+
+def _markdown_section(body: str, headings: tuple[str, ...]) -> str:
+    """First paragraph under the first matching heading, else the first prose."""
+    lines = body.splitlines()
+    wanted = {name.lower() for name in headings}
+    collecting = False
+    buffer: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            if collecting:
+                break
+            collecting = stripped.lstrip("#").strip().lower() in wanted
+            continue
+        if collecting:
+            if stripped:
+                buffer.append(stripped)
+            elif buffer:
+                break
+    if not buffer:
+        for line in lines:
+            stripped = line.strip()
+            if stripped and not stripped.startswith(("#", "---", "|", "<!--")):
+                buffer = [stripped]
+                break
+    return " ".join(buffer)[:_MEMORY_SUMMARY_CHARS]
+
+
+def _yaml_scalars(text: str, limit: int = 40) -> dict[str, str]:
+    """Top-level ``key: value`` scalar pairs from a simple YAML profile.
+
+    Deliberately stdlib-only (see _yaml_string_list). Nested blocks and lists are
+    skipped rather than half-parsed, so what comes back is only what is certain.
+    """
+    values: dict[str, str] = {}
+    for raw in text.splitlines():
+        if len(values) >= limit:
+            break
+        if not raw or raw.startswith((" ", "\t", "#", "-")):
+            continue
+        key, sep, value = raw.partition(":")
+        value = value.strip().strip("\"'")
+        if sep and value and not key.strip().startswith("#"):
+            values[key.strip()] = value[:_MEMORY_SUMMARY_CHARS]
+    return values
+
+
 def load_project_memory(root: Path) -> dict[str, Any]:
+    """What this project has already decided, as content rather than filenames.
+
+    The previous version returned an `rglob` listing of three directories: paths
+    only, no file ever opened, and `initiatives/` — where every PRD, plan and
+    review actually lives — omitted entirely. A list of filenames is not memory;
+    injecting it into a session tells the model nothing it could act on.
+
+    Everything here is bounded so this stays safe to run on SessionStart.
+    """
     base = engineering_root(root)
-    paths = ["profile", "decisions", "ledger"]
-    loaded = {
-        name: [relpath(path, root) for path in sorted((base / name).rglob("*")) if path.is_file()]
-        if (base / name).exists()
-        else []
-        for name in paths
+    memory: dict[str, Any] = {
+        "meta": {"loaded_at": now_iso(), "workspace": relpath(base, root), "exists": base.exists()},
+        "profile": {},
+        "decisions": [],
+        "initiatives": [],
+        "ledger": {},
     }
-    loaded["loaded_at"] = now_iso()
-    return loaded
+    if not base.exists():
+        return memory
 
+    for path in sorted((base / "profile").glob("*.yaml")):
+        try:
+            memory["profile"][path.stem] = _yaml_scalars(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+    stack = base / "context" / "stack.json"
+    if stack.is_file():
+        detected = read_json_safe(stack)
+        memory["profile"]["stack"] = {
+            key: detected.get(key) for key in ("package_manager", "frameworks", "backend", "database", "testing")
+        }
 
-def active_initiative_resolver(root: Path, prompt: str) -> dict[str, Any]:
-    initiatives = engineering_root(root) / "initiatives"
-    candidates = [p.name for p in initiatives.iterdir() if p.is_dir()] if initiatives.exists() else []
-    text = prompt.lower()
-    chosen = next(
-        (item for item in candidates if item.lower() in text), candidates[0] if len(candidates) == 1 else None
-    )
-    return {
-        "initiative_id": chosen,
-        "confidence": "high" if chosen and chosen.lower() in text else "medium" if chosen else "low",
-        "candidates": candidates,
-    }
+    decisions = sorted((base / "decisions").glob("*.md"))
+    for path in decisions[:_MEMORY_MAX_DECISIONS]:
+        try:
+            front, body = parse_front_matter(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+        memory["decisions"].append(
+            {
+                "path": relpath(path, root),
+                "title": next((line.lstrip("# ").strip() for line in body.splitlines() if line.startswith("# ")), ""),
+                "status": front.get("status", "unknown"),
+                "summary": _markdown_section(body, ("decision", "summary", "context")),
+            }
+        )
+
+    initiatives_dir = base / "initiatives"
+    if initiatives_dir.is_dir():
+        entries = sorted(path for path in initiatives_dir.iterdir() if path.is_dir())
+        for path in entries[:_MEMORY_MAX_INITIATIVES]:
+            stages = {}
+            for stage in sorted(child for child in path.iterdir() if child.is_dir()):
+                artifacts = [item for item in sorted(stage.glob("*.md")) if item.is_file()]
+                if artifacts:
+                    stages[stage.name] = [relpath(item, root) for item in artifacts]
+            memory["initiatives"].append({"id": path.name, "stages": stages, "stage_count": len(stages)})
+
+    ledger = read_json_safe(base / "ledger" / "ledger.json")
+    if ledger:
+        memory["ledger"] = ledger.get("summary", {})
+
+    memory["meta"]["truncated"] = len(decisions) > _MEMORY_MAX_DECISIONS
+    return memory
 
 
 def classify_changed(root: Path, explicit: list[str] | None = None) -> dict[str, Any]:
@@ -1166,147 +1180,217 @@ def prompt_rewrite_suggestions(prompt: str) -> dict[str, Any]:
     }
 
 
-def run_tool(name: str, args: argparse.Namespace) -> dict[str, Any]:
-    root = repo_root(Path(args.root))
-    payload = load_hook_payload() if args.hook else {}
-    prompt = args.prompt or prompt_from_payload(payload)
-    text = args.text or text_from_payload(payload)
-    command = args.command or command_from_payload(payload)
-    path = args.path or file_from_payload(payload)
-    files = args.file or []
-    hook_tool_name = str(payload.get("tool_name") or payload.get("toolName") or "")
+@dataclass(frozen=True)
+class ToolContext:
+    """Everything a tool might need, resolved once before dispatch.
 
-    if name == "detect-stack":
-        return detect_stack(root)
-    if name == "repo-context-pack":
-        return repo_context_pack(root)
-    if name == "classify-user-intent":
-        return classify_user_intent(prompt)
-    if name == "prompt-quality-score":
-        return prompt_quality_score(prompt)
-    if name == "prompt-rewrite-suggestions":
-        return prompt_rewrite_suggestions(prompt)
-    if name == "skill-router":
-        return skill_router(prompt)
-    if name == "clarification-gate":
-        return clarification_gate(prompt)
-    if name == "ask-user-question-bridge":
-        return hook_output("PreToolUse", permissionDecision="allow")
-    if name == "ambiguity-patterns":
-        return ambiguity_patterns(prompt)
-    if name == "load-project-memory":
-        return load_project_memory(root)
-    if name == "active-initiative-resolver":
-        return active_initiative_resolver(root, prompt)
-    if name == "plan-quality-gate":
-        return plan_quality_gate(text or prompt)
-    if name == "architecture-decision-detector":
-        return architecture_decision_detector(root, text or prompt)
-    if name == "council-trigger-detector":
-        return council_trigger_detector(text or prompt)
-    if name in {"dangerous-command-guard", "block-dangerous-bash"}:
-        return dangerous_command_guard(command)
-    if name == "production-environment-guard":
-        return production_environment_guard(command)
-    if name in {"secret-exfiltration-guard", "block-secret-exfil"}:
-        return secret_exfiltration_guard(command, text, path)
-    if name == "sensitive-file-policy":
-        action = args.action
-        if args.hook and hook_tool_name in {"Edit", "MultiEdit"}:
-            action = "edit"
-        elif args.hook and hook_tool_name == "Write":
-            action = "write"
-        return sensitive_file_policy(path, action)
-    if name == "generated-file-guard":
-        return generated_file_guard(path)
-    if name == "edit-scope-guard":
-        allowed = load_current_plan_scope(root)
-        outside = bool(path and allowed and str(Path(path)).replace("\\", "/") not in allowed)
-        return {"outside_scope": outside, "allowed_files": allowed, "path": path}
-    if name == "changed-files-classifier":
-        return classify_changed(root, files)
-    if name in {"env-example-sync", "detect-new-env-vars"}:
-        return env_example_sync(root, args.apply)
-    if name in {"gitignore-sync", "suggest-gitignore-updates"}:
-        return gitignore_sync(root, args.apply)
-    if name in {"schema-validator", "validate-generated-artifacts"}:
-        return schema_validator(root)
-    if name == "markdown-artifact-validator":
-        return markdown_artifact_validator(root, files)
-    if name == "test-command-resolver":
-        return test_command_resolver(root, files)
-    if name == "test-result-parser":
-        return test_result_parser(text, command)
-    if name == "completion-contract-check":
-        return completion_contract_check(root, text or prompt)
-    if name == "definition-of-done-check":
-        return definition_of_done_check(root, args.task_type, text or prompt)
-    if name == "final-answer-structure-check":
-        return final_answer_structure_check(args.task_type, text or prompt)
-    if name == "artifact-completeness-score":
-        return artifact_completeness_score(root, files)
-    if name == "artifact-consistency-check":
-        return artifact_consistency_check(root)
-    if name == "naming-consistency-check":
-        return naming_consistency_check(root)
-    if name == "diagram-sync-check":
-        return diagram_sync_check(root)
-    if name == "example-output-validator":
-        return example_output_validator(root)
-    if name == "prompt-outcome-logger":
-        return prompt_outcome_logger(root, prompt)
-    if name == "skill-trigger-audit":
-        return skill_trigger_audit(root)
-    if name == "prompt-optimization-evaluator":
-        return prompt_optimization_evaluator(root)
-    if name == "failure-pattern-miner":
-        return failure_pattern_miner(root)
-    if name == "dependency-risk-check":
-        return dependency_risk_check(root)
-    if name == "migration-risk-check":
-        return migration_risk_check(root, files)
-    if name == "api-contract-breaking-change-check":
-        return api_contract_breaking_change_check(root, files)
-    if name == "council-input-builder":
-        return council_input_builder(root, prompt or args.question, files)
-    if name == "council-synthesizer":
-        return council_synthesizer(root, args.run_dir, prompt or args.question)
-    if name == "council-role-runner":
-        return council_role_runner(args.role, prompt or args.question)
-    if name == "council-anonymizer":
-        return council_anonymizer(files)
-    if name == "council-peer-review":
-        return council_peer_review(files)
-    if name == "council-fixture-recorder":
-        return council_fixture_recorder(root, args.name, payload)
-    if name == "post-edit-hygiene":
-        return {
-            "changed_files": classify_changed(root, files),
-            "env": env_example_sync(root, False),
-            "gitignore": gitignore_sync(root, False),
-            "schemas": schema_validator(root),
-        }
-    if name == "stop-completion-check":
-        return {
-            "completion": completion_contract_check(root, text or prompt),
-            "artifact_completeness": artifact_completeness_score(root, files),
-        }
-    if name == "user-prompt-intake":
-        result = {
-            "intent": classify_user_intent(prompt),
-            "quality": prompt_quality_score(prompt),
-            "clarification": clarification_gate(prompt),
-            "skill_route": skill_router(prompt),
-            "council": {**council_trigger_detector(prompt), "enforcement": council_enforcement(root)},
-            "linear": linear_pending(root),
-        }
-        # Always emit intake context (intent, quality, council, linear), but only
-        # persist the intake log once the workspace exists. A UserPromptSubmit hook
-        # must never create .project just because the user typed a prompt.
-        if workspace_exists(root):
-            write_json(engineering_root(root) / "reports" / "intake" / f"{now_iso().replace(':', '-')}.json", result)
+    Tools take this rather than the raw Namespace so a registry entry can stay a
+    single expression, and so the payload is parsed once instead of per branch.
+    """
+
+    args: argparse.Namespace
+    root: Path
+    payload: dict[str, Any]
+    prompt: str
+    text: str
+    command: str
+    path: str
+    files: list[str]
+    hook_tool_name: str
+
+
+def _ask_user_question_bridge(c: ToolContext) -> Any:
+    # Record the question before allowing the tool through. Previously this
+    # returned allow and kept nothing, so every question the assistant asked and
+    # every answer it received was discarded.
+    capture_asked_questions(c.root, c.payload)
+    return hook_output("PreToolUse", permissionDecision="allow")
+
+
+def _open_questions(c: ToolContext) -> Any:
+    if c.args.answer:
+        return answer_question(c.root, c.args.id or c.args.question, c.args.answer, c.args.status)
+    if c.args.question:
+        record_questions(c.root, [{"question": c.args.question, "kind": c.args.kind}])
+    return sync_open_questions(c.root)
+
+
+def _sensitive_file_policy(c: ToolContext) -> Any:
+    action = c.args.action
+    if c.args.hook and c.hook_tool_name in {"Edit", "MultiEdit"}:
+        action = "edit"
+    elif c.args.hook and c.hook_tool_name == "Write":
+        action = "write"
+    return sensitive_file_policy(c.path, action)
+
+
+def _edit_scope_guard(c: ToolContext) -> Any:
+    allowed = load_current_plan_scope(c.root)
+    outside = bool(c.path and allowed and str(Path(c.path)).replace("\\", "/") not in allowed)
+    return {
+        "outside_scope": outside,
+        "allowed_files": allowed,
+        "path": c.path,
+        "wrong_initiative": wrong_initiative_write(c.root, c.path),
+    }
+
+
+def _post_edit_hygiene(c: ToolContext) -> Any:
+    return {
+        "changed_files": classify_changed(c.root, c.files),
+        "env": env_example_sync(c.root, False),
+        "gitignore": gitignore_sync(c.root, False),
+        "schemas": schema_validator(c.root),
+    }
+
+
+def _stop_completion_check(c: ToolContext) -> Any:
+    return {
+        "completion": completion_contract_check(c.root, c.text or c.prompt),
+        "artifact_completeness": artifact_completeness_score(c.root, c.files),
+    }
+
+
+def _user_prompt_intake(c: ToolContext) -> Any:
+    intent = classify_user_intent(c.prompt)
+    result = {
+        "intent": intent,
+        "quality": prompt_quality_score(c.prompt),
+        "clarification": clarification_gate(c.prompt),
+        "skill_route": skill_router(c.prompt),
+        "council": {**council_trigger_detector(c.prompt), "enforcement": council_enforcement(c.root)},
+        "linear": linear_pending(c.root),
+        "questions": sync_open_questions(c.root) if workspace_exists(c.root) else {"open_count": 0},
+        # Answers "which initiative is this?" every turn. The resolver existed
+        # but was never called from anywhere, so nothing ever noticed a pivot.
+        "initiative": initiative_drift_detector(c.root, c.prompt, intent),
+    }
+    # Always emit intake context (intent, quality, council, linear), but only
+    # persist the intake log once the workspace exists. A UserPromptSubmit hook
+    # must never create .project just because the user typed a prompt.
+    if workspace_exists(c.root):
+        write_json(engineering_root(c.root) / "reports" / "intake" / f"{now_iso().replace(':', '-')}.json", result)
+    return result
+
+
+# The dispatch table. Keys are tool names as invoked by the dispatcher scripts in
+# this directory and by hooks.json; several tools carry a second name because a
+# hook script and a CLI script address the same logic.
+#
+# A table rather than a chain of comparisons so the set of tools is enumerable:
+# `test_every_dispatcher_script_resolves_to_a_registered_tool` walks these keys
+# against the scripts on disk, which catches a shim whose name no tool answers to
+# and a tool no shim can reach. A 57-branch if-chain cannot be checked that way.
+TOOLS: dict[str, Callable[[ToolContext], Any]] = {
+    # context and detection
+    "detect-stack": lambda c: detect_stack(c.root),
+    "repo-context-pack": lambda c: repo_context_pack(c.root),
+    "load-project-memory": lambda c: load_project_memory(c.root),
+    # prompt intake
+    "classify-user-intent": lambda c: classify_user_intent(c.prompt),
+    "prompt-quality-score": lambda c: prompt_quality_score(c.prompt),
+    "prompt-rewrite-suggestions": lambda c: prompt_rewrite_suggestions(c.prompt),
+    "skill-router": lambda c: skill_router(c.prompt),
+    "clarification-gate": lambda c: clarification_gate(c.prompt),
+    "ambiguity-patterns": lambda c: ambiguity_patterns(c.prompt),
+    "user-prompt-intake": _user_prompt_intake,
+    # questions and initiative identity
+    "ask-user-question-bridge": _ask_user_question_bridge,
+    "open-questions": _open_questions,
+    "active-initiative-resolver": lambda c: active_initiative_resolver(c.root, c.prompt),
+    "initiative-drift-detector": lambda c: initiative_drift_detector(c.root, c.prompt, classify_user_intent(c.prompt)),
+    "initiative": lambda c: initiative_command(c.root, c.args.action, c.args.id or c.args.name, c.args.text),
+    # planning and decisions
+    "plan-quality-gate": lambda c: plan_quality_gate(c.text or c.prompt),
+    "architecture-decision-detector": lambda c: architecture_decision_detector(c.root, c.text or c.prompt),
+    "council-trigger-detector": lambda c: council_trigger_detector(c.text or c.prompt),
+    # guards
+    "dangerous-command-guard": lambda c: dangerous_command_guard(c.command),
+    "production-environment-guard": lambda c: production_environment_guard(c.command),
+    "secret-exfiltration-guard": lambda c: secret_exfiltration_guard(c.command, c.text, c.path),
+    "sensitive-file-policy": _sensitive_file_policy,
+    "generated-file-guard": lambda c: generated_file_guard(c.path),
+    "edit-scope-guard": _edit_scope_guard,
+    # hygiene
+    "changed-files-classifier": lambda c: classify_changed(c.root, c.files),
+    "env-example-sync": lambda c: env_example_sync(c.root, c.args.apply),
+    "gitignore-sync": lambda c: gitignore_sync(c.root, c.args.apply),
+    "schema-validator": lambda c: schema_validator(c.root),
+    "markdown-artifact-validator": lambda c: markdown_artifact_validator(c.root, c.files),
+    "post-edit-hygiene": _post_edit_hygiene,
+    # verification
+    "test-command-resolver": lambda c: test_command_resolver(c.root, c.files),
+    "test-result-parser": lambda c: test_result_parser(c.text, c.command),
+    "completion-contract-check": lambda c: completion_contract_check(c.root, c.text or c.prompt),
+    "definition-of-done-check": lambda c: definition_of_done_check(c.root, c.args.task_type, c.text or c.prompt),
+    "final-answer-structure-check": lambda c: final_answer_structure_check(c.args.task_type, c.text or c.prompt),
+    "artifact-completeness-score": lambda c: artifact_completeness_score(c.root, c.files),
+    "artifact-consistency-check": lambda c: artifact_consistency_check(c.root),
+    "naming-consistency-check": lambda c: naming_consistency_check(c.root),
+    "diagram-sync-check": lambda c: diagram_sync_check(c.root),
+    "example-output-validator": lambda c: example_output_validator(c.root),
+    "stop-completion-check": _stop_completion_check,
+    # risk
+    "dependency-risk-check": lambda c: dependency_risk_check(c.root),
+    "migration-risk-check": lambda c: migration_risk_check(c.root, c.files),
+    "api-contract-breaking-change-check": lambda c: api_contract_breaking_change_check(c.root, c.files),
+    # telemetry and evaluation
+    "prompt-outcome-logger": lambda c: prompt_outcome_logger(c.root, c.prompt),
+    "skill-trigger-audit": lambda c: skill_trigger_audit(c.root),
+    "prompt-optimization-evaluator": lambda c: prompt_optimization_evaluator(c.root),
+    "failure-pattern-miner": lambda c: failure_pattern_miner(c.root),
+    # council
+    "council-input-builder": lambda c: council_input_builder(c.root, c.prompt or c.args.question, c.files),
+    "council-synthesizer": lambda c: council_synthesizer(c.root, c.args.run_dir, c.prompt or c.args.question),
+    "council-role-runner": lambda c: council_role_runner(c.args.role, c.prompt or c.args.question),
+    "council-anonymizer": lambda c: council_anonymizer(c.files),
+    "council-peer-review": lambda c: council_peer_review(c.files),
+    "council-fixture-recorder": lambda c: council_fixture_recorder(c.root, c.args.name, c.payload),
+}
+
+
+def run_tool(name: str, args: argparse.Namespace) -> dict[str, Any]:
+    handler = TOOLS.get(name)
+    if handler is None:
+        raise SystemExit(f"unknown tool: {name}")
+    payload = load_hook_payload() if args.hook else {}
+    return handler(
+        ToolContext(
+            args=args,
+            root=repo_root(Path(args.root)),
+            payload=payload,
+            prompt=args.prompt or prompt_from_payload(payload),
+            text=args.text or text_from_payload(payload),
+            command=args.command or command_from_payload(payload),
+            path=args.path or file_from_payload(payload),
+            files=args.file or [],
+            hook_tool_name=str(payload.get("tool_name") or payload.get("toolName") or ""),
+        )
+    )
+
+
+def wrong_initiative_write(root: Path, path: str) -> dict[str, Any]:
+    """True when an edit targets an initiative other than the active one.
+
+    The last line of defence for initiative drift. The intake hook asks at the
+    top of the turn; this catches the case where the model proceeded anyway, or
+    where the drift only became apparent once a path was chosen.
+    """
+    result: dict[str, Any] = {"mismatch": False, "target": None, "active": None}
+    if not path or not workspace_exists(root):
         return result
-    raise SystemExit(f"unknown tool: {name}")
+    parts = Path(str(path).replace("\\", "/")).as_posix().split("/")
+    if "initiatives" not in parts:
+        return result
+    index = parts.index("initiatives")
+    if index + 1 >= len(parts):
+        return result
+    target = parts[index + 1]
+    if target.endswith(".json"):  # registry.json and friends are not initiatives
+        return result
+    active = load_initiative_registry(root)["active"]
+    result.update(target=target, active=active, mismatch=bool(active and target != active))
+    return result
 
 
 def load_current_plan_scope(root: Path) -> list[str]:
@@ -1326,8 +1410,17 @@ def render_hook(tool_name: str, result: dict[str, Any]) -> dict[str, Any] | None
         return permission_output("PreToolUse", "deny", result.get("reason", "Blocked by Engineering Lifecycle guard."))
     if tool_name == "production-environment-guard" and result.get("requires_approval"):
         return permission_output("PreToolUse", "ask", "Command appears to target production.")
-    if tool_name == "edit-scope-guard" and result.get("outside_scope"):
-        return permission_output("PreToolUse", "ask", "This file is outside the approved implementation scope.")
+    if tool_name == "edit-scope-guard":
+        wrong = result.get("wrong_initiative") or {}
+        if wrong.get("mismatch"):
+            return permission_output(
+                "PreToolUse",
+                "ask",
+                f"This writes into initiative '{wrong['target']}' while '{wrong['active']}' is active. "
+                f"Confirm the target, or run `/initiative switch {wrong['target']}` first.",
+            )
+        if result.get("outside_scope"):
+            return permission_output("PreToolUse", "ask", "This file is outside the approved implementation scope.")
     if tool_name == "generated-file-guard" and result.get("generated"):
         return hook_additional_context("PreToolUse", result["message"])
     if tool_name == "sensitive-file-policy" and result.get("sensitive"):
@@ -1351,6 +1444,13 @@ def render_hook(tool_name: str, result: dict[str, Any]) -> dict[str, Any] | None
             f"Recommended skill: {result['skill_route'].get('recommended_skill')}.",
             f"Prompt quality score: {quality['score']} ({quality['risk']} risk).",
         ]
+        # Surfaced before anything else that writes artifacts, so a pivot is
+        # caught at the top of the turn rather than after the files land.
+        initiative = result.get("initiative") or {}
+        if initiative.get("active"):
+            messages.append(f"Active initiative: {initiative['active']}.")
+        if initiative.get("drift") and initiative.get("message"):
+            messages.append(initiative["message"])
         if clarification["requires_clarification"]:
             messages.append("Clarification is recommended before implementation: " + clarification["reason"])
         council = result.get("council") or {}
@@ -1371,8 +1471,20 @@ def render_hook(tool_name: str, result: dict[str, Any]) -> dict[str, Any] | None
         linear = result.get("linear") or {}
         if linear.get("configured") and linear.get("pending") and linear.get("enforcement") != "off":
             messages.append(
-                f"{linear['pending']} task(s) are not yet tracked in Linear. Run the "
-                "sync-linear-tasks skill to push them."
+                f"{linear['pending']} task(s) are not yet tracked in Linear. "
+                "Run `eng-life linear-sync plan` to push them."
+            )
+        # Surfaced every turn so a question the human never answered stops being
+        # forgotten the moment the turn that raised it ends.
+        questions = result.get("questions") or {}
+        if questions.get("open_count"):
+            unanswered = [
+                entry["question"] for entry in questions.get("open_questions", []) if entry.get("status") == "open"
+            ][:3]
+            listed = "".join(f"\n  - {item}" for item in unanswered)
+            messages.append(
+                f"{questions['open_count']} open question(s) awaiting a human answer "
+                f"({questions.get('path', 'questions/open-questions.json')}):{listed}"
             )
         return hook_additional_context("UserPromptSubmit", "\n".join(messages))
     if tool_name == "post-edit-hygiene":
@@ -1386,6 +1498,12 @@ def render_hook(tool_name: str, result: dict[str, Any]) -> dict[str, Any] | None
         # no pending request the model replies "(Standing by.)" and stops again,
         # which re-fires this hook -> an endless loop. Recommendations are
         # available via the non-hook CLI output; never inject them on Stop.
+        #
+        # This is also why unanswered open questions are NOT surfaced here, which
+        # is where you would first think to put them. They are surfaced at
+        # UserPromptSubmit instead (see the "questions" branch below), which fires
+        # on every turn rather than once at the end - strictly more visible, and
+        # the only route that does not risk the loop above.
         return None
     return None
 
@@ -1405,8 +1523,14 @@ def cli_main(tool_name: str | None = None) -> int:
     parser.add_argument("--role", default="executor")
     parser.add_argument("--name", default="council-fixture")
     parser.add_argument("--task-type", default="implementation")
-    parser.add_argument("--action", default="read")
+    parser.add_argument(
+        "--action", default="read", help="Verb for multi-action tools (initiative: new|switch|close|list)"
+    )
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--id", default="", help="Open-question id to resolve")
+    parser.add_argument("--answer", default="", help="Answer text that resolves an open question")
+    parser.add_argument("--kind", default="general", choices=list(QUESTION_KINDS))
+    parser.add_argument("--status", default="answered", choices=list(QUESTION_STATUSES))
     parser.add_argument(
         "--hook",
         action="store_true",
