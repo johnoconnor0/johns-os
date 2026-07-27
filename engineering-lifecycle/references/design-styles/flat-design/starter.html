@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flat design starter</title>
+<style>
+:root {
+  --bg: #FFFFFF;
+  --fg: #17202A;
+  --surface: #F2F5F7;
+  --surface-2: #E3E9ED;
+  --fg-muted: #4E5C6B;
+  --accent: #E4572E;
+  --accent-fg: #FFFFFF;
+  --success: #1B7F5A;
+  --warning: #B4690E;
+  --danger: #C42B1C;
+  --border: #C6D0D8;
+  --radius: 4px;
+  --shadow: none;                 /* flat means flat */
+  --font-display: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --space: 8px;
+  --motion-fast: 120ms linear;
+  --motion-slow: 220ms linear;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12181F; --fg: #EDF2F6; --surface: #1B242E; --surface-2: #24303C;
+    --fg-muted: #A8B6C3; --accent: #FF7C55; --accent-fg: #17202A;
+    --success: #43BC8E; --warning: #E0A346; --danger: #F0655A; --border: #33414F;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12181F; --fg: #EDF2F6; --surface: #1B242E; --surface-2: #24303C;
+  --fg-muted: #A8B6C3; --accent: #FF7C55; --accent-fg: #17202A;
+  --success: #43BC8E; --warning: #E0A346; --danger: #F0655A; --border: #33414F;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-body); line-height: 1.55; }
+.bar { background: var(--accent); color: var(--accent-fg); }
+.bar .inner { max-width: 1080px; margin: 0 auto; padding: calc(var(--space) * 2) calc(var(--space) * 3);
+              display: flex; align-items: center; gap: calc(var(--space) * 3); }
+.bar a { color: var(--accent-fg); text-decoration: none; font-weight: 600; }
+.wrap { max-width: 1080px; margin: 0 auto; padding: calc(var(--space) * 5) calc(var(--space) * 3); }
+/* Blocks of colour define regions; there are no borders between sections. */
+.block { background: var(--surface); }
+.block .inner { max-width: 1080px; margin: 0 auto; padding: calc(var(--space) * 7) calc(var(--space) * 3); }
+h1 { font-size: clamp(2rem, 4.5vw, 3.25rem); font-weight: 800; line-height: 1.1; letter-spacing: -0.02em;
+     margin: 0 0 calc(var(--space) * 2); max-width: 18ch; }
+h2 { font-size: 1.5rem; font-weight: 700; margin: 0 0 calc(var(--space) * 2); }
+h3 { font-size: 1.0625rem; font-weight: 700; margin: 0 0 var(--space); }
+p { color: var(--fg-muted); max-width: 62ch; }
+/* Primary actions are FILLED. A border-only button on a coloured field is the
+   classic flat failure: nobody can find it. */
+.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 22px;
+       border: 2px solid var(--accent); border-radius: var(--radius); background: var(--accent);
+       color: var(--accent-fg); font-size: 0.9375rem; font-weight: 700; cursor: pointer;
+       text-decoration: none; transition: background var(--motion-fast), border-color var(--motion-fast); }
+.btn:hover { background: var(--fg); border-color: var(--fg); color: var(--bg); }
+/* Secondary keeps a visible border: affordance survives the loss of decoration. */
+.btn--secondary { background: transparent; color: var(--fg); border-color: var(--border); }
+.btn--secondary:hover { background: var(--surface-2); color: var(--fg); border-color: var(--fg); }
+.btn[disabled] { background: var(--surface-2); border-color: var(--surface-2); color: var(--fg-muted);
+                 cursor: not-allowed; }
+:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+a.inline { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.grid { display: grid; gap: calc(var(--space) * 2); grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        margin: calc(var(--space) * 3) 0; }
+.card { background: var(--bg); border: 2px solid var(--border); border-radius: var(--radius);
+        padding: calc(var(--space) * 3); }
+/* Colour is never the only signal: every state carries a word and a glyph too. */
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--radius);
+         font-size: 0.8125rem; font-weight: 700; color: var(--bg); }
+.badge--ok { background: var(--success); }
+.badge--warn { background: var(--warning); }
+.badge--bad { background: var(--danger); }
+label { display: block; font-weight: 700; font-size: 0.9375rem; margin-bottom: var(--space); }
+input { width: 100%; min-height: 44px; padding: 0 12px; border: 2px solid var(--border);
+        border-radius: var(--radius); background: var(--bg); color: var(--fg); font-size: 0.9375rem; }
+input:focus { border-color: var(--accent); }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-muted); }
+th, td { padding: 12px 8px; }
+tbody tr { background: var(--surface); }
+tbody tr:nth-child(even) { background: var(--surface-2); }
+footer { color: var(--fg-muted); font-size: 0.875rem; padding: calc(var(--space) * 4) 0; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="bar">
+  <div class="inner">
+    <strong>Bindaree Produce</strong>
+    <a href="#orders" style="margin-left:auto">Orders</a>
+    <a href="#account">Account</a>
+    <button class="btn btn--secondary" id="theme" style="border-color:var(--accent-fg);color:var(--accent-fg)">Theme</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <h1>Wholesale produce ordering that closes at 9pm, not 4pm.</h1>
+  <p>Order tonight, packed at 3am, on your dock by 6. Two hundred and forty lines,
+     priced per kilo, updated twice daily from the market floor.</p>
+  <p style="margin-top:20px">
+    <a class="btn" href="#orders">Start an order</a>
+    <a class="btn btn--secondary" href="#pricing" style="margin-left:8px">See today's pricing</a>
+  </p>
+</div>
+
+<div class="block">
+  <div class="inner">
+    <h2 id="orders">Open orders</h2>
+    <table>
+      <thead><tr><th>Order</th><th>Delivery</th><th>Lines</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td>BP-40188</td><td>Thu 6 Mar</td><td>34</td><td><span class="badge badge--ok">&#10003; Packed</span></td></tr>
+        <tr><td>BP-40191</td><td>Fri 7 Mar</td><td>18</td><td><span class="badge badge--warn">&#9888; Short 2 lines</span></td></tr>
+        <tr><td>BP-40194</td><td>Fri 7 Mar</td><td>51</td><td><span class="badge badge--bad">&#10007; Payment held</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="wrap">
+  <h2 id="pricing">Today's movers</h2>
+  <div class="grid">
+    <div class="card"><h3>Truss tomato</h3><p style="margin:0">$4.80/kg, down 11% on Tuesday.</p></div>
+    <div class="card"><h3>Iceberg lettuce</h3><p style="margin:0">$2.15/head, up 34% after the Gippsland rain.</p></div>
+    <div class="card"><h3>Dutch carrot</h3><p style="margin:0">$3.60/bunch, steady three weeks running.</p></div>
+  </div>
+
+  <h2 id="account">Open a trade account</h2>
+  <form onsubmit="event.preventDefault()" style="max-width:400px">
+    <label for="abn">ABN</label>
+    <input id="abn" type="text" placeholder="11 digits, no spaces" required>
+    <p style="margin-top:16px"><button class="btn" type="submit">Apply for an account</button></p>
+    <p style="font-size:0.875rem">Already trading with us? <a class="inline" href="#orders">Sign in instead</a>.</p>
+  </form>
+
+  <footer>Bindaree Produce, Epping Market VIC. Trading since 1998.</footer>
+</div>
+<script>
+  document.getElementById('theme').addEventListener('click', () => {
+    const root = document.documentElement;
+    root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+  });
+</script>
+</body>
+</html>

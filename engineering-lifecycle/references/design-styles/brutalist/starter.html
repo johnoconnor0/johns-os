@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brutalist starter</title>
+<style>
+:root {
+  --bg: #F4F4F0;
+  --fg: #0A0A0A;
+  --surface: #FFFFFF;
+  --surface-2: #EAE8E3;
+  --fg-muted: #55534E;
+  --accent: #E61919;
+  --accent-fg: #FFFFFF;
+  --border: #0A0A0A;
+  --radius: 0px;
+  --shadow: none;
+  --font-display: "Archivo Black", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --space: 8px;
+  --motion-fast: 80ms linear;
+  --motion-slow: 160ms linear;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0A0A0A; --fg: #EAEAEA; --surface: #121212; --surface-2: #1A1A1A;
+    --fg-muted: #8A8A8A; --border: #EAEAEA;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0A0A0A; --fg: #EAEAEA; --surface: #121212; --surface-2: #1A1A1A;
+  --fg-muted: #8A8A8A; --border: #EAEAEA;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); line-height: 1.5;
+}
+.mono { font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.wrap { max-width: 1400px; margin: 0 auto; padding: calc(var(--space) * 3); }
+header { border-bottom: 2px solid var(--border); padding-bottom: calc(var(--space) * 2); }
+nav { display: flex; gap: calc(var(--space) * 3); flex-wrap: wrap; }
+nav a { color: var(--fg); text-decoration: none; border-bottom: 2px solid transparent; }
+nav a:hover, nav a:focus-visible { border-bottom-color: var(--accent); }
+h1 {
+  font-family: var(--font-display); font-weight: 900;
+  font-size: clamp(3rem, 9vw, 11rem); line-height: 0.9; letter-spacing: -0.03em;
+  text-transform: uppercase; margin: calc(var(--space) * 6) 0 calc(var(--space) * 2);
+}
+h2 { font-family: var(--font-display); font-size: clamp(1.5rem, 3vw, 2.5rem); text-transform: uppercase;
+     letter-spacing: -0.02em; margin: calc(var(--space) * 6) 0 calc(var(--space) * 2); }
+p { max-width: 62ch; }
+.rule { height: 2px; background: var(--border); margin: calc(var(--space) * 4) 0; }
+/* Hairline grid: 1px gap over a dark parent draws every divider at once. */
+.grid { display: grid; gap: 1px; background: var(--border); border: 2px solid var(--border);
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.cell { background: var(--bg); padding: calc(var(--space) * 3); }
+.cell h3 { margin: 0 0 var(--space); font-family: var(--font-display); text-transform: uppercase; font-size: 1.125rem; }
+.btn {
+  display: inline-block; min-height: 44px; padding: 12px 24px; border: 2px solid var(--border);
+  background: var(--fg); color: var(--bg); font-family: var(--font-mono); font-size: 0.8rem;
+  letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: background var(--motion-fast);
+}
+.btn:hover, .btn:focus-visible { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.btn--ghost { background: transparent; color: var(--fg); }
+label { display: block; margin-bottom: var(--space); }
+input {
+  width: 100%; min-height: 44px; padding: 10px 12px; border: 2px solid var(--border);
+  background: var(--bg); color: var(--fg); font-family: var(--font-mono); font-size: 0.875rem;
+}
+input:focus-visible, .btn:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 0.8rem; }
+th { text-align: left; text-transform: uppercase; letter-spacing: 0.08em; }
+th, td { padding: 12px; border-bottom: 1px solid var(--border); }
+.alert { border: 2px solid var(--accent); border-left-width: 12px; padding: calc(var(--space) * 2); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <nav class="mono">
+      <a href="#work">Work</a><a href="#specs">Specifications</a><a href="#contact">Contact</a>
+      <button class="btn btn--ghost" id="theme" style="margin-left:auto">Theme</button>
+    </nav>
+  </header>
+
+  <h1>Load<br>Bearing</h1>
+  <p class="mono">Structural steel fabrication | Est. 1974 | Unit D-01</p>
+  <p>Every element on this page is either carrying content or carrying structure. Nothing is
+     here to look designed. That constraint is the whole method.</p>
+  <p><a class="btn" href="#specs">Read the specifications</a></p>
+
+  <div class="rule"></div>
+
+  <h2 id="specs">Specifications</h2>
+  <div class="grid">
+    <div class="cell"><h3>Tolerance</h3><p class="mono">± 0.4 mm across a 12 m span.</p></div>
+    <div class="cell"><h3>Throughput</h3><p class="mono">1,840 t processed in FY24.</p></div>
+    <div class="cell"><h3>Certification</h3><p class="mono">AS/NZS 5131 CC3.</p></div>
+  </div>
+
+  <h2>Recent work</h2>
+  <table>
+    <thead><tr><th>Reference</th><th>Client</th><th>Tonnage</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>D-0417</td><td>Hallidie &amp; Roe</td><td>212.4</td><td>Delivered</td></tr>
+      <tr><td>D-0419</td><td>Nordvik Rail</td><td>1,038.7</td><td>In fabrication</td></tr>
+      <tr><td>D-0423</td><td>Peverell Group</td><td>76.2</td><td>Detailing</td></tr>
+    </tbody>
+  </table>
+
+  <div class="rule"></div>
+
+  <div class="alert">
+    <p class="mono" style="margin:0">Capacity for Q3 is committed. New enquiries are being scheduled from October.</p>
+  </div>
+
+  <h2 id="contact">Enquiry</h2>
+  <form onsubmit="event.preventDefault()">
+    <label class="mono" for="email">Email</label>
+    <input id="email" type="email" placeholder="name@company.com.au" required>
+    <p><button class="btn" type="submit">Submit enquiry</button></p>
+  </form>
+</div>
+<script>
+  document.getElementById('theme').addEventListener('click', () => {
+    const root = document.documentElement;
+    root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+  });
+</script>
+</body>
+</html>

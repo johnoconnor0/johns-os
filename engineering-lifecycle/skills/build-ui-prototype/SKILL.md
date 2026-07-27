@@ -1,239 +1,145 @@
 ---
 name: build-ui-prototype
-description: Use when the user asks to build a lightweight UI prototype, clickable MVP, app shell, dashboard mock, product demo, or frontend proof-of-concept from requirements, UX flows, screen inventory, or an implementation plan.
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(python:*), AskUserQuestion
+description: Use when the user asks to build a UI prototype, clickable MVP, app shell, dashboard mock, product demo, or frontend proof-of-concept; to recreate a design from an image; to redesign an existing component; or to scaffold an app from requirements, UX flows, or an implementation plan.
+argument-hint: "[--image-to-component|--component-redesign|--web-page-design|--clickable-prototype|--scaffold-app] [--<style>]"
 ---
 
 # Build UI Prototype
 
 ## Trigger
 
-Use when the user explicitly asks to build, create, implement, prototype, scaffold, or demo a user-facing UI, MVP shell, dashboard, clickable flow, app screen, or frontend proof-of-concept.
+Use when the user asks for a prototype, mock, demo, clickable flow, app shell, a
+component built from a screenshot, or a redesign of existing UI.
 
 ## When To Use
 
-- Use after a PRD, UX flow, screen inventory, or implementation plan exists.
-- Use when the user wants source changes, not only planning.
-- Use when mock data is acceptable or explicitly requested.
-- Use when a lightweight vertical slice is more useful than full production implementation.
-- Use when a demoable product experience is needed quickly.
+- Product value or a user journey needs to be seen before it is built.
+- Requirements, UX flows or a screen inventory exist and need a visual check.
+- An existing component needs redesigning.
 
 ## When Not To Use
 
-- Use `create-discovery-brief` when the product idea is unclear.
-- Use `create-prd` when requirements are missing.
-- Use `create-ux-flow` when screens and states are not defined.
-- Use `create-architecture-plan` when architecture decisions are unresolved.
-- Use `implement-feature-safely` for general non-UI implementation work.
-- Use `review-change` after the prototype is implemented.
+- Production implementation. Use `implement-feature-safely`.
+- Defining reusable standards. Use `create-design-system`.
+- Backend or data work.
 
-## Inputs
+## Step 0: State The Design Read
 
-Inspect available inputs before editing:
+Before any code, say in one line what you are building and for whom:
 
-- PRD, discovery brief, UX flow, and screen inventory.
-- Implementation plan when available.
-- Existing routes, pages, layouts, components, styling, design-system conventions, and mock data patterns.
-- Package scripts, test commands, framework config, and README.
-- Relevant `.project/.engineering` artefacts and hygiene reports.
+> *Reading this as: `<page kind>` for `<audience>`, in a `<style>` language, using
+> `<design system or preset>`.*
 
-Look for these initiative artefacts when an initiative ID or `.project/.engineering` workflow is present:
+If the design read genuinely diverges, ask **one** question. If it can be inferred,
+do not ask.
 
-- `.project/.engineering/initiatives/<initiative-id>/requirements/prd.md`
-- `.project/.engineering/initiatives/<initiative-id>/ux/ux-flow.md`
-- `.project/.engineering/initiatives/<initiative-id>/ux/screen-inventory.md`
-- `.project/.engineering/initiatives/<initiative-id>/system-map/system-map.md`
-- `.project/.engineering/initiatives/<initiative-id>/architecture/architecture-plan.md`
-- `.project/.engineering/initiatives/<initiative-id>/implementation/implementation-plan.md`
+## Step 1: Resolve The Mode
 
-Inspect the repo for:
+| Flag | Behaviour |
+| --- | --- |
+| `--image-to-component` | Rebuild an attached image as a component. Describe the structure you see (layout, grid, type scale, spacing rhythm, states) before writing any markup, and name what you cannot determine from the image rather than inventing it. |
+| `--component-redesign` | Audit first: read the existing component, list what it does, what it gets right, and what is actually wrong. Preserve behaviour, props and accessibility. Change appearance only. |
+| `--web-page-design` | A full page composition: hero, sections, footer, real copy. |
+| `--clickable-prototype` | Multi-screen navigable flow with local state. No real persistence. |
+| `--scaffold-app` | App shell: routing, layout, navigation, empty states. Not features. |
 
-- `package.json`
-- `README.md`
-- Existing routes, pages, or app directory
-- Existing components and layouts
-- Styling, theme, and design-system files
-- Test setup and package scripts
-- Mock data or fixture conventions
-- `.env.example`
-- Framework config
+No flag: infer the mode, state it, proceed.
 
-## Prototype Modes
+## Step 2: Resolve The Design Language
 
-Classify the request before editing:
+Never invent a visual language when one exists.
 
-- Static UI mock: visual or interaction exploration when no API or data model exists.
-- Clickable prototype: demoable flow with navigation, forms, modals, fake transitions, local state, and mock data.
-- Vertical MVP slice: one thin working journey when a basic backend or data contract already exists.
-- Dashboard/app shell: SaaS shell, navigation, cards, tables, empty states, placeholder data, and responsive layout.
+1. **Look for a design system** in this order:
+   - `.project/.engineering/initiatives/<id>/design-system/design-tokens.md`
+   - repo token files: `tokens.ts`, `theme.json`, `tailwind.config.*`, `src/design-system/`
+   - existing components under `src/components/ui/`, `resources/views/components/`
+   - `context/stack.json` for the framework and styling approach
+2. **If one exists, use it.** Do not introduce a second visual language into a
+   codebase that already has one. Say which system you found.
+3. **If none exists**, offer `create-design-system` first when the work is durable.
+4. **If the user declines, or this is throwaway**, ask one style question and apply
+   a preset from `references/design-styles/`:
 
-## Workflow
+   `--brutalist` `--minimalist` `--glassmorphism` `--neumorphism`
+   `--material-design` `--flat-design` `--editorial` `--futuristic`
 
-1. Confirm implementation intent. If the request only asks to plan, design, or map, produce a prototype plan but do not edit source. If intent is unclear, ask whether to plan only, build a prototype with mock data, or build a thin MVP slice using existing APIs/data.
-2. Inspect upstream artefacts and current UI conventions before proposing files or components.
-3. Classify the prototype mode as static UI mock, clickable prototype, vertical MVP slice, or dashboard/app shell.
-4. Define the smallest useful user journey and screen set that demonstrates the product value. Do not build every screen.
-5. State planned files/components, data strategy, mocked behaviour, validation commands, and known limitations before editing.
-6. Implement the prototype in small scoped changes using existing project conventions.
-7. Prefer mock data unless real APIs, schemas, and permissions are already approved.
-8. Include empty, loading, error, success, and permission states where relevant.
-9. Run the smallest relevant validation commands available from package scripts.
-10. Write prototype plan, implementation log, QA checklist, and limitations artefacts when an initiative path exists or can be inferred.
-11. Record follow-up work for productionisation.
+   Each preset has `style.md` (the rules and its specific failure modes) and
+   `starter.html` (a self-contained, token-driven page). Read `style.md` before
+   using the starter. Copy the `:root` token block into the project rather than
+   linking to the reference folder.
 
-## Scope Statement
+## Step 3: Read The Anti-Slop Register
 
-Before editing, produce a short scope statement:
+Read `references/anti-slop-register.md` before generating.
 
-```markdown
-## Prototype Scope
+It is **not a ban list**. Every entry names the pattern, why it reads as
+machine-made, **when it is legitimate**, and what to do instead. Check the override
+condition before rejecting a pattern: if the brief genuinely calls for it, use it
+deliberately and say why.
 
-- Prototype mode:
-- User journey:
-- Screens included:
-- Screens excluded:
-- Data source:
-- Mocked behaviour:
-- Real behaviour:
-- Known limitations:
-- Validation commands:
+The register's sections 7 to 10 cover the specific failure modes of the eight
+presets. If you picked a preset, read its section.
+
+## Step 4: Scope
+
+Build the smallest prototype that demonstrates the value. One complete journey
+beats five partial screens. Write the scope statement before the code:
+
+- Mode and style, and why.
+- The user journey in one sentence.
+- Screens included; screens excluded and why.
+- What is mocked versus real.
+- Known limitations and what productionising would need.
+
+## Step 5: Build
+
+- Match existing repo conventions: framework, styling, file layout, naming.
+- Keep mock data in a clearly named fixture location, visibly separate from real
+  data paths. Never present a mock integration as a real connection.
+- Cover the states that make a demo credible: empty, loading, error, populated,
+  and the permission variants that matter.
+- Accessibility is not deferred to production: semantic elements, labelled
+  controls, visible focus, 4.5:1 body contrast, 44px targets, keyboard reachable.
+- Do not add dependencies unless the repo already uses them or the prototype
+  genuinely cannot work without them.
+
+## Step 6: Check
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/scripts/anti-slop-check.py" <files you wrote>
 ```
 
-## File Plan
+Findings are advisory. For each one, either fix it or state which override
+condition applies. Then walk the register's pre-flight list.
 
-Before editing, map screens to files/components:
+Run the project's own checks (lint, typecheck, build) from `context/stack.json`.
 
-```markdown
-## Planned Files
-
-| File | Purpose | New / Existing | Risk |
-| --- | --- | --- | --- |
-| app/dashboard/page.tsx | Dashboard prototype route | New | Low |
-| components/prototype/audit-card.tsx | Display mock audit status | New | Low |
-| lib/prototype/mock-audit-data.ts | Mock data source | New | Low |
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/scripts/validate-artifact.py" <artifact paths>
 ```
-
-Adapt file paths to the detected framework.
-
-## Implementation Rules
-
-- Use existing conventions.
-- Keep changes small.
-- Prefer mock data unless APIs are already defined.
-- Do not invent real integrations.
-- Do not add unnecessary dependencies.
-- Do not change core architecture unless explicitly requested.
-- Do not touch production auth, billing, payment, database, or production config code unless needed and approved.
-- Include empty, loading, error, success, and permission states where practical.
-- Keep accessibility basic but explicit.
-- Preserve responsive behaviour.
-- Keep prototype limitations visible.
-
-## Safety Constraints
-
-- Do not build without clear implementation intent.
-- Do not invent real backend, API, or provider behaviour.
-- Do not represent mock data as production data.
-- Do not add unnecessary dependencies.
-- Do not edit auth, billing, payment, database, production config, or sensitive permission code unless explicitly requested and scoped.
-- Do not claim production readiness unless tests, review, security, and release criteria support it.
-
-## Prototype Artefacts
-
-When an initiative ID exists or can be inferred, write:
-
-- `.project/.engineering/initiatives/<initiative-id>/prototype/prototype-plan.md`
-- `.project/.engineering/initiatives/<initiative-id>/prototype/prototype-implementation-log.md`
-- `.project/.engineering/initiatives/<initiative-id>/prototype/prototype-qa-checklist.md`
-- `.project/.engineering/initiatives/<initiative-id>/prototype/prototype-limitations.md`
-
-Use the files in `templates/` for these artefacts. The limitations file is required to prevent the prototype from being mistaken for production-ready software.
-
-If no initiative path exists, still summarize plan, implementation log, QA checklist, and limitations in the final response or place them in the nearest project documentation location only when consistent with repo conventions.
 
 ## Outputs
 
-- Source changes for the UI prototype when explicitly requested.
-- `.project/.engineering/initiatives/<initiative-id>/prototype/prototype-plan.md`
-- `.project/.engineering/initiatives/<initiative-id>/prototype/prototype-implementation-log.md`
-- `.project/.engineering/initiatives/<initiative-id>/prototype/prototype-qa-checklist.md`
-- `.project/.engineering/initiatives/<initiative-id>/prototype/prototype-limitations.md`
+Under `.project/.engineering/initiatives/<initiative-id>/prototype/`:
 
-## Lifecycle Position
+- `prototype-plan.md` — scope statement, mode, style, journey, inclusions
+- `prototype-implementation-log.md` — what was built and where
+- `prototype-qa-checklist.md` — states and accessibility checks covered
+- `prototype-limitations.md` — what is mocked, what productionising needs
 
-Use this skill as the implementation bridge in the product workflow:
+Plus the prototype source, in the repo's own conventional location.
 
-```text
-create-discovery-brief
--> create-prd
--> create-ux-flow
--> build-ui-prototype
--> create-test-strategy
--> review-change
--> create-release-plan
-```
+## Safety Constraints
 
-For a more technical MVP:
-
-```text
-profile-product-system
--> create-discovery-brief
--> create-prd
--> create-ux-flow
--> create-system-map
--> create-architecture-plan
--> create-data-model
--> create-api-contract
--> create-implementation-plan
--> build-ui-prototype
--> implement-feature-safely
--> create-test-strategy
--> review-change
--> create-release-plan
-```
-
-Keep the boundary clear: `build-ui-prototype` is for a user-facing prototype or MVP UI slice; `implement-feature-safely` is for broader implementation beyond the prototype.
-
-## References
-
-- Read `engineering-lifecycle/references/prototype-scope-guide.md` when choosing prototype mode, included screens, excluded screens, and data strategy.
-- Read `engineering-lifecycle/references/ui-state-coverage-guide.md` when deciding empty, loading, error, success, permission, responsive, and accessibility states.
-- Use `examples/` for realistic invocation patterns and expected output shape.
-
-## Validation
-
-Inspect `package.json` before choosing commands. Run the smallest relevant checks available, such as:
-
-- `npm run lint`
-- `npm run typecheck`
-- `npm run test`
-- `pnpm lint`
-- `pnpm typecheck`
-- `pnpm test`
-- `npm run build`
-
-If no test/build commands exist, state that clearly and provide manual QA steps.
-
-## Final Response
-
-Include these sections:
-
-- Prototype Built
-- Files Changed
-- Screens / Flow Included
-- Mocked vs Real Behaviour
-- Validation Run
-- Known Limitations
-- Recommended Next Steps
-
-Never claim the prototype is production-ready unless release, test, security, and review checks actually support that.
+- Never present mocked behaviour as real.
+- Never write real credentials, keys or production endpoints into a prototype.
+- Do not modify production code paths, migrations or data.
+- Do not introduce a second design language into a codebase that has one.
+- State every assumption made about content, brand or data that was not given.
 
 ## Related Agents
 
-- `ux-flow-designer`
 - `frontend-engineer`
-- `requirements-analyst`
+- `ux-flow-designer`
 - `qa-test-strategist`
-- `repo-hygiene-maintainer`
-- `solution-architect` when architecture changes are involved
-- `backend-engineer` when backend/API work is involved
-- `security-reviewer` when permissions, PII, account data, or auth flows are involved

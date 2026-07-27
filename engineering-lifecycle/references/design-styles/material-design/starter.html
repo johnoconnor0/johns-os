@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Material Design starter</title>
+<!-- Token-accurate approximation for prototyping only. For production install
+     @material/web and Material 3 tokens: the ripple, state layers, focus order
+     and motion curves are the system, and hand-rolling them behaves wrong. -->
+<style>
+:root {
+  /* Seeded from a real brand colour, not the default baseline purple. */
+  --bg: #FBF8F5;
+  --fg: #1D1B18;
+  --surface: #FBF8F5;
+  --surface-2: #F4EEE8;            /* surface-container */
+  --surface-3: #EEE7DF;            /* surface-container-high */
+  --fg-muted: #4F463C;             /* on-surface-variant */
+  --accent: #8A5218;               /* primary */
+  --accent-fg: #FFFFFF;            /* on-primary */
+  --accent-container: #FFDCC2;
+  --on-accent-container: #2F1500;
+  --error: #BA1A1A;
+  --border: #D3C4B4;               /* outline-variant */
+  --radius: 12px;                  /* shape.medium */
+  --radius-lg: 16px;
+  --radius-full: 999px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08);
+  --shadow-2: 0 2px 6px rgba(0,0,0,0.14), 0 1px 2px rgba(0,0,0,0.10);
+  --font-display: "Roboto", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-body: "Roboto", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --space: 8px;
+  --motion-fast: 200ms cubic-bezier(0.2, 0, 0, 1);
+  --motion-slow: 400ms cubic-bezier(0.2, 0, 0, 1);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15130F; --fg: #EBE1D9; --surface: #15130F; --surface-2: #211E1A;
+    --surface-3: #2C2823; --fg-muted: #D6C5B3; --accent: #FFB77C; --accent-fg: #4A2800;
+    --accent-container: #6A3C05; --on-accent-container: #FFDCC2; --border: #52463B;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15130F; --fg: #EBE1D9; --surface: #15130F; --surface-2: #211E1A;
+  --surface-3: #2C2823; --fg-muted: #D6C5B3; --accent: #FFB77C; --accent-fg: #4A2800;
+  --accent-container: #6A3C05; --on-accent-container: #FFDCC2; --border: #52463B;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-body);
+       line-height: 1.5; -webkit-font-smoothing: antialiased; }
+.appbar { display: flex; align-items: center; gap: calc(var(--space) * 2); height: 64px;
+          padding: 0 calc(var(--space) * 2); background: var(--surface-2); box-shadow: var(--shadow); }
+.appbar .title { font-size: 1.375rem; font-weight: 500; }
+.wrap { max-width: 960px; margin: 0 auto; padding: calc(var(--space) * 4) calc(var(--space) * 3); }
+h1 { font-size: clamp(2rem, 4vw, 3rem); font-weight: 400; line-height: 1.15; letter-spacing: -0.015em;
+     margin: 0 0 calc(var(--space) * 2); max-width: 20ch; }
+h2 { font-size: 1.375rem; font-weight: 500; margin: calc(var(--space) * 5) 0 calc(var(--space) * 2); }
+h3 { font-size: 1rem; font-weight: 500; margin: 0 0 var(--space); }
+p { color: var(--fg-muted); max-width: 62ch; }
+/* Elevation is a hierarchy: 1 = card at rest, 2 = raised. Not decoration. */
+.card { background: var(--surface-2); border-radius: var(--radius); padding: calc(var(--space) * 3);
+        box-shadow: var(--shadow); }
+.card--raised { background: var(--surface-3); box-shadow: var(--shadow-2); }
+.grid { display: grid; gap: calc(var(--space) * 2); grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        margin: calc(var(--space) * 3) 0; }
+/* Material specifies 48px touch targets, not 44. */
+.btn { position: relative; display: inline-flex; align-items: center; justify-content: center;
+       min-height: 48px; padding: 0 24px; border: none; border-radius: var(--radius-full);
+       background: var(--accent); color: var(--accent-fg); font-family: inherit; font-size: 0.875rem;
+       font-weight: 500; letter-spacing: 0.01em; cursor: pointer; text-decoration: none;
+       overflow: hidden; transition: box-shadow var(--motion-fast); }
+.btn::after { content: ""; position: absolute; inset: 0; background: currentColor; opacity: 0;
+              transition: opacity var(--motion-fast); }
+.btn:hover::after { opacity: 0.08; }   /* state layer, per spec */
+.btn:active::after { opacity: 0.10; }
+.btn--tonal { background: var(--accent-container); color: var(--on-accent-container); }
+.btn--outlined { background: transparent; color: var(--accent); border: 1px solid var(--border); }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.chip { display: inline-flex; align-items: center; min-height: 32px; padding: 0 16px;
+        border-radius: var(--radius-full); border: 1px solid var(--border); background: transparent;
+        color: var(--fg); font-size: 0.8125rem; }
+.field { position: relative; margin-bottom: calc(var(--space) * 3); }
+.field input { width: 100%; min-height: 56px; padding: 20px 16px 6px; border: 1px solid var(--border);
+               border-radius: 4px 4px 0 0; background: var(--surface-2); color: var(--fg);
+               font-size: 1rem; font-family: inherit; }
+.field label { position: absolute; left: 16px; top: 8px; font-size: 0.75rem; color: var(--fg-muted); }
+.list { border-radius: var(--radius); overflow: hidden; background: var(--surface-2); box-shadow: var(--shadow); }
+.list-item { display: flex; align-items: center; gap: calc(var(--space) * 2); min-height: 56px;
+             padding: 0 calc(var(--space) * 2); border-bottom: 1px solid var(--border); }
+.list-item:last-child { border-bottom: none; }
+.list-item .meta { margin-left: auto; color: var(--fg-muted); font-size: 0.875rem; }
+.fab { position: fixed; right: 24px; bottom: 24px; width: 56px; height: 56px; border: none;
+       border-radius: var(--radius-lg); background: var(--accent-container);
+       color: var(--on-accent-container); font-size: 1.5rem; cursor: pointer; box-shadow: var(--shadow-2); }
+footer { color: var(--fg-muted); font-size: 0.875rem; padding: calc(var(--space) * 4) 0; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<div class="appbar">
+  <span class="title">Rostering</span>
+  <span style="margin-left:auto"><button class="btn btn--outlined" id="theme">Theme</button></span>
+</div>
+<div class="wrap">
+  <h1>This fortnight's roster, already balanced.</h1>
+  <p>Shift allocation that respects award rules, requested leave and fatigue limits before
+     you see it, not after payroll flags it.</p>
+  <p style="margin-top:20px">
+    <a class="btn" href="#shifts">Open roster</a>
+    <a class="btn btn--tonal" href="#shifts" style="margin-left:8px">Export CSV</a>
+  </p>
+
+  <div class="grid">
+    <div class="card"><h3>Unfilled shifts</h3><p style="margin:0">7 across 3 sites</p></div>
+    <div class="card card--raised"><h3>Award breaches</h3><p style="margin:0">0 flagged</p></div>
+  </div>
+
+  <h2 id="shifts">Next up</h2>
+  <div class="list">
+    <div class="list-item"><span>Marguerite Oyelaran</span><span class="meta">Sat 06:00 - 14:30</span></div>
+    <div class="list-item"><span>Dev Ramanathan</span><span class="meta">Sat 14:00 - 22:30</span></div>
+    <div class="list-item"><span>Bridie Callaghan</span><span class="meta">Sun 06:00 - 14:30</span></div>
+  </div>
+
+  <h2>Add a team member</h2>
+  <form onsubmit="event.preventDefault()" style="max-width:400px">
+    <div class="field">
+      <label for="name">Full name</label>
+      <input id="name" type="text" required>
+    </div>
+    <p><span class="chip">Casual</span> <span class="chip" style="margin-left:8px">Level 3</span></p>
+    <p><button class="btn" type="submit">Add to roster</button></p>
+  </form>
+
+  <footer>Rostering, an internal tool at Wattlebank Health.</footer>
+</div>
+<button class="fab" aria-label="Add shift">+</button>
+<script>
+  document.getElementById('theme').addEventListener('click', () => {
+    const root = document.documentElement;
+    root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+  });
+</script>
+</body>
+</html>

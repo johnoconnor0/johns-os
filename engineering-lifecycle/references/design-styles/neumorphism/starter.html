@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Neumorphism starter</title>
+<style>
+:root {
+  --bg: #E0E5EC;              /* mid-tone is mandatory: the effect needs room both ways */
+  --fg: #2B3445;              /* full contrast, always ON the surface, never made of it */
+  --surface: #E0E5EC;
+  --surface-2: #D6DCE5;
+  --fg-muted: #5A6478;
+  --accent: #4C6EF5;
+  --accent-fg: #FFFFFF;
+  --border: rgba(0,0,0,0.06);
+  --radius: 18px;
+  --shadow-dark: #BEC5CE;
+  --shadow-light: #FFFFFF;
+  --shadow: 6px 6px 12px var(--shadow-dark), -6px -6px 12px var(--shadow-light);
+  --shadow-inset: inset 5px 5px 10px var(--shadow-dark), inset -5px -5px 10px var(--shadow-light);
+  --font-display: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --space: 8px;
+  --motion-fast: 150ms ease-out;
+  --motion-slow: 300ms ease-out;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #2E3239; --fg: #EEF1F5; --surface: #2E3239; --surface-2: #292D33;
+    --fg-muted: #AEB6C2; --accent: #7C93FF; --accent-fg: #12161C;
+    --shadow-dark: #24272C; --shadow-light: #383D46;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #2E3239; --fg: #EEF1F5; --surface: #2E3239; --surface-2: #292D33;
+  --fg-muted: #AEB6C2; --accent: #7C93FF; --accent-fg: #12161C;
+  --shadow-dark: #24272C; --shadow-light: #383D46;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); line-height: 1.6; -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 900px; margin: 0 auto; padding: calc(var(--space) * 5) calc(var(--space) * 3); }
+header { display: flex; align-items: center; gap: calc(var(--space) * 2);
+         padding: calc(var(--space) * 2) calc(var(--space) * 3);
+         border-radius: var(--radius); box-shadow: var(--shadow); }
+.brand { font-weight: 700; letter-spacing: -0.01em; }
+nav { margin-left: auto; display: flex; gap: calc(var(--space) * 2); align-items: center; }
+h1 { font-size: clamp(1.875rem, 4vw, 2.75rem); line-height: 1.15; letter-spacing: -0.02em;
+     margin: calc(var(--space) * 6) 0 calc(var(--space) * 2); max-width: 18ch; }
+h2 { font-size: 1.25rem; margin: calc(var(--space) * 5) 0 calc(var(--space) * 2); }
+h3 { font-size: 1rem; margin: 0 0 var(--space); }
+p { color: var(--fg-muted); max-width: 60ch; }
+.card { border-radius: var(--radius); box-shadow: var(--shadow); padding: calc(var(--space) * 3); background: var(--surface); }
+.well { border-radius: var(--radius); box-shadow: var(--shadow-inset); padding: calc(var(--space) * 3); }
+.grid { display: grid; gap: calc(var(--space) * 3); grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        margin: calc(var(--space) * 3) 0; }
+/* Primary action: solid accent, NOT a shadow variation. The one element that must
+   be findable is the one element that is not the background colour. */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 26px;
+  border: none; border-radius: 999px; background: var(--accent); color: var(--accent-fg);
+  font-size: 0.9375rem; font-weight: 600; cursor: pointer; text-decoration: none;
+  box-shadow: var(--shadow); transition: box-shadow var(--motion-fast), transform var(--motion-fast);
+}
+.btn:active { box-shadow: var(--shadow-inset); transform: translateY(1px); }
+.btn--soft { background: var(--surface); color: var(--fg); }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+/* A toggle differing only by shadow direction is invisible to many users, so the
+   knob also changes colour and the label states the value in words. */
+.toggle { display: inline-flex; align-items: center; gap: 12px; cursor: pointer; }
+.toggle .track { width: 62px; height: 34px; border-radius: 999px; box-shadow: var(--shadow-inset);
+                 position: relative; transition: background var(--motion-fast); }
+.toggle .knob { position: absolute; top: 4px; left: 4px; width: 26px; height: 26px; border-radius: 50%;
+                background: var(--fg-muted); box-shadow: var(--shadow);
+                transition: transform var(--motion-fast), background var(--motion-fast); }
+.toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.toggle input:checked ~ .track .knob { transform: translateX(28px); background: var(--accent); }
+.toggle input:focus-visible ~ .track { outline: 3px solid var(--accent); outline-offset: 3px; }
+label.field { display: block; font-size: 0.9375rem; font-weight: 600; margin-bottom: var(--space); color: var(--fg); }
+input[type="text"], input[type="email"] {
+  width: 100%; min-height: 48px; padding: 0 18px; border: none; border-radius: 999px;
+  background: var(--surface); color: var(--fg); font-size: 0.9375rem; box-shadow: var(--shadow-inset);
+}
+.stat { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; color: var(--fg); }
+footer { color: var(--fg-muted); font-size: 0.875rem; padding: calc(var(--space) * 4) 0; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="brand">Fernhill Studio</span>
+    <nav>
+      <button class="btn btn--soft" id="theme">Theme</button>
+    </nav>
+  </header>
+
+  <h1>Room-by-room climate, without another app.</h1>
+  <p>Six wireless sensors, one hub. Reads temperature, humidity and CO2, and hands the
+     numbers to whatever heating you already have.</p>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Living room</h3>
+      <div class="stat">21.4&deg;C</div>
+      <p style="margin:4px 0 0;font-size:0.875rem">CO2 618 ppm | RH 47%</p>
+    </div>
+    <div class="card">
+      <h3>Study</h3>
+      <div class="stat">19.8&deg;C</div>
+      <p style="margin:4px 0 0;font-size:0.875rem">CO2 1,042 ppm | RH 51%</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Night setback</h3>
+    <p style="margin-bottom:16px">Drops the target by 3 degrees between 22:30 and 05:45.</p>
+    <label class="toggle">
+      <input type="checkbox" checked id="setback">
+      <span class="track"><span class="knob"></span></span>
+      <span id="setbackLabel" style="font-weight:600">On</span>
+    </label>
+  </div>
+
+  <h2>Add a sensor</h2>
+  <div class="well">
+    <form onsubmit="event.preventDefault()" style="max-width:400px">
+      <label class="field" for="pairing">Pairing code</label>
+      <input id="pairing" type="text" placeholder="8 characters from the sensor base" required>
+      <p style="margin-top:18px"><button class="btn" type="submit">Pair sensor</button></p>
+    </form>
+  </div>
+
+  <footer>Fernhill Studio, Hobart TAS.</footer>
+</div>
+<script>
+  document.getElementById('theme').addEventListener('click', () => {
+    const root = document.documentElement;
+    root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+  });
+  const setback = document.getElementById('setback');
+  const setbackLabel = document.getElementById('setbackLabel');
+  setback.addEventListener('change', () => { setbackLabel.textContent = setback.checked ? 'On' : 'Off'; });
+</script>
+</body>
+</html>

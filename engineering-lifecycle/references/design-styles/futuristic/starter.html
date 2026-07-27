@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Futuristic starter</title>
+<style>
+:root {
+  --bg: #08090F;
+  --fg: #E6EDF5;                  /* 4.5:1 body text: dark mode is not automatically accessible */
+  --surface: #0F121B;
+  --surface-2: #161A26;
+  --fg-muted: #96A2B8;            /* still clears 4.5:1 on --bg */
+  --accent: #35E6C0;
+  --accent-rgb: 53, 230, 192;
+  --accent-fg: #04120E;
+  --warn: #F0B429;
+  --danger: #FF6B6B;
+  --border: #222839;
+  --radius: 6px;
+  --shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.30), 0 0 24px -4px rgba(var(--accent-rgb), 0.42);
+  --font-display: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Consolas, monospace;
+  --space: 8px;
+  --motion-fast: 160ms cubic-bezier(0.2, 0, 0, 1);
+  --motion-slow: 420ms cubic-bezier(0.2, 0, 0, 1);
+}
+:root[data-theme="light"] {
+  --bg: #F2F5FA; --fg: #0D1220; --surface: #FFFFFF; --surface-2: #E8EDF5;
+  --fg-muted: #4A566B; --accent: #0A8F76; --accent-rgb: 10, 143, 118; --accent-fg: #FFFFFF;
+  --border: #CBD4E2; --shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.25), 0 2px 10px rgba(13,18,32,0.08);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-body);
+       line-height: 1.55; -webkit-font-smoothing: antialiased; }
+/* Ambient motion: exactly one element, slow, low opacity, non-interactive. */
+.ambient { position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: 0.35;
+  background: radial-gradient(60rem 40rem at 20% -10%, rgba(var(--accent-rgb), 0.16), transparent 60%),
+              radial-gradient(50rem 34rem at 92% 12%, rgba(88,120,255,0.14), transparent 62%);
+  animation: drift 26s ease-in-out infinite alternate; }
+@keyframes drift { to { transform: translate3d(-2%, 1.5%, 0) scale(1.04); } }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.label { font-family: var(--font-mono); font-size: 0.6875rem; letter-spacing: 0.14em;
+         text-transform: uppercase; color: var(--fg-muted); }
+.wrap { max-width: 1120px; margin: 0 auto; padding: calc(var(--space) * 3); }
+header { display: flex; align-items: center; gap: calc(var(--space) * 3);
+         padding: calc(var(--space) * 2) 0; border-bottom: 1px solid var(--border); }
+.brand { font-weight: 650; letter-spacing: -0.01em; }
+h1 { font-size: clamp(2rem, 4.5vw, 3.25rem); font-weight: 650; line-height: 1.08;
+     letter-spacing: -0.025em; margin: calc(var(--space) * 6) 0 calc(var(--space) * 2); max-width: 19ch; }
+h2 { font-size: 1.25rem; font-weight: 600; margin: calc(var(--space) * 5) 0 calc(var(--space) * 2); }
+h3 { font-size: 0.9375rem; font-weight: 600; margin: 0 0 var(--space); }
+p { color: var(--fg-muted); max-width: 62ch; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+         padding: calc(var(--space) * 3); }
+/* Glow the border, never the fill: a glowing fill kills the text on top of it.
+   Exactly one element per view carries it. */
+.panel--live { box-shadow: var(--shadow); border-color: rgba(var(--accent-rgb), 0.42); }
+.grid { display: grid; gap: calc(var(--space) * 2); grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        margin: calc(var(--space) * 3) 0; }
+/* Tabular figures: without them a live readout reflows on every update. */
+.readout { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 2rem;
+           font-weight: 600; letter-spacing: -0.02em; color: var(--fg); }
+.delta { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 0.8125rem; }
+.delta--up { color: var(--accent); } .delta--down { color: var(--danger); }
+.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 22px;
+       border: 1px solid rgba(var(--accent-rgb), 0.5); border-radius: var(--radius);
+       background: rgba(var(--accent-rgb), 0.10); color: var(--accent); font-family: var(--font-mono);
+       font-size: 0.75rem; letter-spacing: 0.10em; text-transform: uppercase; cursor: pointer;
+       text-decoration: none; transition: background var(--motion-fast), box-shadow var(--motion-fast); }
+.btn:hover { background: rgba(var(--accent-rgb), 0.18); box-shadow: var(--shadow); }
+.btn--solid { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+table { width: 100%; border-collapse: collapse; font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums; font-size: 0.8125rem; }
+th { text-align: left; color: var(--fg-muted); font-weight: 500; letter-spacing: 0.08em;
+     text-transform: uppercase; font-size: 0.6875rem; }
+th, td { padding: 10px 8px; border-bottom: 1px solid var(--border); }
+td.num { text-align: right; }
+/* Real SVG, not decorative bars implying data that is not there. */
+.spark { width: 100%; height: 48px; display: block; }
+.spark path { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+label { display: block; font-size: 0.875rem; margin-bottom: var(--space); color: var(--fg); }
+input { width: 100%; min-height: 44px; padding: 0 12px; border: 1px solid var(--border);
+        border-radius: var(--radius); background: var(--surface-2); color: var(--fg);
+        font-family: var(--font-mono); font-size: 0.875rem; }
+footer { color: var(--fg-muted); font-size: 0.8125rem; padding: calc(var(--space) * 4) 0;
+         border-top: 1px solid var(--border); margin-top: calc(var(--space) * 5); }
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+  .ambient { animation: none; }
+}
+</style>
+</head>
+<body>
+<div class="ambient"></div>
+<div class="wrap">
+  <header>
+    <span class="brand">Halcyon Grid</span>
+    <span class="label" style="margin-left:auto">Node AU-SE-02</span>
+    <button class="btn" id="theme">Theme</button>
+  </header>
+
+  <h1>Every inverter on the array, once a second.</h1>
+  <p>Per-string telemetry from 4,100 inverters across eleven sites, reconciled against
+     the market price so curtailment decisions are made on margin, not on guesswork.</p>
+  <p style="margin-top:20px"><a class="btn btn--solid" href="#live">Open live view</a></p>
+
+  <div class="grid" id="live">
+    <div class="panel panel--live">
+      <div class="label">Export now</div>
+      <div class="readout" id="mw">78.42<span style="font-size:1rem"> MW</span></div>
+      <div class="delta delta--up">+3.18 MW since 14:20</div>
+    </div>
+    <div class="panel">
+      <div class="label">Spot price</div>
+      <div class="readout">$91.40</div>
+      <div class="delta delta--down">-$12.05 /MWh</div>
+    </div>
+    <div class="panel">
+      <div class="label">Strings offline</div>
+      <div class="readout">17</div>
+      <div class="delta">of 4,118</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Export, last 60 minutes</h3>
+    <svg class="spark" viewBox="0 0 300 48" preserveAspectRatio="none" role="img"
+         aria-label="Export trending from 71 to 78 megawatts over the last hour">
+      <path d="M0,34 L20,31 L40,33 L60,27 L80,29 L100,22 L120,25 L140,19 L160,21
+               L180,16 L200,18 L220,13 L240,15 L260,11 L280,12 L300,8"/>
+    </svg>
+  </div>
+
+  <h2>Sites requiring attention</h2>
+  <table>
+    <thead><tr><th>Site</th><th>Strings</th><th class="num">Offline</th><th class="num">Export MW</th></tr></thead>
+    <tbody>
+      <tr><td>Bungendore North</td><td>612</td><td class="num">9</td><td class="num">11.208</td></tr>
+      <tr><td>Wemen Stage 2</td><td>884</td><td class="num">6</td><td class="num">18.641</td></tr>
+      <tr><td>Kiamal East</td><td>1,204</td><td class="num">2</td><td class="num">24.077</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Set a curtailment threshold</h2>
+  <form onsubmit="event.preventDefault()" style="max-width:360px">
+    <label for="price">Spot price floor ($/MWh)</label>
+    <input id="price" type="text" value="-45.00" class="mono">
+    <p style="margin-top:16px"><button class="btn btn--solid" type="submit">Apply threshold</button></p>
+  </form>
+
+  <footer>Halcyon Grid Operations. Telemetry delayed by up to 4 seconds.</footer>
+</div>
+<script>
+  document.getElementById('theme').addEventListener('click', () => {
+    const root = document.documentElement;
+    root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light';
+  });
+</script>
+</body>
+</html>
