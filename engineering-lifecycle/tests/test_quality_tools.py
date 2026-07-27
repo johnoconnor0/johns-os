@@ -1362,6 +1362,33 @@ class QualityToolTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             quality_tools.run_tool("no-such-tool", args)
 
+    def test_context_paths_survive_a_root_spelled_differently(self) -> None:
+        # Windows can hand the same directory back under two names: an 8.3 short
+        # form (C:\Users\RUNNER~1\...) and its long form. Path.relative_to
+        # compares components literally and raises when the two are mixed, which
+        # is how the council crashed on the CI runner while passing on every
+        # developer machine, where both spellings happen to agree.
+        #
+        # Reproduced portably with a symlink, or a trailing-dot-and-slash root
+        # where symlinks are not permitted: same directory, different spelling.
+        import council  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as tmp:
+            real = Path(tmp) / "workspace"
+            (real / "notes").mkdir(parents=True)
+            (real / "notes" / "context.md").write_text("# Context\n", encoding="utf-8")
+
+            alias = Path(tmp) / "alias"
+            try:
+                alias.symlink_to(real, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                alias = Path(str(real) + os.sep + "." + os.sep)
+
+            # Root spelled one way, the context file spelled the other.
+            files = council.context_files([str(real / "notes" / "context.md")], Path(alias))
+            self.assertEqual(len(files), 1, files)
+            self.assertTrue(files[0].endswith("context.md"), files[0])
+
     def test_hook_config_uses_supported_top_level_fields(self) -> None:
         config = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
         self.assertTrue(set(config).issubset({"description", "hooks"}))

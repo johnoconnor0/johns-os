@@ -56,14 +56,23 @@ def event(path: Path, name: str, payload: dict[str, Any]) -> None:
 
 
 def context_files(contexts: list[str], root: Path) -> list[str]:
+    """Context paths, relative to the root where possible.
+
+    Uses relpath rather than Path.relative_to because the two can disagree about
+    the same directory on Windows. A path handed in as an 8.3 short name
+    (C:\\Users\\RUNNER~1\\...) and a root that has been resolved to its long form
+    (C:\\Users\\runneradmin\\...) are the same location, but relative_to compares
+    the components literally and raises. relpath resolves both sides first and
+    degrades to the absolute path instead of failing.
+    """
     files: list[str] = []
     for ctx in contexts:
         path = Path(ctx)
         full = path if path.is_absolute() else root / path
         if full.is_dir():
-            files.extend(str(p.relative_to(root)).replace("\\", "/") for p in sorted(full.rglob("*")) if p.is_file())
+            files.extend(relpath(p, root) for p in sorted(full.rglob("*")) if p.is_file())
         elif full.exists():
-            files.append(str(full.relative_to(root)).replace("\\", "/"))
+            files.append(relpath(full, root))
     return sorted(set(files))
 
 

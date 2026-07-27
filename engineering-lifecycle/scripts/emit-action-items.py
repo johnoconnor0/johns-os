@@ -7,7 +7,7 @@ import argparse
 import re
 from pathlib import Path
 
-from eng_common import WORKSPACE, now_iso, read_json, repo_root, slugify, write_json
+from eng_common import WORKSPACE, now_iso, read_json, relpath, repo_root, slugify, write_json
 
 ACTION_RE = re.compile(r"^\s*[-*]\s+\[(?P<state>[ xX])\]\s+(?P<title>.+)$")
 
@@ -30,7 +30,7 @@ def item_from_text(line: str, source: str, index: int) -> dict | None:
 
 
 def collect_from_markdown(path: Path, root: Path) -> list[dict]:
-    rel = str(path.relative_to(root)).replace("\\", "/")
+    rel = relpath(path, root)
     items: list[dict] = []
     for index, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         item = item_from_text(line, rel, index)
@@ -52,7 +52,7 @@ def collect(root: Path, inputs: list[Path]) -> list[dict]:
                         "id": item.get("id") or f"{slugify(full.stem)}-{index:03d}",
                         "title": item.get("title") or item.get("description") or "Untitled action item",
                         "status": item.get("status", "open"),
-                        "source": str(full.relative_to(root)).replace("\\", "/"),
+                        "source": relpath(full, root),
                         "created_at": item.get("created_at") or now_iso(),
                         "owner": item.get("owner", "unassigned"),
                         "priority": item.get("priority", "normal"),
