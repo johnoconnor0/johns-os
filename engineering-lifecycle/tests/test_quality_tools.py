@@ -949,6 +949,22 @@ class QualityToolTests(unittest.TestCase):
                 fire({"tool_name": "Edit", "tool_input": {"file_path": "README.md", "new_string": "hi"}}).strip(), ""
             )
 
+    def run_checked(self, cmd: list[str], **kw: object) -> subprocess.CompletedProcess:
+        """subprocess.run with a failure message that includes stderr.
+
+        check=True raises CalledProcessError, which unittest reports as bare
+        "exit status 1". That is close to useless from a CI log on a machine you
+        cannot reach: the subprocess wrote the reason to stderr and the harness
+        threw it away.
+        """
+        proc = subprocess.run(cmd, text=True, capture_output=True, check=False, **kw)  # type: ignore[arg-type]
+        if proc.returncode != 0:
+            rendered = " ".join(str(part) for part in cmd)
+            self.fail(
+                f"{rendered}\nexit {proc.returncode}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}",
+            )
+        return proc
+
     def drift(self, root: Path, prompt: str) -> dict:
         """Drift detection with the intent injected, as the caller must supply it.
 
@@ -1377,7 +1393,7 @@ class QualityToolTests(unittest.TestCase):
 
             context = target / "context.md"
             context.write_text("# Context\n\nPrefer a reversible implementation slice.\n", encoding="utf-8")
-            council = subprocess.run(
+            council = self.run_checked(
                 [
                     sys.executable,
                     str(ROOT / "bin" / "eng-council"),
@@ -1390,9 +1406,6 @@ class QualityToolTests(unittest.TestCase):
                     "cli-council",
                 ],
                 cwd=target,
-                text=True,
-                capture_output=True,
-                check=True,
             )
             run_dir = Path(council.stdout.strip())
             self.assertTrue((run_dir / "synthesis.md").exists())
@@ -1434,7 +1447,7 @@ class QualityToolTests(unittest.TestCase):
                 encoding="utf-8",
             )
             env = {**os.environ, "ENGINEERING_COUNCIL_ADAPTER_COMMAND": f"{sys.executable} {adapter}"}
-            proc = subprocess.run(
+            proc = self.run_checked(
                 [
                     sys.executable,
                     str(ROOT / "scripts" / "council.py"),
@@ -1452,9 +1465,6 @@ class QualityToolTests(unittest.TestCase):
                     "--run-id",
                     "live-command-test",
                 ],
-                text=True,
-                capture_output=True,
-                check=True,
                 env=env,
             )
             run_dir = Path(proc.stdout.strip())
