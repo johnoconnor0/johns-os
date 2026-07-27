@@ -1,0 +1,55 @@
+name: Publish CLI
+
+# Manual only. Publishing is a deliberate act, and the version in cli/package.json
+# is checked against .claude-plugin/marketplace.json first so the installer can
+# never advertise a marketplace version that does not exist.
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Pack only, do not publish'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Check the CLI version matches the marketplace
+        run: python scripts/check-cli-version.py
+
+      - name: Smoke test the CLI
+        run: |
+          node cli/index.js --version
+          node cli/index.js --help
+          node cli/index.js list
+
+      - name: Pack
+        run: npm pack --workspaces=false
+        working-directory: cli
+
+      - name: Publish
+        if: ${{ inputs.dry-run == false }}
+        run: npm publish --provenance --access public
+        working-directory: cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

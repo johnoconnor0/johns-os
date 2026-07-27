@@ -7,6 +7,11 @@
 /docs/
 /NOTES.md
 
+# Node: the CLI package and the dashboard e2e suite are the only Node in the repo
+node_modules/
+package-lock.json
+cli/*.tgz
+
 # Python bytecode and tool caches
 __pycache__/
 *.py[cod]

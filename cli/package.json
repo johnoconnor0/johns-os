@@ -1,0 +1,30 @@
+{
+  "name": "johns-os",
+  "version": "0.3.0",
+  "description": "Install and manage the johns-os Claude Code plugin marketplace: engineering-lifecycle, business-development, ai-utilities.",
+  "bin": {
+    "johns-os": "index.js"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "index.js",
+    "README.md"
+  ],
+  "keywords": [
+    "claude-code",
+    "claude",
+    "plugin",
+    "marketplace",
+    "engineering-lifecycle"
+  ],
+  "author": "John O'Connor <john@weblifter.com.au>",
+  "license": "MIT",
+  "homepage": "https://github.com/johnoconnor0/johns-os",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johnoconnor0/johns-os.git"
+  }
+}

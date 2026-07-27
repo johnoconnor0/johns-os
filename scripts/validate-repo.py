@@ -13,10 +13,12 @@ ROOT = Path(__file__).resolve().parents[1]
 def commands() -> list[list[str]]:
     return [
         [sys.executable, str(ROOT / "scripts" / "johns-os-marketplace.py"), "validate"],
+        [sys.executable, str(ROOT / "scripts" / "check-cli-version.py")],
         [sys.executable, str(ROOT / "engineering-lifecycle" / "bin" / "eng-life"), "validate"],
         [sys.executable, "-m", "unittest", "discover", "-s", "tests"],
         [sys.executable, "-m", "unittest", "discover", "-s", "engineering-lifecycle/tests"],
-        [sys.executable, "-m", "compileall", "-q", "."],
+        # The e2e fixture and node_modules are generated; compiling them is noise.
+        [sys.executable, "-m", "compileall", "-q", "-x", r"(node_modules|\.fixture)", "."],
     ]
 
 
