@@ -24,7 +24,7 @@ test_cases:
     expected_activation: false
   - id: activate-negative-2
     kind: activation
-    description: should NOT fire when the user wants an implementation breakdown (create-implementation-plan)
+    description: should NOT fire when the user wants an implementation breakdown (create-engineering-plan)
     user_input: "Split this change into sequenced, independently reviewable implementation slices."
     expected_activation: false
   - id: functional-1

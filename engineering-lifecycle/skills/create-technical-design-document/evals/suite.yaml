@@ -1,6 +1,6 @@
-# Starter eval suite for create-architecture-plan. Review and tune judge_criteria + edge expectations.
-skill: create-architecture-plan
-description: "Verifies create-architecture-plan activates on architecture/tradeoff requests and produces an architecture plan with required sections and ADR candidates."
+# Starter eval suite for create-technical-design-document. Review and tune judge_criteria + edge expectations.
+skill: create-technical-design-document
+description: "Verifies create-technical-design-document activates on architecture/tradeoff requests and produces an architecture plan with required sections and ADR candidates."
 test_cases:
   - id: activate-positive-1
     kind: activation

@@ -19,7 +19,7 @@ test_cases:
     expected_activation: true
   - id: activate-negative-1
     kind: activation
-    description: should NOT fire when the user wants an architecture plan with tradeoffs (create-architecture-plan)
+    description: should NOT fire when the user wants an architecture plan with tradeoffs (create-technical-design-document)
     user_input: "Turn this into an implementable architecture plan with module boundaries and ADR candidates."
     expected_activation: false
   - id: activate-negative-2

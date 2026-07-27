@@ -70,9 +70,9 @@
       "should_trigger": "create-system-map"
     },
     {
-      "id": "create-architecture-plan-positive",
+      "id": "create-technical-design-document-positive",
       "query": "Create an architecture plan with module boundaries, technical tradeoffs, ADR candidates, and rollout risks.",
-      "should_trigger": "create-architecture-plan"
+      "should_trigger": "create-technical-design-document"
     },
     {
       "id": "create-data-model-positive",
@@ -85,9 +85,9 @@
       "should_trigger": "create-api-contract"
     },
     {
-      "id": "create-implementation-plan-positive",
+      "id": "create-engineering-plan-positive",
       "query": "Break this approved design into a safe implementation plan with slices, dependencies, tests, and rollback.",
-      "should_trigger": "create-implementation-plan"
+      "should_trigger": "create-engineering-plan"
     },
     {
       "id": "implement-feature-safely-positive",
@@ -115,25 +115,15 @@
       "should_trigger": "run-engineering-council"
     },
     {
-      "id": "sync-linear-tasks-positive",
-      "query": "Push our engineering tasks to Linear and reconcile the issue status.",
-      "should_trigger": "sync-linear-tasks"
-    },
-    {
       "id": "update-repo-hygiene-positive",
       "query": "Update repo hygiene by checking .env.example, .gitignore, generated files, docs drift, and changelog needs.",
       "should_trigger": "update-repo-hygiene"
     },
     {
-      "id": "build-project-dashboard-positive",
-      "query": "Build a project dashboard showing lifecycle status, risks, action items, recent artifacts, and release readiness.",
-      "should_trigger": "build-project-dashboard"
-    },
-    {
       "id": "system-map-not-architecture-plan",
       "query": "Map external systems, workflows, data flow, and failure points for this repo.",
       "should_trigger": "create-system-map",
-      "should_not_trigger": "create-architecture-plan"
+      "should_not_trigger": "create-technical-design-document"
     },
     {
       "id": "discovery-not-prd",
@@ -157,7 +147,7 @@
       "id": "implement-not-plan",
       "query": "Implement the approved checkout feature safely in small verified slices and run the relevant tests; do not re-plan it.",
       "should_trigger": "implement-feature-safely",
-      "should_not_trigger": "create-implementation-plan"
+      "should_not_trigger": "create-engineering-plan"
     },
     {
       "id": "council-not-review-change",

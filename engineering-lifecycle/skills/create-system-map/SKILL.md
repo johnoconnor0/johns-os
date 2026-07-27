@@ -30,13 +30,13 @@ Use when the user asks to understand architecture, map a system, identify compon
 3. Mark each claim as confirmed from inspected evidence or inference.
 4. Produce `system-map.md`, `context-diagram.mmd`, and `container-diagram.mmd`.
 5. Emit action items for missing diagrams, unknown owners, unclear security boundaries, or undocumented external dependencies.
-6. Run `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate-artifact.py" .project/.engineering/initiatives/<initiative-id>/system-map/system-map.md`.
+6. Run `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate-artifact.py" .project/docs/engineering/<initiative-id>/system-map/system-map.md`.
 
 ## Outputs
 
-- `.project/.engineering/initiatives/<initiative-id>/system-map/system-map.md`
-- `.project/.engineering/initiatives/<initiative-id>/system-map/context-diagram.mmd`
-- `.project/.engineering/initiatives/<initiative-id>/system-map/container-diagram.mmd`
+- `.project/docs/engineering/<initiative-id>/system-map/system-map.md`
+- `.project/docs/engineering/<initiative-id>/system-map/context-diagram.mmd`
+- `.project/docs/engineering/<initiative-id>/system-map/container-diagram.mmd`
 
 ## Required Front Matter
 

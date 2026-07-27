@@ -8,7 +8,7 @@ import json
 import re
 from pathlib import Path
 
-from eng_common import REQUIRED_FRONT_MATTER, parse_front_matter, repo_root
+from eng_common import REQUIRED_FRONT_MATTER, artifact_roots, parse_front_matter, repo_root
 
 REQUIRED_SECTIONS = {
     "discovery-brief": [
@@ -24,19 +24,50 @@ REQUIRED_SECTIONS = {
     "prd": [
         "Problem",
         "Goals",
+        "Non-Goals",
         "Users",
+        "User Stories",
         "Functional Requirements",
         "Non-Functional Requirements",
         "Permissions And Data Handling",
+        "Assumptions",
+        "Dependencies",
+        "Success Metrics",
         "Acceptance Criteria",
+        "Release Criteria",
         "Edge Cases",
         "Out Of Scope",
         "Open Questions",
     ],
     "ux-flow": ["Users", "Journeys", "Screens", "States", "Edge Cases", "Accessibility", "Open Questions"],
     "system-map": ["Product Context", "Components", "Data Flow", "Missing Information"],
+    # Kept so plans written before the rename still validate.
     "architecture-plan": ["Decision Summary", "Alternatives Considered", "Risks"],
-    "entity-model": ["Entities", "Relationships", "Ownership", "Sensitivity", "Retention", "Migration Risk"],
+    "technical-design-document": [
+        "Context And Scope",
+        "Non-Goals",
+        "Constraints",
+        "Recommended Architecture",
+        "Detailed Design",
+        "Data Design",
+        "API And Integration Design",
+        "Cross-Cutting Concerns",
+        "Environments",
+        "Alternatives Considered",
+        "Risks",
+        "Migration And Rollback",
+        "Open Questions",
+    ],
+    "entity-model": [
+        "Entities",
+        "Relationships",
+        "Ownership",
+        "Sensitivity",
+        "Retention",
+        "Audit And Lifecycle",
+        "Migration Risk",
+        "Open Questions",
+    ],
     "api-contract": [
         "Purpose",
         "Consumers",
@@ -154,9 +185,12 @@ def main() -> int:
     root = repo_root(Path(args.root))
     paths = [Path(p) for p in args.paths]
     if not paths:
-        paths = list((root / ".project" / ".engineering").rglob("*.md")) + list(
-            (root / ".project" / ".engineering").rglob("*.json")
-        )
+        paths = [
+            item
+            for base in artifact_roots(root)
+            if base.exists()
+            for item in list(base.rglob("*.md")) + list(base.rglob("*.json"))
+        ]
     errors: list[str] = []
     for path in paths:
         errors.extend(validate_path(path if path.is_absolute() else root / path, root))

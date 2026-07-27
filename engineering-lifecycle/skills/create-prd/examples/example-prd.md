@@ -26,11 +26,24 @@ I actually buy this?" and analytics show a high drop-off on the cart screen.
 - Avoid storing any card data in our systems; delegate card capture to the
   payment provider's hosted page.
 
+## Non-Goals
+- Changing how audit events are recorded upstream.
+- Exporting anything other than audit events (billing, usage, session logs).
+- Scheduled or recurring exports; this release is on-demand only.
+
 ## Users
 
 - Returning shoppers with a saved cart who want to complete a purchase.
 - Support agents who need to explain checkout failures to customers.
 - Finance, who reconcile completed orders against provider payouts.
+
+## User Stories
+- As a tenant admin, I want to export a filtered range of audit events, so that I can
+  answer a compliance request without asking support for a database extract.
+- As a compliance reviewer, I want the export to be provably scoped to one tenant, so
+  that I can hand it to an auditor without redacting it first.
+- As a support operator, I want to see that an export ran, so that I can tell a
+  customer whether their file is on the way.
 
 ## Functional Requirements
 
@@ -60,6 +73,26 @@ I actually buy this?" and analytics show a high drop-off on the cart screen.
 - Orders and payment records inherit the originating cart's tenant boundary and
   are readable only by that tenant's support and finance roles.
 
+## Assumptions
+- Tenants hold fewer than 100,000 audit events per month, based on the current p99.
+  Above that the synchronous path will not hold; see Open Questions.
+- Admins requesting an export are already authenticated with an unexpired session.
+- CSV is acceptable to auditors. Not yet confirmed with a real auditor.
+
+## Dependencies
+
+- The audit event schema must be finalised before the export can select columns.
+  Owned by the platform team.
+- Object storage lifecycle rules must exist before generated files can be retained.
+
+## Success Metrics
+
+- 60% of tenant admins run at least one export within 30 days of release. Baseline
+  is zero: the capability does not exist today.
+- Support tickets requesting a manual database extract fall from 12 per month to
+  under 2 within one quarter.
+- 95% of exports complete within 30 seconds.
+
 ## Acceptance Criteria
 
 - Given a valid saved cart, when the user selects Checkout, then they reach the
@@ -68,6 +101,14 @@ I actually buy this?" and analytics show a high drop-off on the cart screen.
   actionable error and remain on the cart screen.
 - Given a confirmed payment webhook, when it is processed twice, then exactly
   one paid order exists for that cart.
+
+## Release Criteria
+- All acceptance criteria verified against a tenant with at least 50,000 events.
+- Cross-tenant leakage test passes: an export requested by tenant A contains zero
+  rows belonging to tenant B.
+- Object storage retention rule verified as active before the first real export.
+- Rollback verified: disabling the feature flag removes the UI entry point and
+  leaves no partially written files.
 
 ## Edge Cases
 

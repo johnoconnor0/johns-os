@@ -18,6 +18,24 @@
       "title": "Review fixture action item."
     }
   ],
+  "open_human_tasks": [
+    {
+      "id": "fixture-human-001",
+      "reason": "The assistant cannot verify this from repository evidence.",
+      "status": "open",
+      "task": "Confirm the production rollout window."
+    }
+  ],
+  "open_questions": [
+    {
+      "asked_at": "2026-01-01T00:00:00Z",
+      "id": "q-fixture00001",
+      "kind": "artifact",
+      "question": "Which team owns the export retention policy?",
+      "source_artifact": "evals/fixtures/artifact-valid.md",
+      "status": "open"
+    }
+  ],
   "recent_artifacts": [
     {
       "freshness": "current",
@@ -32,6 +50,8 @@
   "summary": {
     "artifact_count": 1,
     "council_run_count": 0,
-    "open_action_item_count": 1
+    "open_action_item_count": 1,
+    "open_human_task_count": 1,
+    "open_question_count": 1
   }
 }

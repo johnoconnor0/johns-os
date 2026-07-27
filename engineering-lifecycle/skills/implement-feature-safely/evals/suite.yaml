@@ -19,7 +19,7 @@ test_cases:
     expected_activation: true
   - id: activate-negative-1
     kind: activation
-    description: should NOT fire when the user asks to plan the implementation (create-implementation-plan)
+    description: should NOT fire when the user asks to plan the implementation (create-engineering-plan)
     user_input: "Plan the implementation work and break it into sequenced, testable tasks."
     expected_activation: false
   - id: activate-negative-2

@@ -1,6 +1,6 @@
-# Starter eval suite for create-implementation-plan. Review and tune judge_criteria + edge expectations.
-skill: create-implementation-plan
-description: Verifies create-implementation-plan fires on build/sequencing requests, produces a sequenced plan artifact, and handles missing context gracefully.
+# Starter eval suite for create-engineering-plan. Review and tune judge_criteria + edge expectations.
+skill: create-engineering-plan
+description: Verifies create-engineering-plan fires on build/sequencing requests, produces a sequenced plan artifact, and handles missing context gracefully.
 test_cases:
   - id: activate-positive-1
     kind: activation

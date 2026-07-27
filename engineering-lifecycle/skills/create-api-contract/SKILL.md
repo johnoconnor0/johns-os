@@ -32,8 +32,8 @@ Use when the user asks for request/response shapes, service boundaries, webhooks
 
 ## Outputs
 
-- `.project/.engineering/initiatives/<initiative-id>/api/api-contract.md`
-- `.project/.engineering/initiatives/<initiative-id>/api/openapi-fragment.yaml` when applicable.
+- `.project/docs/engineering/<initiative-id>/api/api-contract.md`
+- `.project/docs/engineering/<initiative-id>/api/openapi-fragment.yaml` when applicable.
 
 ## Required Sections
 

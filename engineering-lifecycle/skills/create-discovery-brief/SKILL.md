@@ -29,11 +29,11 @@ Use when the user has an idea, product problem, feature concept, or business goa
 3. Define the problem, affected users, current workaround, desired outcome, success signals, constraints, risks, and explicit non-goals.
 4. Convert unclear product or business facts into open questions rather than inventing answers.
 5. Recommend the next lifecycle artifact, usually `create-prd`, only when discovery is specific enough for requirements.
-6. Validate the artifact with `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate-artifact.py" .project/.engineering/initiatives/<initiative-id>/discovery/discovery-brief.md`.
+6. Validate the artifact with `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate-artifact.py" .project/docs/engineering/<initiative-id>/discovery-brief.md`.
 
 ## Outputs
 
-- `.project/.engineering/initiatives/<initiative-id>/discovery/discovery-brief.md`
+- `.project/docs/engineering/<initiative-id>/discovery-brief.md`
 
 ## Required Sections
 

@@ -33,8 +33,8 @@ Use when the user asks for user journeys, screen flow, UI states, interaction de
 
 ## Outputs
 
-- `.project/.engineering/initiatives/<initiative-id>/ux/ux-flow.md`
-- `.project/.engineering/initiatives/<initiative-id>/ux/screen-inventory.md`
+- `.project/docs/engineering/<initiative-id>/app-flow.md`
+- `.project/docs/engineering/<initiative-id>/screen-inventory.md`
 
 ## Required Sections
 

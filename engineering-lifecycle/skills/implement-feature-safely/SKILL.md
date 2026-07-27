@@ -23,7 +23,7 @@ Use when the user explicitly asks to implement an approved plan or safely make a
 
 ## Workflow
 
-1. Confirm an approved implementation plan exists, or — for a small change — an agreed inline plan. If neither exists, stop and run create-implementation-plan first.
+1. Confirm an approved implementation plan exists, or — for a small change — an agreed inline plan. If neither exists, stop and run create-engineering-plan first.
 2. Inspect affected source, tests, configs, package scripts, docs, generated artifacts, and hygiene reports before editing.
 3. Implement one slice at a time: make the smallest change that satisfies the accepted scope, naming the expected files and rollback path; pause and ask before editing files outside scope or touching sensitive/generated files.
 4. Run the smallest relevant validation commands available and record exact results. Never claim a check passed unless it was run.

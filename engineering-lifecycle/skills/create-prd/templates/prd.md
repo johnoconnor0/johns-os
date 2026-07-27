@@ -22,11 +22,17 @@ source_artifacts:
 - Success signal:
 - Non-goal:
 
+## Non-Goals
+- What this deliberately does not do, so scope cannot drift into it later.
+
 ## Users
 
 | User / Role | Need | Permission / Constraint |
 | --- | --- | --- |
 | Primary user | Required outcome | Constraint |
+
+## User Stories
+- As a <role>, I want <capability>, so that <outcome>.
 
 ## Functional Requirements
 
@@ -46,15 +52,27 @@ source_artifacts:
 - Allowed action:
 - Restricted data or operation:
 
-## Requirements
+## Assumptions
+- Believed true but unverified. If wrong, the plan changes.
 
-- Deprecated section retained for backward compatibility. Use Functional Requirements and Non-Functional Requirements above.
+## Dependencies
+
+- Other work, teams, systems or vendors this depends on, and who owns each.
+
+## Success Metrics
+
+- Measure, current baseline, target, and by when. Write "baseline unknown" rather
+  than inventing a figure.
 
 ## Acceptance Criteria
 
 | ID | Scenario | Expected Outcome |
 | --- | --- | --- |
 | AC-001 | Given / when condition | Then observable result |
+
+## Release Criteria
+- What must be true to ship. Distinct from acceptance criteria, which describe
+  correct behaviour.
 
 ## Edge Cases
 

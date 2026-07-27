@@ -24,7 +24,7 @@ test_cases:
     expected_activation: false
   - id: activate-negative-2
     kind: activation
-    description: should NOT fire when the user asks to design the architecture (create-architecture-plan)
+    description: should NOT fire when the user asks to design the architecture (create-technical-design-document)
     user_input: "Design the architecture plan with module boundaries and tradeoffs."
     expected_activation: false
   - id: functional-1
