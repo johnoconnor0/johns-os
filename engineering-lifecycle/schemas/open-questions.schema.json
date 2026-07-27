@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/engineering-lifecycle/open-questions.schema.json",
+  "title": "Engineering Lifecycle Open Questions",
+  "description": "Durable store for questions the assistant needs a human to answer, from any source.",
+  "type": "object",
+  "required": ["generated_at", "open_questions"],
+  "properties": {
+    "generated_at": { "type": "string" },
+    "open_questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "question", "kind", "status", "asked_at"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "question": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "enum": ["clarification", "council", "artifact", "general"] },
+          "status": { "type": "string", "enum": ["open", "answered", "deferred", "obsolete"] },
+          "asked_at": { "type": "string" },
+          "answered_at": { "type": ["string", "null"] },
+          "answer": { "type": ["string", "null"] },
+          "options": { "type": "array", "items": { "type": "string" } },
+          "initiative_id": { "type": ["string", "null"] },
+          "skill": { "type": ["string", "null"] },
+          "source_artifact": { "type": ["string", "null"] }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

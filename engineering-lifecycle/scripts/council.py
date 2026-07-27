@@ -13,7 +13,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from eng_common import engineering_root, now_iso, repo_root, slugify, write_json, write_text
+from eng_common import engineering_root, now_iso, relpath, repo_root, slugify, write_json, write_text
+from quality_tools import extract_open_questions, record_questions
 
 ROLES = [
     ("contrarian", "Challenge weak assumptions and identify downside risk."),
@@ -578,6 +579,7 @@ def ask(
     )
     synthesis = with_front_matter(run_id, files, synthesis)
     write_text(base / "synthesis.md", synthesis)
+    record_council_questions(root, run_id, question, synthesis, quorum)
 
     write_json(
         base / "council-report.json",
@@ -595,6 +597,32 @@ def ask(
     )
     event(events, "synthesis_written", {"quorum": quorum, "mode": mode})
     return base
+
+
+def record_council_questions(root: Path, run_id: str, question: str, synthesis: str, quorum: bool) -> None:
+    """Push a council run's unresolved questions into the open-questions store.
+
+    A council run used to be write-only: the ledger recorded that it happened
+    and where its files were, but the question it was convened to answer, and
+    any question it raised in turn, went nowhere a human would see again.
+    """
+    source = relpath(engineering_root(root) / "council" / run_id / "synthesis.md", root)
+    entries: list[dict[str, Any]] = [
+        {"question": item, "kind": "council", "source_artifact": source, "skill": "run-engineering-council"}
+        for item in extract_open_questions(synthesis)
+    ]
+    if not quorum and question:
+        # A failed quorum means the decision is still the human's to make.
+        entries.append(
+            {
+                "question": f"Council run {run_id} did not reach quorum. Decide directly: {question}",
+                "kind": "council",
+                "source_artifact": source,
+                "skill": "run-engineering-council",
+            }
+        )
+    if entries:
+        record_questions(root, entries)
 
 
 def main() -> int:

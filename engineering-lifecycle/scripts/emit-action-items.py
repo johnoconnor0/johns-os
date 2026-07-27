@@ -7,7 +7,7 @@ import argparse
 import re
 from pathlib import Path
 
-from eng_common import now_iso, read_json, repo_root, slugify, write_json
+from eng_common import WORKSPACE, now_iso, read_json, repo_root, slugify, write_json
 
 ACTION_RE = re.compile(r"^\s*[-*]\s+\[(?P<state>[ xX])\]\s+(?P<title>.+)$")
 
@@ -67,7 +67,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("inputs", nargs="+")
     parser.add_argument("--root", default=".")
-    parser.add_argument("--out", default=".project/.engineering/ledger/action-items.json")
+    parser.add_argument("--out", default=str(WORKSPACE / "ledger" / "action-items.json").replace("\\", "/"))
     args = parser.parse_args()
     root = repo_root(Path(args.root))
     items = collect(root, [Path(p) for p in args.inputs])
