@@ -13,6 +13,13 @@ from typing import Any
 
 WORKSPACE = Path(".project") / ".engineering"
 
+# Two roots, two audiences. The workspace above is machine state: ledger, reports,
+# context, council, hygiene, dashboards, questions, registry. DOCS_ROOT below holds
+# the narrative deliverables a person actually reads - PRDs, technical design
+# documents, app flows, design systems and engineering plans - so they are not
+# buried inside a dot-directory of runtime state.
+DOCS_ROOT = Path(".project") / "docs" / "engineering"
+
 # Directories the fallback scan never descends into. Pruned during traversal —
 # filtering them out of the results afterwards still pays the full walk cost.
 # These are the trees `git ls-files` would omit anyway (VCS internals, vendored
@@ -46,6 +53,30 @@ SCAN_PRUNE_DIRS = frozenset(
 SCAN_MAX_FILES = 20_000
 SCAN_MAX_DEPTH = 12
 
+# Stage subdirectories inside `initiatives/<initiative-id>/`, per the workspace
+# contract. Previously these existed only as prose in three documents and were
+# created ad hoc by whichever skill wrote first.
+INITIATIVE_STAGES = (
+    "discovery",
+    "requirements",
+    "ux",
+    "system-map",
+    "architecture",
+    "data",
+    "api",
+    "design-system",
+    "prototype",
+    "implementation",
+    "review",
+    "testing",
+    "release",
+    "maintenance",
+)
+
+# Subdirectories inside `docs/engineering/<initiative-id>/`. The narrative
+# deliverables sit at the top level; these two hold sets of files rather than one.
+DOCS_SUBDIRS = ("design-system", "data", "system-map", "api")
+
 REQUIRED_FRONT_MATTER = [
     "initiative_id",
     "skill",
@@ -74,6 +105,17 @@ def engineering_root(root: Path | None = None) -> Path:
     return (root or repo_root()) / WORKSPACE
 
 
+def docs_root(root: Path | None = None) -> Path:
+    """Where the human-readable deliverables live."""
+    return (root or repo_root()) / DOCS_ROOT
+
+
+def artifact_roots(root: Path | None = None) -> list[Path]:
+    """Both artifact trees, for anything that scans or validates the lot."""
+    base = root or repo_root()
+    return [engineering_root(base), docs_root(base)]
+
+
 def workspace_exists(root: Path | None = None) -> bool:
     """True once the Engineering Lifecycle workspace exists for this repo.
 
@@ -96,6 +138,21 @@ def read_json(path: Path, default: Any = None) -> Any:
         return default
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def read_json_safe(path: Path) -> dict[str, Any]:
+    """A JSON object, or an empty one, never an exception.
+
+    `read_json` raises on malformed content, which is right when a caller must
+    know the file is broken. Detection and context-gathering callers want the
+    opposite: a corrupt generated file should degrade the answer, not abort the
+    scan that was reading it.
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def write_json(path: Path, data: Any) -> None:

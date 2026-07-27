@@ -6,13 +6,13 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from eng_common import engineering_root, repo_root, write_text
+from eng_common import WORKSPACE, engineering_root, repo_root, write_text
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".")
-    parser.add_argument("--out", default=".project/.engineering/reports/mermaid-index.md")
+    parser.add_argument("--out", default=str(WORKSPACE / "reports" / "mermaid-index.md").replace("\\", "/"))
     args = parser.parse_args()
     root = repo_root(Path(args.root))
     diagrams = sorted(engineering_root(root).rglob("*.mmd"))
