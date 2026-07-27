@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -13,8 +15,30 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
+import data_model
 import eng_common
 import quality_tools
+
+SCHEMA_FIXTURE = """
+CREATE TYPE export_status AS ENUM ('pending', 'complete');
+
+CREATE TABLE IF NOT EXISTS public.tenants (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.export_jobs (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id uuid NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    requested_by_email text NOT NULL,
+    status export_status NOT NULL DEFAULT 'pending',
+    CONSTRAINT uq_export_jobs UNIQUE (tenant_id, status)
+);
+
+CREATE INDEX idx_export_jobs_tenant ON public.export_jobs (tenant_id, status);
+ALTER TABLE public.export_jobs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenant_reads_own_jobs" ON public.export_jobs FOR SELECT USING (tenant_id = auth.uid());
+"""
 
 
 class QualityToolTests(unittest.TestCase):
@@ -84,11 +108,17 @@ class QualityToolTests(unittest.TestCase):
             "# Product Requirements Document\n\n"
             "## Problem\n\nCheckout lacks reliable audit exports.\n\n"
             "## Goals\n\nProvide exportable audit events.\n\n"
+            "## Non-Goals\n\n- Changing how audit events are recorded.\n\n"
             "## Users\n\nTenant admins who reconcile audit events.\n\n"
+            "## User Stories\n\n- As a tenant admin, I want a filtered export, so that I can reconcile.\n\n"
             "## Functional Requirements\n\n- Export filtered audit events.\n\n"
             "## Non-Functional Requirements\n\n- Preserve tenant boundaries.\n\n"
             "## Permissions And Data Handling\n\nExports are scoped to the caller's tenant.\n\n"
+            "## Assumptions\n\n- Event volume stays under 100k rows per tenant per month.\n\n"
+            "## Dependencies\n\n- The audit event schema must land first.\n\n"
+            "## Success Metrics\n\n- 60% of tenant admins export at least once in 30 days.\n\n"
             "## Acceptance Criteria\n\n- Given a tenant admin, export contains only tenant events.\n\n"
+            "## Release Criteria\n\n- Verified against a tenant with 50k events.\n\n"
             "## Edge Cases\n\n- An empty range yields an empty export rather than an error.\n\n"
             "## Out Of Scope\n\n- Cross-tenant reporting.\n\n"
             "## Open Questions\n\n- Confirm retention period.\n\n"
@@ -104,7 +134,16 @@ class QualityToolTests(unittest.TestCase):
             artifact.parent.mkdir(parents=True, exist_ok=True)
             artifact.write_text(json.dumps(data, indent=2), encoding="utf-8")
             proc = subprocess.run(
-                [sys.executable, str(ROOT / "scripts" / "validate-schemas.py"), "--root", str(target)],
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "validate-schemas.py"),
+                    "--root",
+                    str(target),
+                    # Generated project artifacts are validated on request, not by
+                    # default: the plugin's own transient .project must never gate a build.
+                    "--project-root",
+                    str(target),
+                ],
                 text=True,
                 capture_output=True,
                 check=False,
@@ -114,7 +153,15 @@ class QualityToolTests(unittest.TestCase):
 
     def test_every_new_script_has_help(self) -> None:
         for path in sorted(SCRIPTS.glob("*.py")):
-            if path.name in {"quality_tools.py", "eng_common.py"}:
+            # Shared modules, imported by the CLI scripts rather than run directly.
+            if path.name in {
+                "quality_tools.py",
+                "eng_common.py",
+                "data_model.py",
+                "stack_detection.py",
+                "questions.py",
+                "initiatives.py",
+            }:
                 continue
             proc = subprocess.run([sys.executable, str(path), "--help"], text=True, capture_output=True)
             self.assertEqual(proc.returncode, 0, path.name)
@@ -622,6 +669,683 @@ class QualityToolTests(unittest.TestCase):
         self.assertIn("plugin scaffold is valid", validate.stdout)
         self.assertIn("schemas and JSON artifacts are valid", validate.stdout)
 
+    def init_target(self, tmp: str) -> Path:
+        target = Path(tmp)
+        subprocess.run(
+            [sys.executable, "-B", str(ROOT / "bin" / "eng-life"), "--root", str(target), "init"],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        return target
+
+    def test_migration_moves_deliverables_and_leaves_working_state(self) -> None:
+        # Two trees, two audiences. An existing workspace has everything in the
+        # machine tree; this moves the narrative half across and renames it to
+        # match the skills that now produce it.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            base = target / ".project" / ".engineering" / "initiatives" / "billing-exports"
+            for stage, name in (
+                ("requirements", "prd.md"),
+                ("architecture", "architecture-plan.md"),
+                ("ux", "ux-flow.md"),
+                ("implementation", "implementation-plan.md"),
+                ("data", "schema.sql"),
+                ("testing", "test-strategy.md"),
+                ("review", "change-review.md"),
+            ):
+                (base / stage).mkdir(parents=True, exist_ok=True)
+                (base / stage / name).write_text(f"# {name}\n", encoding="utf-8")
+
+            script = SCRIPTS / "migrate-artifact-paths.py"
+            dry = json.loads(
+                subprocess.run(
+                    [sys.executable, "-B", str(script), "--root", str(target)],
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                ).stdout
+            )
+            self.assertFalse(dry["applied"])
+            self.assertTrue((base / "requirements" / "prd.md").exists(), "dry run moved files")
+
+            applied = json.loads(
+                subprocess.run(
+                    [sys.executable, "-B", str(script), "--root", str(target), "--apply", "--no-git"],
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                ).stdout
+            )
+            self.assertEqual(applied["errors"], [])
+
+            docs = target / ".project" / "docs" / "engineering" / "billing-exports"
+            for expected in (
+                "prd.md",
+                "technical-design-document.md",
+                "app-flow.md",
+                "engineering-plan.md",
+                "data/schema.sql",
+            ):
+                self.assertTrue((docs / expected).is_file(), expected)
+
+            # Working state is not a deliverable and must stay put.
+            self.assertTrue((base / "testing" / "test-strategy.md").is_file())
+            self.assertTrue((base / "review" / "change-review.md").is_file())
+
+    def test_anti_slop_check_finds_the_detectable_patterns(self) -> None:
+        slop = (
+            '<div class="grid grid-cols-3">\n'
+            "<h3>Elevate your workflow</h3><p>Seamless integration - built for scale.</p>\n"
+            "<p>John Doe, CEO, Acme Inc</p><p>Lorem ipsum dolor sit amet.</p>\n"
+            "<p>99.99% uptime</p>\n"
+            '</div>\n<section class="h-screen" style="background:#000000">\n'
+            "<span>001 / Capabilities</span><span>Design · Build · Ship · Scale</span>\n"
+            '<a href="#">Scroll</a><span>v1.4.2</span>\n'
+            '<svg viewBox="0 0 24 24"><path d="M12 2L2 7v10z"/></svg>\n'
+            "<p>A sentence with an em-dash — right here.</p>\n"
+            "</section>\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            page = Path(tmp) / "page.html"
+            page.write_text(slop, encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, "-B", str(SCRIPTS / "anti-slop-check.py"), str(page), "--root", tmp],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            fired = {finding["id"] for result in json.loads(proc.stdout)["results"] for finding in result["findings"]}
+            for rule in (
+                "em-dash",
+                "pure-black",
+                "screen-height-hero",
+                "placeholder-names",
+                "placeholder-brands",
+                "lorem-ipsum",
+                "filler-verbs",
+                "round-metrics",
+                "hand-rolled-icon",
+                "middle-dot-run",
+                "version-stamp",
+                "three-equal-cards",
+            ):
+                self.assertIn(rule, fired, rule)
+
+    def test_design_style_starters_practise_what_they_preach(self) -> None:
+        # A starter template that trips the register it ships beside is worse than
+        # no starter: it teaches the pattern it is meant to prevent.
+        styles = sorted((ROOT / "references" / "design-styles").glob("*/"))
+        self.assertGreaterEqual(len(styles), 8, "expected eight style presets")
+
+        starters = []
+        for folder in styles:
+            self.assertTrue((folder / "style.md").is_file(), folder.name)
+            starter = folder / "starter.html"
+            self.assertTrue(starter.is_file(), folder.name)
+            starters.append(str(starter))
+
+            markup = starter.read_text(encoding="utf-8")
+            # The shared token contract is what lets a prototype swap styles.
+            for token in ("--bg", "--fg", "--accent", "--radius", "--font-body", "--space"):
+                self.assertIn(token, markup, f"{folder.name} missing {token}")
+            # Both themes, and motion preferences honoured.
+            self.assertIn('data-theme="dark"', markup, folder.name)
+            self.assertIn("prefers-reduced-motion", markup, folder.name)
+            # Self-contained: no external request of any kind.
+            self.assertNotIn("https://fonts.", markup, folder.name)
+            self.assertNotIn("cdn.", markup, folder.name)
+
+        proc = subprocess.run(
+            [sys.executable, "-B", str(SCRIPTS / "anti-slop-check.py"), *starters, "--root", str(ROOT)],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        report = json.loads(proc.stdout)
+        self.assertEqual(report["finding_count"], 0, report["results"])
+
+    def test_glassmorphism_starter_handles_reduced_transparency(self) -> None:
+        # The register calls this required, not optional: without it the style is
+        # unusable for anyone who has turned transparency off.
+        markup = (ROOT / "references/design-styles/glassmorphism/starter.html").read_text(encoding="utf-8")
+        self.assertIn("prefers-reduced-transparency", markup)
+
+    def test_schema_sql_parses_into_a_usable_model(self) -> None:
+        # The old skill emitted prose plus a nine-line Mermaid sketch, so nothing
+        # downstream could read the model back. This is the structure that makes
+        # the schema durable.
+        model = data_model.parse_schema_sql(SCHEMA_FIXTURE)
+        names = [entity["name"] for entity in model["entities"]]
+        self.assertEqual(names, ["public.export_jobs", "public.tenants"])
+        self.assertEqual(model["enums"][0]["values"], ["pending", "complete"])
+
+        jobs = model["entities"][0]
+        self.assertEqual(jobs["primary_key"], ["id"])
+        self.assertTrue(jobs["rls_enabled"])
+        self.assertEqual(jobs["policies"], ["tenant_reads_own_jobs"])
+        self.assertEqual(jobs["indexes"][0]["columns"], ["tenant_id", "status"])
+        self.assertIn(["tenant_id", "status"], jobs["unique_constraints"])
+
+        by_name = {column["name"]: column for column in jobs["columns"]}
+        self.assertFalse(by_name["tenant_id"]["nullable"])
+        self.assertEqual(by_name["tenant_id"]["references"], {"table": "public.tenants", "column": "id"})
+        # A hint for a human decision, never a classification claimed as fact.
+        self.assertTrue(by_name["requested_by_email"]["sensitive_hint"])
+
+        self.assertEqual(model["relationships"][0]["cardinality"], "many-to-one")
+        self.assertIn("public.tenants: row level security not enabled", model["warnings"])
+
+        erd = data_model.render_erd(model)
+        self.assertIn("erDiagram", erd)
+        self.assertIn("public.export_jobs }o--|| public.tenants", erd)
+
+    def test_schema_to_json_regenerates_sidecar_and_erd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            quality_tools.initiative_command(target, "new", "billing-exports", "Billing exports")
+            data = target / ".project" / "docs" / "engineering" / "billing-exports" / "data"
+            (data / "schema.sql").write_text(SCHEMA_FIXTURE, encoding="utf-8")
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-B",
+                    str(SCRIPTS / "schema-to-json.py"),
+                    "--root",
+                    str(target),
+                    "--initiative",
+                    "billing-exports",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            result = json.loads(proc.stdout)
+            self.assertEqual(result["entity_count"], 2)
+            self.assertTrue((data / "data-model.json").is_file())
+            self.assertTrue((data / "erd.mmd").is_file())
+
+    def test_schema_drift_check_reports_both_directions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            quality_tools.initiative_command(target, "new", "billing-exports", "Billing exports")
+            data = target / ".project" / "docs" / "engineering" / "billing-exports" / "data"
+            (data / "schema.sql").write_text(SCHEMA_FIXTURE, encoding="utf-8")
+            subprocess.run(
+                [sys.executable, "-B", str(SCRIPTS / "schema-to-json.py"), "--root", str(target)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            (target / "supabase" / "migrations").mkdir(parents=True)
+            (target / "supabase" / "migrations" / "0001_init.sql").write_text(
+                "CREATE TABLE public.tenants (id uuid PRIMARY KEY);\n"
+                "CREATE TABLE public.legacy_invoices (id uuid PRIMARY KEY);\n",
+                encoding="utf-8",
+            )
+
+            proc = subprocess.run(
+                [sys.executable, "-B", str(SCRIPTS / "schema-drift-check.py"), "--root", str(target)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            report = json.loads(proc.stdout)["reports"][0]
+            self.assertFalse(report["in_sync"])
+            self.assertEqual(report["modelled_only"], ["export_jobs"])
+            self.assertEqual(report["live_only"], ["legacy_invoices"])
+
+    def test_data_model_hook_guards_backend_edits(self) -> None:
+        # Designing a schema and filing it away does not stop a backend drifting.
+        # The model has to be present at the moment a query or migration is written.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            quality_tools.initiative_command(target, "new", "billing-exports", "Billing exports")
+            data = target / ".project" / "docs" / "engineering" / "billing-exports" / "data"
+            (data / "schema.sql").write_text(SCHEMA_FIXTURE, encoding="utf-8")
+            subprocess.run(
+                [sys.executable, "-B", str(SCRIPTS / "schema-to-json.py"), "--root", str(target)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            hook = ROOT / "hooks" / "scripts" / "data-model-context.py"
+
+            def fire(payload: dict) -> str:
+                return subprocess.run(
+                    [sys.executable, "-B", str(hook)],
+                    input=json.dumps(payload),
+                    text=True,
+                    capture_output=True,
+                    cwd=target,
+                    check=True,
+                ).stdout
+
+            informed = json.loads(
+                fire({"tool_name": "Edit", "tool_input": {"file_path": "src/db/queries.ts", "new_string": "select 1"}})
+            )
+            self.assertIn("export_jobs", informed["hookSpecificOutput"]["additionalContext"])
+
+            blocked = json.loads(
+                fire(
+                    {
+                        "tool_name": "Write",
+                        "tool_input": {
+                            "file_path": "supabase/migrations/0002_add.sql",
+                            "content": "CREATE TABLE public.audit_trail (id uuid PRIMARY KEY);",
+                        },
+                    }
+                )
+            )
+            self.assertEqual(blocked["hookSpecificOutput"]["permissionDecision"], "ask")
+            self.assertIn("audit_trail", blocked["hookSpecificOutput"]["permissionDecisionReason"])
+
+            # Silent on files that are not backend work, so it never becomes noise.
+            self.assertEqual(
+                fire({"tool_name": "Edit", "tool_input": {"file_path": "README.md", "new_string": "hi"}}).strip(), ""
+            )
+
+    def drift(self, root: Path, prompt: str) -> dict:
+        """Drift detection with the intent injected, as the caller must supply it.
+
+        `initiatives` deliberately does not import prompt classification; passing
+        the intent in is what keeps that module free of a cycle back into
+        quality_tools.
+        """
+        return quality_tools.initiative_drift_detector(root, prompt, quality_tools.classify_user_intent(prompt))
+
+    def seed_initiative(self, root: Path, identifier: str, title: str, prd: str) -> None:
+        quality_tools.initiative_command(root, "new", identifier, title)
+        base = root / ".project" / ".engineering" / "initiatives" / identifier
+        (base / "requirements" / "prd.md").write_text(prd, encoding="utf-8")
+
+    def test_initiative_command_creates_registers_and_switches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            created = quality_tools.initiative_command(target, "new", "billing-exports", "Billing exports")
+            self.assertEqual(created["active"], "billing-exports")
+
+            base = target / ".project" / ".engineering" / "initiatives" / "billing-exports"
+            for stage in eng_common.INITIATIVE_STAGES:
+                self.assertTrue((base / stage).is_dir(), stage)
+
+            quality_tools.initiative_command(target, "new", "push-notifications", "Push notifications")
+            self.assertEqual(quality_tools.load_initiative_registry(target)["active"], "push-notifications")
+
+            quality_tools.initiative_command(target, "switch", "billing-exports")
+            self.assertEqual(quality_tools.load_initiative_registry(target)["active"], "billing-exports")
+
+            closed = quality_tools.initiative_command(target, "close", "billing-exports")
+            self.assertEqual(closed["closed"], "billing-exports")
+            # One initiative left open, so it becomes the unambiguous active one.
+            self.assertEqual(closed["active"], "push-notifications")
+
+    def test_registry_adopts_folders_created_by_hand(self) -> None:
+        # Initiatives predate the registry, and a folder can always be created
+        # directly. The registry must never disagree with the filesystem.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            (target / ".project" / ".engineering" / "initiatives" / "legacy-work").mkdir(parents=True)
+            registry = quality_tools.load_initiative_registry(target)
+            self.assertIn("legacy-work", [entry["id"] for entry in registry["initiatives"]])
+            self.assertEqual(registry["active"], "legacy-work")
+
+    def test_initiative_drift_is_detected_when_the_session_pivots(self) -> None:
+        # The reported failure: a session starts on one initiative, the user
+        # pivots to unrelated work, and the model keeps writing into the first
+        # folder because nothing notices.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            self.seed_initiative(
+                target,
+                "billing-exports",
+                "Billing exports",
+                "# PRD: Billing exports\n\nTenant admins export billing and invoice events to CSV.\n",
+            )
+
+            on_topic = self.drift(target, "add invoice CSV export filters for tenant admins")
+            self.assertFalse(on_topic["drift"], on_topic)
+
+            pivot = self.drift(target, "plan the requirements for a mobile push notification service")
+            self.assertTrue(pivot["drift"], pivot)
+            self.assertEqual(pivot["action"], "ask")
+            self.assertIn("new initiative", pivot["message"])
+
+            # And the model actually sees it, at the top of the turn.
+            intake = self.run_hook(
+                "hooks/scripts/user-prompt-intake.py",
+                {"prompt": "plan the requirements for a mobile push notification service"},
+                target,
+            )
+            self.assertIn(
+                "new work rather than the active initiative", intake["hookSpecificOutput"]["additionalContext"]
+            )
+
+    def test_drift_detector_suggests_switching_to_a_better_match(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            self.seed_initiative(target, "billing-exports", "Billing exports", "# PRD\n\nInvoice CSV exports.\n")
+            self.seed_initiative(target, "push-notifications", "Push notifications", "# PRD\n\nMobile push delivery.\n")
+            quality_tools.initiative_command(target, "switch", "billing-exports")
+
+            drift = self.drift(target, "write the push notifications delivery requirements")
+            self.assertTrue(drift["drift"])
+            self.assertEqual(drift["action"], "switch")
+            self.assertEqual(drift["best_match"], "push-notifications")
+
+    def test_resolver_matches_natural_language_not_just_the_exact_slug(self) -> None:
+        # The previous resolver did a literal substring test, so "the push
+        # notification work" did not match `push-notifications`, and with two
+        # initiatives and no slug typed verbatim it returned nothing at all.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            self.seed_initiative(target, "billing-exports", "Billing exports", "# PRD\n\nInvoice CSV exports.\n")
+            self.seed_initiative(target, "push-notifications", "Push notifications", "# PRD\n\nMobile push delivery.\n")
+
+            resolved = quality_tools.active_initiative_resolver(target, "the push notification work")
+            self.assertEqual(resolved["best_match"], "push-notifications")
+            self.assertGreater(resolved["best_score"], 0)
+
+    def test_edit_scope_guard_asks_before_writing_to_another_initiative(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            quality_tools.initiative_command(target, "new", "push-notifications", "Push notifications")
+            quality_tools.initiative_command(target, "new", "billing-exports", "Billing exports")
+
+            guard = self.run_hook(
+                "hooks/scripts/edit-scope-guard.py",
+                {
+                    "tool_name": "Write",
+                    "tool_input": {
+                        "file_path": ".project/.engineering/initiatives/push-notifications/requirements/prd.md"
+                    },
+                },
+                target,
+            )
+            output = guard["hookSpecificOutput"]
+            self.assertEqual(output["permissionDecision"], "ask")
+            self.assertIn("push-notifications", output["permissionDecisionReason"])
+
+            allowed = self.run_hook(
+                "hooks/scripts/edit-scope-guard.py",
+                {
+                    "tool_name": "Write",
+                    "tool_input": {
+                        "file_path": ".project/.engineering/initiatives/billing-exports/requirements/prd.md"
+                    },
+                },
+                target,
+            )
+            self.assertNotEqual(allowed.get("hookSpecificOutput", {}).get("permissionDecision"), "ask")
+
+    def test_open_questions_are_captured_from_every_source(self) -> None:
+        # Before this store existed, questions lived only as free-text headings
+        # inside individual artifacts, and the AskUserQuestion hook returned
+        # `allow` while recording nothing. Both are producers now.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            base = target / ".project" / ".engineering"
+            requirements = base / "initiatives" / "billing" / "requirements"
+            requirements.mkdir(parents=True)
+            (requirements / "prd.md").write_text(
+                "---\ninitiative_id: billing\nskill: create-prd\n---\n\n# PRD\n\n"
+                "## Open Questions\n\n- Confirm the refund retention period.\n- TBD\n",
+                encoding="utf-8",
+            )
+
+            bridge = self.run_hook(
+                "hooks/scripts/ask-user-question-bridge.py",
+                {
+                    "tool_name": "AskUserQuestion",
+                    "tool_input": {"questions": [{"question": "Which region hosts billing?", "options": []}]},
+                },
+                target,
+            )
+            self.assertEqual(bridge["hookSpecificOutput"]["permissionDecision"], "allow")
+
+            result = quality_tools.sync_open_questions(target)
+            asked = {entry["question"]: entry for entry in result["open_questions"]}
+            self.assertIn("Which region hosts billing?", asked)
+            self.assertIn("Confirm the refund retention period.", asked)
+            # Template placeholders are not questions anyone can answer.
+            self.assertNotIn("TBD", asked)
+            self.assertEqual(asked["Confirm the refund retention period."]["kind"], "artifact")
+            self.assertEqual(asked["Which region hosts billing?"]["kind"], "clarification")
+            self.assertEqual(result["open_count"], 2)
+
+            # A human-readable view sits beside the machine one.
+            digest = (base / "questions" / "open-questions.md").read_text(encoding="utf-8")
+            self.assertIn("Which region hosts billing?", digest)
+
+    def test_answered_questions_survive_a_rescan(self) -> None:
+        # The artifact scanner re-reads the same headings on every sync, so
+        # without stable ids and answer preservation an answered question would
+        # reopen forever and the store would be worse than useless.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            requirements = target / ".project" / ".engineering" / "initiatives" / "billing" / "requirements"
+            requirements.mkdir(parents=True)
+            (requirements / "prd.md").write_text(
+                "# PRD\n\n## Open Questions\n\n- Confirm the refund retention period.\n", encoding="utf-8"
+            )
+
+            first = quality_tools.sync_open_questions(target)
+            self.assertEqual(first["open_count"], 1)
+            question_id = first["open_questions"][0]["id"]
+
+            answered = quality_tools.answer_question(target, "refund retention", "Seven years.")
+            self.assertTrue(answered["updated"])
+
+            second = quality_tools.sync_open_questions(target)
+            self.assertEqual(second["open_count"], 0)
+            self.assertEqual(second["total_count"], 1, "a rescan duplicated the question")
+            self.assertEqual(second["open_questions"][0]["id"], question_id, "id is not stable across rescans")
+            self.assertEqual(second["open_questions"][0]["answer"], "Seven years.")
+
+    def test_intake_surfaces_unanswered_questions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            quality_tools.record_questions(target, [{"question": "Who owns dunning emails?", "kind": "general"}])
+            intake = self.run_hook(
+                "hooks/scripts/user-prompt-intake.py", {"prompt": "continue the billing work"}, target
+            )
+            context = intake["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("open question", context)
+            self.assertIn("Who owns dunning emails?", context)
+
+    def test_project_memory_reads_content_not_filenames(self) -> None:
+        # The previous implementation rglob'd three directories and returned
+        # paths, never opening a file and skipping initiatives/ entirely. A list
+        # of filenames tells a session nothing it can act on.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            subprocess.run(
+                [sys.executable, "-B", str(ROOT / "bin" / "eng-life"), "--root", str(target), "init"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            base = target / ".project" / ".engineering"
+            (base / "decisions" / "ADR-0007-queue.md").write_text(
+                "---\nstatus: accepted\n---\n\n# ADR-0007: Use a queue\n\n"
+                "## Decision\n\nWrites go through a durable queue so retries are idempotent.\n",
+                encoding="utf-8",
+            )
+            (base / "initiatives" / "billing" / "requirements").mkdir(parents=True)
+            (base / "initiatives" / "billing" / "requirements" / "prd.md").write_text("# PRD\n", encoding="utf-8")
+
+            memory = quality_tools.load_project_memory(target)
+
+            # loaded_at used to be injected into a dict[str, list[str]], so any
+            # consumer iterating values walked the timestamp character by character.
+            self.assertIsInstance(memory["meta"]["loaded_at"], str)
+            for key in ("profile", "decisions", "initiatives", "ledger"):
+                self.assertNotIsInstance(memory[key], str, key)
+
+            decision = memory["decisions"][0]
+            self.assertEqual(decision["status"], "accepted")
+            self.assertIn("durable queue", decision["summary"])
+            self.assertIn("ADR-0007", decision["title"])
+
+            self.assertEqual([item["id"] for item in memory["initiatives"]], ["billing"])
+            self.assertIn("requirements", memory["initiatives"][0]["stages"])
+
+    def test_project_memory_hook_is_dormant_without_a_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = subprocess.run(
+                [sys.executable, "-B", str(ROOT / "hooks" / "scripts" / "load-project-memory.py")],
+                cwd=tmp,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertEqual(proc.stdout.strip(), "", proc.stdout)
+
+    def test_dashboard_rebuilds_without_a_skill_and_shows_questions(self) -> None:
+        # The dashboard skill was removed because sync-ledger already aggregates
+        # and renders on every edit. This proves the pipeline is self-sufficient:
+        # a file written outside any tool call still reaches the rendered page.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            base = target / ".project" / ".engineering"
+            quality_tools.record_questions(target, [{"question": "Which region hosts billing?", "kind": "council"}])
+
+            subprocess.run(
+                [sys.executable, "-B", str(ROOT / "hooks" / "scripts" / "sync-ledger.py"), "--stop"],
+                cwd=target,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            data = json.loads((base / "dashboards" / "dashboard-data.json").read_text(encoding="utf-8"))
+            self.assertEqual(data["summary"]["open_question_count"], 1)
+            self.assertEqual(data["open_questions"][0]["question"], "Which region hosts billing?")
+
+            page = (base / "dashboards" / "project-dashboard.html").read_text(encoding="utf-8")
+            self.assertIn("Open questions", page)
+            self.assertIn("Which region hosts billing?", page)
+
+    def test_removed_dashboard_skill_is_not_referenced(self) -> None:
+        self.assertFalse((ROOT / "skills" / "build-project-dashboard").exists())
+        self.assertNotIn("build-project-dashboard", quality_tools.SKILL_BY_INTENT.values())
+        for name in ("README.md", "references/lifecycle-model.md"):
+            text = (ROOT / name).read_text(encoding="utf-8")
+            self.assertNotIn("`build-project-dashboard`", text, name)
+
+    def test_hooks_never_write_bytecode_into_the_install_directory(self) -> None:
+        # A plugin runs from a version-pinned copy under ~/.claude/plugins/cache.
+        # Without -B, every hook firing drops __pycache__/*.pyc into that install
+        # directory, which reads as "the plugin is caching my edits" when the real
+        # cause is that the install is a different copy entirely. -B removes the
+        # misleading symptom at the source.
+        config = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        commands = [
+            hook["command"]
+            for entries in config["hooks"].values()
+            for entry in entries
+            for hook in entry["hooks"]
+            if hook.get("type") == "command"
+        ]
+        self.assertTrue(commands)
+        for command in commands:
+            if command.startswith("python"):
+                self.assertIn("-B", command.split('"', 1)[0], command)
+
+        # The sh wrappers exec python themselves and need the same flag.
+        for name in ("block-dangerous-bash.sh", "block-secret-exfil.sh"):
+            body = (ROOT / "hooks" / "scripts" / name).read_text(encoding="utf-8")
+            self.assertIn('-B "$PLUGIN_ROOT', body, name)
+
+    def test_eng_dev_reports_install_provenance(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, "-B", str(ROOT / "bin" / "eng-dev"), "status"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        self.assertIn("checkout", proc.stdout)
+        self.assertIn("version", proc.stdout)
+
+    def test_session_start_reports_plugin_root_and_version(self) -> None:
+        # Cache drift is invisible unless the running copy announces itself.
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = subprocess.run(
+                [sys.executable, "-B", str(ROOT / "hooks" / "scripts" / "session-start-context.py")],
+                cwd=tmp,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            context = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("engineering-lifecycle v", context)
+            self.assertIn("running from", context)
+
+    def test_stop_ledger_sync_is_silent_and_debounced(self) -> None:
+        # The Stop hook catches artifacts written by Bash, which never fires
+        # PostToolUse. It must emit nothing (Stop stdout is re-injected and loops)
+        # and must not re-scan when nothing changed since the last sync.
+        hook = ROOT / "hooks" / "scripts" / "sync-ledger.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            subprocess.run(
+                [sys.executable, "-B", str(ROOT / "bin" / "eng-life"), "--root", str(target), "init"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            (target / ".project" / ".engineering" / "decisions" / "ADR-0001-x.md").write_text(
+                "# ADR\n", encoding="utf-8"
+            )
+
+            first = subprocess.run(
+                [sys.executable, "-B", str(hook), "--stop"], cwd=target, text=True, capture_output=True, check=True
+            )
+            self.assertEqual(first.stdout.strip(), "", first.stdout)
+            ledger = target / ".project" / ".engineering" / "ledger" / "ledger.json"
+            self.assertTrue(ledger.exists())
+
+            synced_at = ledger.stat().st_mtime
+            second = subprocess.run(
+                [sys.executable, "-B", str(hook), "--stop"], cwd=target, text=True, capture_output=True, check=True
+            )
+            self.assertEqual(second.stdout.strip(), "", second.stdout)
+            self.assertEqual(ledger.stat().st_mtime, synced_at, "debounce did not prevent a redundant sync")
+
+    def test_every_dispatcher_resolves_to_a_registered_tool(self) -> None:
+        # The reason run_tool is a table rather than a chain of comparisons: the
+        # set of tools is enumerable, so a shim whose name no tool answers to
+        # fails here instead of at the moment a hook fires. A 57-branch if-chain
+        # could not be checked this way.
+        registered = set(quality_tools.TOOLS)
+        self.assertGreater(len(registered), 50)
+
+        invoked: dict[str, str] = {}
+        for folder in (ROOT / "scripts", ROOT / "hooks" / "scripts"):
+            for path in sorted(folder.glob("*.py")):
+                match = re.search(r'cli_main\("([a-z0-9-]+)"\)', path.read_text(encoding="utf-8"))
+                if match:
+                    invoked[str(path.relative_to(ROOT))] = match.group(1)
+
+        self.assertGreater(len(invoked), 50, "expected the dispatcher shims to be found")
+        unknown = {script: tool for script, tool in invoked.items() if tool not in registered}
+        self.assertEqual(unknown, {}, f"dispatcher scripts naming an unregistered tool: {unknown}")
+
+        # Every registered tool must be reachable from a script or a hook, or it
+        # is dead weight nothing can call.
+        unreachable = registered - set(invoked.values())
+        self.assertEqual(unreachable, set(), f"registered tools no script can invoke: {sorted(unreachable)}")
+
+    def test_unknown_tool_name_is_rejected(self) -> None:
+        args = argparse.Namespace(root=str(ROOT), hook=False)
+        with self.assertRaises(SystemExit):
+            quality_tools.run_tool("no-such-tool", args)
+
     def test_hook_config_uses_supported_top_level_fields(self) -> None:
         config = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
         self.assertTrue(set(config).issubset({"description", "hooks"}))
@@ -1017,6 +1741,106 @@ class BoundedScanTests(unittest.TestCase):
             self.assertIn("React", stack["frameworks"])
             # Monorepo layout: prisma sits under apps/api, not at the root.
             self.assertEqual(stack["database"], ["Prisma"])
+
+    def make_monorepo(self, tmp: str) -> Path:
+        """A pnpm workspace whose real stack lives entirely below the root.
+
+        This is the shape that returned empty frameworks/backend/database: the
+        root manifest carries only build tooling, and every framework, runtime
+        and database signal sits inside a workspace member or a sibling folder.
+        """
+        root = Path(tmp) / "monorepo"
+        (root / "apps" / "web").mkdir(parents=True)
+        (root / "workers" / "api").mkdir(parents=True)
+        (root / "supabase" / "migrations").mkdir(parents=True)
+        (root / "node_modules" / "next").mkdir(parents=True)
+
+        (root / "pnpm-workspace.yaml").write_text('packages:\n  - "apps/*"\n  - "workers/*"\n', encoding="utf-8")
+        (root / "pnpm-lock.yaml").write_text("", encoding="utf-8")
+        (root / "tsconfig.base.json").write_text("{}", encoding="utf-8")
+        # Root manifest carries build tooling only, as a real turbo repo does.
+        (root / "package.json").write_text(
+            json.dumps({"devDependencies": {"turbo": "^2", "typescript": "^5"}, "scripts": {"build": "turbo build"}}),
+            encoding="utf-8",
+        )
+        (root / "apps" / "web" / "package.json").write_text(
+            json.dumps({"dependencies": {"next": "^15", "react": "^19"}}), encoding="utf-8"
+        )
+        (root / "apps" / "web" / "next.config.ts").write_text("", encoding="utf-8")
+        (root / "workers" / "api" / "package.json").write_text(
+            json.dumps({"dependencies": {"hono": "^4", "drizzle-orm": "^0.3"}}), encoding="utf-8"
+        )
+        (root / "workers" / "api" / "wrangler.toml").write_text("", encoding="utf-8")
+        (root / "supabase" / "config.toml").write_text("", encoding="utf-8")
+        return root
+
+    def test_detect_stack_resolves_workspace_members(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.make_monorepo(tmp)
+            stack = quality_tools.detect_stack(root)
+
+            self.assertEqual(stack["package_manager"], "pnpm")
+            # Frameworks live in a workspace member, not at the root.
+            self.assertIn("Next.js", stack["frameworks"])
+            self.assertIn("React", stack["frameworks"])
+            # A JS/TS monorepo has a backend even with no requirements.txt.
+            self.assertIn("Node.js", stack["backend"])
+            self.assertIn("TypeScript", stack["backend"])
+            self.assertIn("Hono", stack["backend"])
+            self.assertIn("Cloudflare Workers", stack["backend"])
+            # Supabase and Drizzle are invisible to a Prisma-only detector.
+            self.assertIn("Supabase", stack["database"])
+            self.assertIn("Drizzle", stack["database"])
+
+            # Every detection names the file or dependency that proved it.
+            self.assertEqual(stack["evidence"]["frameworks"]["Next.js"], "apps/web/next.config.ts")
+            self.assertEqual(stack["evidence"]["database"]["Supabase"], "supabase/config.toml")
+            self.assertEqual(
+                sorted(stack["workspace_manifests"]), ["apps/web/package.json", "workers/api/package.json"]
+            )
+
+            # Vendored copies must never be mistaken for workspace members.
+            self.assertFalse(any("node_modules" in item for item in stack["workspace_manifests"]))
+
+    def test_detect_stack_only_reports_commands_that_exist(self) -> None:
+        # Templating `<pm> test` off the package manager advertised scripts that
+        # were never defined, and told this repo to run pytest when it runs
+        # unittest and does not depend on pytest.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "node"
+            root.mkdir()
+            (root / "package-lock.json").write_text("", encoding="utf-8")
+            (root / "package.json").write_text(json.dumps({"scripts": {"lint": "eslint ."}}), encoding="utf-8")
+            commands = quality_tools.detect_stack(root)["test_commands"]
+            self.assertEqual(commands, {"lint": "npm run lint"})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "py"
+            (root / "tests").mkdir(parents=True)
+            (root / "pyproject.toml").write_text("[tool.ruff]\n", encoding="utf-8")
+            (root / "requirements-dev.txt").write_text("ruff==0.15.22\n", encoding="utf-8")
+            commands = quality_tools.detect_stack(root)["test_commands"]
+            self.assertEqual(commands["unit"], "python -m unittest discover -s tests")
+            self.assertEqual(commands["lint"], "python -m ruff check .")
+
+    def test_workspace_globs_read_pnpm_and_package_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pnpm-workspace.yaml").write_text(
+                "# a comment\npackages:\n  - 'apps/*'\n  - \"workers/*/widgets\"\nonlyBuiltDependencies:\n  - esbuild\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(quality_tools.workspace_globs(root), ["apps/*", "workers/*/widgets"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(json.dumps({"workspaces": ["packages/*"]}), encoding="utf-8")
+            self.assertEqual(quality_tools.workspace_globs(root), ["packages/*"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(json.dumps({"workspaces": {"packages": ["libs/*"]}}), encoding="utf-8")
+            self.assertEqual(quality_tools.workspace_globs(root), ["libs/*"])
 
 
 if __name__ == "__main__":

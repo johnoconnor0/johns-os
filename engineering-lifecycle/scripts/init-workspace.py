@@ -17,8 +17,10 @@ DIRS = [
     "hygiene",
     "ledger",
     "council",
+    "questions",
     "dashboards",
     "reports",
+    "context",
 ]
 
 
