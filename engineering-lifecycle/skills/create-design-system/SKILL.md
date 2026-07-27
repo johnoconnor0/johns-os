@@ -1,7 +1,8 @@
 ---
 name: create-design-system
-allowed-tools: Read, Grep, Glob, Write, Edit
-description: Use when the user asks to plan, document, create, audit, or implement a design system, UI kit, component system, design tokens, typography, colours, spacing, accessibility rules, or reusable frontend component standards.
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(python:*)
+description: Use when the user asks to plan, document, create, audit, or implement a design system, UI kit, component system, design tokens, typography, colours, spacing, accessibility rules, or reusable frontend component standards. Works for any stack, not only React - PHP, WordPress, Laravel, Vue and static HTML have their own adapters.
+argument-hint: "[--adapter=<react-tailwind|react-css|vue-nuxt|php-native|wordpress|laravel-blade|static-html>]"
 ---
 
 # Create Design System
@@ -25,7 +26,7 @@ Use when the user asks for a design system, UI kit, component library, visual la
 - Use `create-prd` when requirements are missing.
 - Use `create-ux-flow` when user journeys and screens are missing.
 - Use `build-ui-prototype` when the user wants code for a clickable UI prototype.
-- Use `create-architecture-plan` when the user wants broad architecture planning.
+- Use `create-technical-design-document` when the user wants broad architecture planning.
 - Use `review-change` when the user wants a completed UI change reviewed.
 
 ## Inputs Inspected
@@ -45,10 +46,10 @@ Inspect available inputs before creating design-system claims:
 Look for these initiative and profile artefacts when present:
 
 - `.project/.engineering/profile/product-system-profile.yaml`
-- `.project/.engineering/initiatives/<initiative-id>/discovery/discovery-brief.md`
-- `.project/.engineering/initiatives/<initiative-id>/requirements/prd.md`
-- `.project/.engineering/initiatives/<initiative-id>/ux/ux-flow.md`
-- `.project/.engineering/initiatives/<initiative-id>/ux/screen-inventory.md`
+- `.project/docs/engineering/<initiative-id>/discovery-brief.md`
+- `.project/docs/engineering/<initiative-id>/prd.md`
+- `.project/docs/engineering/<initiative-id>/app-flow.md`
+- `.project/docs/engineering/<initiative-id>/screen-inventory.md`
 - `.project/.engineering/initiatives/<initiative-id>/prototype/prototype-plan.md`
 
 Inspect the repo for:
@@ -66,17 +67,16 @@ Inspect the repo for:
 - `public/`
 - `design/`
 
-For React, Next.js, or Tailwind apps, also look for:
+Then inspect the files that matter for the detected stack:
 
-- `tailwind.config.ts`
-- `globals.css`
-- `components/ui/`
-- `components/`
-- `app/layout.tsx`
-- `app/page.tsx`
-- `src/components/`
-
-Adapt the inspection pass for other stacks.
+| Stack | Look for |
+| --- | --- |
+| React / Next / Tailwind | `tailwind.config.*`, `globals.css`, `app/layout.tsx`, `src/components/ui/` |
+| Vue / Nuxt | `nuxt.config.*`, `assets/css/`, `components/ui/` |
+| PHP | `composer.json`, `templates/`, `assets/css/`, `includes/` |
+| WordPress | `theme.json`, `style.css`, `patterns/`, `parts/`, `functions.php` |
+| Laravel | `resources/views/components/`, `resources/css/`, `tailwind.config.js` |
+| Static HTML | `css/`, `index.html`, any partial or include directory |
 
 ## Design System Modes
 
@@ -89,16 +89,45 @@ Classify the request before producing artifacts:
 - `component-library-plan`: focus on component inventory, variants, states, props, and usage rules.
 - `implementation-scaffold`: optionally scaffold tokens or components only when the user explicitly asks for source changes.
 
+## Choose The Adapter
+
+A design system is a set of decisions plus an implementation of those decisions in
+one stack. The decisions are portable; the implementation is not. Everything up to
+step 7 below is stack-neutral. Step 8 is where the adapter applies.
+
+Read `context/stack.json` (populated with evidence by `detect-stack.py`) and pick:
+
+| Detected | Adapter | Tokens land in | Components land in |
+| --- | --- | --- | --- |
+| React + Tailwind | `react-tailwind` | `src/design-system/tokens.ts` + `@theme` | `src/components/ui/` |
+| React, no Tailwind | `react-css` | `src/design-system/tokens.css` | CSS Modules |
+| Vue / Nuxt | `vue-nuxt` | `assets/css/tokens.css` | `components/ui/` |
+| PHP, no framework | `php-native` | `assets/css/tokens.css` | `templates/components/*.php` |
+| WordPress | `wordpress` | `theme.json` | `patterns/`, `parts/` |
+| Laravel | `laravel-blade` | `resources/css/tokens.css` | `resources/views/components/*.blade.php` |
+| Static HTML | `static-html` | `css/tokens.css` | HTML partials + class contract |
+
+`--adapter=<name>` overrides detection. Use it when detection is wrong, or when
+the target stack does not exist yet. **State which adapter you chose and the
+evidence for it.** If the stack is genuinely unclear, ask rather than assuming React.
+
+Read `references/design-system-adapters.md` for each adapter's conventions and the
+shared token contract. CSS custom properties are the lowest common denominator and
+every adapter emits them, so a component can be ported by changing the wrapper
+rather than the values.
+
 ## Workflow
 
-1. Classify the design-system mode.
+1. Classify the design-system mode and choose the adapter.
 2. Inspect upstream product/UX artifacts and existing UI conventions before defining visual or component rules.
 3. Define the design-system scope, target product surface, users, constraints, and non-goals.
 4. Define design principles and foundations: colour, typography, spacing, layout, radius, shadow, borders, icons, motion, and breakpoints.
 5. Define design tokens using implementation-friendly names and stable categories.
 6. Create a component inventory with purpose, variants, states, accessibility requirements, and usage rules.
 7. Define state coverage for loading, empty, error, success, disabled, focus, hover, active, selected, and permission states where relevant.
-8. Map the design system to implementation: CSS variables, Tailwind theme, component props, existing UI library, Storybook, Figma tokens, or other repo conventions.
+8. Map the design system to implementation **through the chosen adapter**. Emit CSS
+   custom properties in every case, plus the framework-native layer the adapter
+   specifies. Use semantic token names (`--accent`, not `--blue-500`).
 9. Identify gaps, risks, and open questions.
 10. Recommend the next lifecycle skill, usually `build-ui-prototype` or `implement-feature-safely`.
 
@@ -116,21 +145,19 @@ Before writing artifacts, define:
 
 Recommended artifact paths:
 
-- `.project/.engineering/initiatives/<initiative-id>/design-system/design-system-plan.md`
-- `.project/.engineering/initiatives/<initiative-id>/design-system/design-tokens.md`
-- `.project/.engineering/initiatives/<initiative-id>/design-system/component-inventory.md`
-- `.project/.engineering/initiatives/<initiative-id>/design-system/accessibility-rules.md`
-- `.project/.engineering/initiatives/<initiative-id>/design-system/implementation-mapping.md`
+- `.project/docs/engineering/<initiative-id>/design-system/design-system-plan.md`
+- `.project/docs/engineering/<initiative-id>/design-system/design-tokens.md`
+- `.project/docs/engineering/<initiative-id>/design-system/component-inventory.md`
+- `.project/docs/engineering/<initiative-id>/design-system/accessibility-rules.md`
+- `.project/docs/engineering/<initiative-id>/design-system/implementation-mapping.md`
 
-Optional code outputs only when explicitly requested:
+Optional code outputs only when explicitly requested. The paths come from the
+chosen adapter, not from a React default. See the adapter table above and
+`references/design-system-adapters.md`.
 
-- `src/design-system/tokens.ts`
-- `src/design-system/components/`
-- `src/components/ui/`
-- Tailwind config updates
-- Storybook stories
-
-Use the files in `templates/` for generated design-system artifacts.
+Use the files in `templates/` for generated design-system artifacts. The
+`implementation-mapping.md` artifact records which adapter was chosen, on what
+evidence, and where each token and component category lands in this repo.
 
 ## Required Front Matter
 
@@ -162,7 +189,9 @@ The main design-system plan must include:
 
 ## References
 
+- Read `engineering-lifecycle/references/design-system-adapters.md` when choosing the adapter and mapping tokens and components into the target stack.
 - Read `engineering-lifecycle/references/design-system-scope-guide.md` when choosing scope, mode, lifecycle position, and output boundaries.
+- Read `engineering-lifecycle/references/anti-slop-register.md` before proposing any concrete visual direction.
 - Read `engineering-lifecycle/references/component-state-guide.md` when defining component variants, states, behaviours, and anti-patterns.
 - Read `engineering-lifecycle/references/accessibility-checklist.md` when defining accessibility rules and checks.
 - Use `examples/` for realistic invocation patterns and expected output shape.
