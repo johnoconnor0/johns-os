@@ -9,7 +9,22 @@
     "frameworks": { "type": "array", "items": { "type": "string" } },
     "backend": { "type": "array", "items": { "type": "string" } },
     "database": { "type": "array", "items": { "type": "string" } },
-    "test_commands": { "type": "object" }
+    "testing": { "type": "array", "items": { "type": "string" } },
+    "test_commands": { "type": "object" },
+    "evidence": {
+      "type": "object",
+      "description": "Per-category map of detected name to the path or dependency that proved it.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": { "type": "string" }
+      }
+    },
+    "workspace_manifests": {
+      "type": "array",
+      "description": "Workspace member package.json paths that were read, beyond the repo root.",
+      "items": { "type": "string" }
+    },
+    "detected_at": { "type": "string" }
   },
   "additionalProperties": true
 }
