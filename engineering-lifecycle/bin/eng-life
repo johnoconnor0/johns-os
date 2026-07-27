@@ -17,7 +17,8 @@ def target_root(value: str | None) -> Path:
 
 
 def run(script: str, root: Path, *args: str) -> int:
-    return subprocess.call([sys.executable, str(ROOT / script), "--root", str(root), *args], cwd=root)
+    # -B keeps __pycache__ out of the installed plugin directory.
+    return subprocess.call([sys.executable, "-B", str(ROOT / script), "--root", str(root), *args], cwd=root)
 
 
 def status(root: Path) -> int:
@@ -49,11 +50,11 @@ def main() -> int:
         return run("scripts/init-workspace.py", root)
     if args.command == "validate":
         code = subprocess.call(
-            [sys.executable, str(ROOT / "scripts" / "validate-plugin.py"), "--root", str(ROOT)], cwd=ROOT
+            [sys.executable, "-B", str(ROOT / "scripts" / "validate-plugin.py"), "--root", str(ROOT)], cwd=ROOT
         )
         code = (
             subprocess.call(
-                [sys.executable, str(ROOT / "scripts" / "validate-schemas.py"), "--root", str(ROOT)], cwd=ROOT
+                [sys.executable, "-B", str(ROOT / "scripts" / "validate-schemas.py"), "--root", str(ROOT)], cwd=ROOT
             )
             or code
         )

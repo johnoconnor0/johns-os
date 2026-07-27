@@ -15,4 +15,5 @@ args = [*sys.argv[1:]]
 if "--root" not in args:
     args.extend(["--root", str(CALLER_ROOT)])
 
-raise SystemExit(subprocess.call([sys.executable, str(SCRIPT), *args], cwd=CALLER_ROOT))
+# -B keeps __pycache__ out of the installed plugin directory.
+raise SystemExit(subprocess.call([sys.executable, "-B", str(SCRIPT), *args], cwd=CALLER_ROOT))

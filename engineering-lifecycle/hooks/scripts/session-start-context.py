@@ -10,11 +10,34 @@ happened to start in). Anchored to the repo root, never `Path.cwd()`.
 
 from __future__ import annotations
 
+import contextlib
+import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from eng_common import emit_json, engineering_root, hook_additional_context, repo_root, workspace_exists
+from eng_common import emit_json, engineering_root, hook_additional_context, plugin_root, repo_root, workspace_exists
+
+
+def provenance() -> str:
+    """Where this plugin is actually executing from, and at what version.
+
+    Plugins run from a version-pinned copy under `~/.claude/plugins/cache/...`,
+    not from a working tree. Editing the source repo has no effect on a session
+    until the plugin is reinstalled. Surfacing the resolved root and version in
+    the first line of every session makes that drift obvious immediately rather
+    than after an hour of edits that appear to do nothing.
+    """
+    base = plugin_root()
+    version = "unknown"
+    manifest = base / ".claude-plugin" / "plugin.json"
+    with contextlib.suppress(OSError, ValueError):
+        version = json.loads(manifest.read_text(encoding="utf-8")).get("version", "unknown")
+    display = str(base).replace("\\", "/")
+    note = ""
+    if ".claude/plugins/cache" in display:
+        note = " (installed copy; edits to the source checkout require a reinstall to take effect)"
+    return f"engineering-lifecycle v{version} running from {display}{note}."
 
 
 def main() -> int:
@@ -25,11 +48,13 @@ def main() -> int:
 
     if workspace_exists(root):
         message = (
+            f"{provenance()}\n"
             f"Engineering Lifecycle workspace detected at {display_ws}. "
             "Lifecycle hooks and skills are active for this repo; proceed."
         )
     else:
         message = (
+            f"{provenance()}\n"
             f"No Engineering Lifecycle workspace exists at the repo root ({display_root}). "
             "The plugin is dormant here and will NOT create `.project` automatically.\n\n"
             "Before starting lifecycle work this session, use AskUserQuestion to ask whether to "

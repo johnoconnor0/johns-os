@@ -10,4 +10,4 @@ else
   PYTHON_BIN=python
 fi
 
-exec "$PYTHON_BIN" "$PLUGIN_ROOT/scripts/secret-exfiltration-guard.py" --hook
+exec "$PYTHON_BIN" -B "$PLUGIN_ROOT/scripts/secret-exfiltration-guard.py" --hook

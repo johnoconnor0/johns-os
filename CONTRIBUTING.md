@@ -15,6 +15,38 @@ pre-commit install --install-hooks
 
 On macOS/Linux, activate the environment with `source .venv/bin/activate`.
 
+## Working on a plugin you have installed
+
+Claude Code does not run a plugin from your working tree. It installs a
+version-pinned copy under `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`,
+and because the `johns-os` marketplace is a git source, `claude plugin update`
+fetches from GitHub rather than from disk.
+
+The practical consequence: **editing a plugin file in this repo has no effect on
+your session until the change is committed, pushed, and the plugin updated.** This
+looks like aggressive caching, and the `__pycache__/*.pyc` and `.in_use/<pid>`
+files in the install directory make it look like a Python problem. It is neither.
+`.in_use/<pid>` is Claude Code's own session lock; leave it alone.
+
+To see where the running copy came from and how far behind it is:
+
+```powershell
+python engineering-lifecycle/bin/eng-dev status
+```
+
+It prints the install path, the pinned commit, how many commits behind your
+checkout it is, and the exact command sequence to resync. To clear regenerable
+litter (`__pycache__`, `.pytest_cache`, a stray `.project`) from the installed
+copy:
+
+```powershell
+python engineering-lifecycle/bin/eng-dev clean --apply
+```
+
+Hooks and CLI entrypoints invoke Python with `-B` so bytecode is never written
+into an install directory in the first place. Keep that flag on any new
+`subprocess` call that spawns a plugin script.
+
 ## Required checks
 
 ```powershell

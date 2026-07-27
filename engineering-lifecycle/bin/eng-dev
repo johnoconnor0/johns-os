@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""Diagnose and repair the gap between this checkout and the installed plugin.
+
+Claude Code does not run plugins from a working tree. It installs them into a
+version-pinned copy under `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`,
+and for a git-sourced marketplace it fetches from the remote, not from disk.
+
+That produces a failure mode that looks like caching but is not: you edit
+`engineering-lifecycle/scripts/*.py`, restart, and nothing changes, because the
+session is executing a different copy of the file that is pinned to whatever
+commit was on the remote at install time.
+
+`eng-dev status` reports exactly where the running copy came from and how far
+behind it is. `eng-dev clean` removes regenerable litter (`__pycache__`,
+`.pytest_cache`, a stray `.project`) from the installed copy.
+
+Commands are printed, not executed, for anything that mutates global plugin
+state or the git remote.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+REPO = ROOT.parent
+PLUGIN_NAME = "engineering-lifecycle"
+
+
+def claude_home() -> Path:
+    override = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(override) if override else Path.home() / ".claude"
+
+
+def read_json(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def git(*args: str, cwd: Path | None = None) -> str:
+    try:
+        proc = subprocess.run(
+            ["git", *args], cwd=cwd or REPO, text=True, capture_output=True, check=False, encoding="utf-8"
+        )
+    except OSError:
+        return ""
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def local_version() -> str:
+    return read_json(ROOT / ".claude-plugin" / "plugin.json").get("version", "unknown")
+
+
+def installed_records() -> list[tuple[str, dict]]:
+    """Every install record whose plugin name matches, across all marketplaces."""
+    data = read_json(claude_home() / "plugins" / "installed_plugins.json")
+    found = []
+    for key, entries in (data.get("plugins") or {}).items():
+        if key.split("@", 1)[0] != PLUGIN_NAME:
+            continue
+        for entry in entries or []:
+            found.append((key, entry))
+    return found
+
+
+def marketplace_source(marketplace: str) -> dict:
+    known = read_json(claude_home() / "plugins" / "known_marketplaces.json")
+    entry = (known.get("marketplaces") or known).get(marketplace) or {}
+    return entry.get("source") or {}
+
+
+def litter(base: Path) -> list[Path]:
+    """Regenerable directories that should not exist in an installed plugin."""
+    found = [base / ".pytest_cache", base / ".project"]
+    found += list(base.rglob("__pycache__"))
+    return [path for path in found if path.exists()]
+
+
+def cmd_status() -> int:
+    print(f"checkout   {REPO}")
+    print(f"  version  {local_version()}")
+    head = git("rev-parse", "HEAD")
+    branch = git("rev-parse", "--abbrev-ref", "HEAD")
+    print(f"  HEAD     {head[:7] or '?'} ({branch or '?'})")
+
+    dirty = git("status", "--porcelain")
+    if dirty:
+        print(f"  dirty    {len(dirty.splitlines())} uncommitted change(s)")
+    unpushed = git("log", "--oneline", "@{u}..HEAD")
+    if unpushed:
+        print(f"  unpushed {len(unpushed.splitlines())} commit(s) ahead of the remote")
+
+    records = installed_records()
+    if not records:
+        print(f"\nNo installed copy of {PLUGIN_NAME} found. This checkout is not driving any session.")
+        return 0
+
+    stale = False
+    for key, entry in records:
+        marketplace = key.split("@", 1)[1] if "@" in key else "?"
+        install_path = Path(entry.get("installPath", ""))
+        sha = entry.get("gitCommitSha", "")
+        print(f"\ninstalled  {key}  (scope: {entry.get('scope', '?')})")
+        print(f"  version  {entry.get('version', '?')}")
+        print(f"  path     {install_path}")
+        if sha:
+            print(f"  commit   {sha[:7]}")
+            if head and sha != head:
+                behind = git("log", "--oneline", f"{sha}..HEAD")
+                count = len(behind.splitlines()) if behind else 0
+                print(f"           STALE: {count} commit(s) behind this checkout" if count else "           diverged")
+                stale = True
+
+        source = marketplace_source(marketplace)
+        if source:
+            kind = source.get("source", "?")
+            origin = source.get("url") or source.get("path") or "?"
+            print(f"  source   {kind}: {origin}")
+            if kind == "git":
+                print("           fetches from the remote, so local commits must be pushed first")
+
+        if install_path.exists():
+            junk = litter(install_path)
+            if junk:
+                print(f"  litter   {len(junk)} regenerable path(s); run `eng-dev clean` to remove")
+            locks = install_path / ".in_use"
+            if locks.exists():
+                pids = sorted(p.name for p in locks.iterdir() if p.is_file())
+                if pids:
+                    print(f"  in use   session PID lock(s): {', '.join(pids)} (Claude Code's own, leave alone)")
+
+    if stale or dirty or unpushed:
+        print("\nTo make this checkout the running plugin:")
+        if dirty:
+            print("  git add -A && git commit")
+        if dirty or unpushed:
+            print("  git push")
+        print(f"  claude plugin marketplace update {records[0][0].split('@', 1)[-1]}")
+        print(f"  claude plugin update {records[0][0]}")
+        print("  then restart the session")
+    else:
+        print("\nInstalled copy matches this checkout.")
+    return 0
+
+
+def cmd_clean(apply: bool) -> int:
+    targets: list[Path] = list(litter(ROOT))
+    for _key, entry in installed_records():
+        install_path = Path(entry.get("installPath", ""))
+        if install_path.exists():
+            targets.extend(litter(install_path))
+
+    if not targets:
+        print("Nothing to clean.")
+        return 0
+    for path in targets:
+        print(f"{'removed ' if apply else 'would remove '}{path}")
+        if apply:
+            shutil.rmtree(path, ignore_errors=True)
+    if not apply:
+        print("\nRe-run with --apply to remove.")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="command")
+    sub.add_parser("status", help="Report installed-copy provenance and staleness (default)")
+    clean = sub.add_parser("clean", help="Remove regenerable litter from the installed copy")
+    clean.add_argument("--apply", action="store_true", help="Actually delete; otherwise dry-run")
+    args = parser.parse_args()
+
+    if args.command == "clean":
+        return cmd_clean(args.apply)
+    return cmd_status()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

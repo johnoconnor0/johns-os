@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def run(script: str, root: Path, *args: str) -> int:
-    return subprocess.call([sys.executable, str(ROOT / script), *args], cwd=root)
+    # -B keeps __pycache__ out of the installed plugin directory.
+    return subprocess.call([sys.executable, "-B", str(ROOT / script), *args], cwd=root)
 
 
 def main() -> int:

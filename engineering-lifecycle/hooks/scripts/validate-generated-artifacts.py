@@ -24,7 +24,7 @@ def main() -> int:
     if not artifacts:
         return 0
     proc = subprocess.run(
-        [sys.executable, str(SCRIPT), *artifacts], cwd=ROOT, text=True, capture_output=True, check=False
+        [sys.executable, "-B", str(SCRIPT), *artifacts], cwd=ROOT, text=True, capture_output=True, check=False
     )
     if proc.stdout.strip():
         print(proc.stdout.strip())
