@@ -52,6 +52,17 @@ for support and debugging, then purged. `Order` rows are retained 7 years to
 meet financial record-keeping requirements, then archived. The `Cart`
 conversion fields follow the existing cart retention policy.
 
+## Audit And Lifecycle
+
+Every `CheckoutSession` state change writes a `checkout_event` row carrying the
+previous state, the new state, the actor (customer, webhook, or support operator)
+and the provider event id that caused it. Support reads this rather than the
+session row, so a resumed checkout can be explained after the fact.
+
+`Order` rows are append-only once created. Corrections are issued as a new
+`Order` referencing the original, never as an in-place edit, because the finance
+export reconciles against immutable records.
+
 ## Migration Risk
 
 Low. `CheckoutSession` and `Order` are new tables, so creating them is
@@ -59,3 +70,9 @@ non-breaking. The `Cart` change adds two nullable columns (`converted_at`,
 `order_id`) with no backfill required, so existing carts remain valid. The
 unique constraints on provider IDs must be added before enabling the webhook
 handler to guarantee idempotency.
+
+## Open Questions
+
+- How long does the provider keep a session token valid after a timeout? The 30
+  minute assumption in the PRD is unconfirmed and changes the retention window.
+- Who owns purging `checkout_event` rows once the parent session is purged?
