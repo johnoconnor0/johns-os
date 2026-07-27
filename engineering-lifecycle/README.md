@@ -29,56 +29,55 @@ The manifest intentionally avoids over-specifying component paths unless future 
 
 The plugin website is declared in the manifests as https://weblifter.com.au.
 
+### Running copy vs source checkout
+
+An installed plugin executes from a version-pinned copy under
+`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`, not from a working
+tree. Edits to a source checkout do not reach a session until they are committed,
+pushed, and the plugin updated. `bin/eng-dev status` reports the install path, the
+pinned commit, and how far behind the checkout it is; `bin/eng-dev clean` removes
+regenerable litter from the installed copy. Every hook and CLI entrypoint runs
+Python with `-B` so bytecode is never written into an install directory.
+
+The first line of every session reports the resolved plugin root and version, so
+a stale install is visible immediately.
+
 ## Quick Start Workflow
 
 1. Profile the product system with `profile-product-system`.
 2. Map lifecycle state with `map-product-lifecycle`.
 3. Create missing artifacts with the relevant lifecycle skill.
 4. Create a design system with `create-design-system` when UI foundations, tokens, or reusable component standards are needed.
-5. Plan implementation with `create-implementation-plan`.
+5. Plan implementation with `create-engineering-plan`.
 6. Implement only after the plan is accepted, using `implement-feature-safely` when execution support is needed.
 7. Review, test, and release with `review-change`, `create-test-strategy`, and `create-release-plan`.
 8. Maintain repo hygiene with `update-repo-hygiene` and the conservative hook checks.
 
 ## Workspace Contract
 
-Generated artifacts use this project-local namespace:
+Generated output is split across two trees under `.project/`, by audience:
 
-```text
-.project/.engineering/
-  profile/
-  lifecycle/
-  initiatives/<initiative-id>/
-    discovery/
-    requirements/
-    ux/
-    system-map/
-    architecture/
-    data/
-    api/
-    implementation/
-    review/
-    testing/
-    release/
-    maintenance/
-  decisions/
-  handoffs/
-  hygiene/
-  ledger/
-  council/
-  dashboards/
-  reports/
-```
+| Tree | Holds | Audience |
+| --- | --- | --- |
+| `.project/.engineering/` | ledger, reports, detected context, council runs, hygiene, dashboards, open questions, initiative registry | machine state, regenerable, gitignored |
+| `.project/docs/engineering/<initiative-id>/` | PRD, technical design document, app flow, design system, engineering plan, data model | the documents people read |
 
 Rules:
 
-- Generated artifacts go under `.project/.engineering`.
+- Machine state goes under `.project/.engineering`; narrative deliverables go under
+  `.project/docs/engineering/<initiative-id>/`.
 - Artifact files should use readable Markdown, YAML, or JSON.
 - Draft and approval state must be explicit in front matter or sidecar metadata.
 - Do not store secrets or copied credential values.
 - `.env.example` may contain variable names and placeholder values only.
 
-See `references/workspace-contract.md` for the full contract.
+**`references/workspace-contract.md` is the single source of truth for the
+directory layout.** It is deliberately not duplicated here: this file previously
+carried its own copy of the tree, and the two drifted apart the first time the
+contract changed. Read the contract for the full structure and stage list.
+
+Run `scripts/migrate-artifact-paths.py` to move a workspace created before the
+two-tree split; it is dry-run by default.
 
 ### Workspace initialization (opt-in)
 
@@ -133,17 +132,23 @@ The skills define production-oriented lifecycle contracts with repeatable workfl
 - `create-design-system`: plan or audit UI foundations, design tokens, component inventory, accessibility rules, and implementation mapping.
 - `build-ui-prototype`: build a lightweight UI prototype, clickable MVP, app shell, dashboard mock, or frontend proof of concept.
 - `create-system-map`: map actors, components, workflows, data flow, boundaries, risks, and deployment shape.
-- `create-architecture-plan`: turn system understanding into architecture decisions and ADR candidates.
-- `create-data-model`: define entities, relationships, ownership, sensitivity, retention, and migration risk.
+- `create-technical-design-document`: turn system understanding into architecture decisions and ADR candidates.
+- `create-data-model`: design the database schema. Produces a durable `schema.sql`
+  plus a generated JSON model and ERD that a `PreToolUse` hook reads back into
+  every later backend edit.
 - `create-api-contract`: define service, frontend, backend, webhook, event, or external-system interfaces.
-- `create-implementation-plan`: sequence work into safe implementation slices with tests and rollback notes.
+- `create-engineering-plan`: sequence work into safe implementation slices with tests and rollback notes.
 - `implement-feature-safely`: guide implementation after planning, with verification and hygiene checks.
 - `review-change`: review a branch, diff, PR, or local change for correctness, risk, and maintainability.
 - `create-test-strategy`: define unit, integration, contract, E2E, regression, load, security, and manual QA coverage.
 - `create-release-plan`: define release, migration, rollout, monitoring, rollback, and support steps.
 - `run-engineering-council`: run optional council review for high-stakes engineering decisions.
 - `update-repo-hygiene`: inspect and intentionally update supporting repo hygiene files.
-- `build-project-dashboard`: summarize lifecycle state, action items, risks, and recent artifacts.
+
+The project dashboard has no skill. `scripts/sync-ledger.py` aggregates the whole
+workspace and rewrites `dashboards/project-dashboard.html` on every edit and again
+at the end of a turn, so it is always current. `eng-life build-dashboard` forces a
+rebuild if one is ever needed.
 
 ## Agents
 
@@ -180,16 +185,42 @@ Agents are specialists, not duplicates of skills. Delegate when isolated expert 
   root by default; `/project-init here` for the current subfolder). This is the
   intended, explicit way to opt a repo into the workspace. See
   [Workspace initialization](#workspace-initialization-opt-in).
+- `/initiative` — create, switch, close, or list initiatives (`new`, `switch`,
+  `close`, `list`). See [Initiative identity](#initiative-identity).
+
+## Initiative identity
+
+An initiative is one coherent piece of work, and every lifecycle artifact belongs
+to exactly one. `initiatives/registry.json` records which exist and which is
+**active**; new artifacts go there.
+
+Three things keep that honest:
+
+1. `UserPromptSubmit` scores each prompt against the active initiative. When the
+   topic does not overlap, it tells the model to stop and ask whether this is new
+   work rather than silently appending to the folder it started in.
+2. The `PreToolUse` edit-scope guard asks for confirmation when a write targets a
+   non-active initiative.
+3. The registry adopts any folder created by hand, so it can never disagree with
+   the filesystem.
+
+Without these an initiative existed only as a directory name invented by whichever
+skill wrote first, and a session that pivoted mid-way kept filing new work under
+the old initiative.
 
 ## Hooks
 
 Hook behavior is conservative, deterministic, and rooted through `CLAUDE_PLUGIN_ROOT` so installed plugin hooks can run from a target project.
 
-- `SessionStart`: fast repo and context detection only. If no workspace exists it
-  offers `/project-init` via `AskUserQuestion` — it never creates `.project`.
+- `SessionStart`: plugin provenance, fast repo and stack detection, and project
+  memory recall. If no workspace exists it offers `/project-init` via
+  `AskUserQuestion` — it never creates `.project`.
+- `UserPromptSubmit`: intent, prompt quality, council trigger, unanswered open
+  questions, and the initiative drift check.
 - `PreToolUse`: dangerous command, production command, generated-file, sensitive-file, edit-scope, and secret-exfiltration guards.
-- `PostToolUse`: hygiene drift detection after edits.
-- `Stop`: completion and hygiene reminders.
+- `PostToolUse`: hygiene drift detection and ledger/dashboard rebuild after edits.
+- `Stop`: completion and hygiene reminders, plus a debounced ledger sync that
+  catches artifacts written by `Bash` (which never fires `PostToolUse`).
 
 Workspace-writing hooks (`SessionStart` stack detection, `PostToolUse` hygiene/ledger,
 `Stop` capture/completion) are **dormant until the workspace exists** and always
@@ -230,6 +261,42 @@ Live adapter options:
 - `openai`: requires `OPENAI_API_KEY` and `ENGINEERING_COUNCIL_MODEL`.
 
 Use `--fallback-on-error` when live model failure should fall back to deterministic local output.
+
+## Script Layout
+
+`scripts/` is two tiers. Most files are five-line dispatchers of the form
+`from quality_tools import cli_main; raise SystemExit(cli_main("<name>"))`, which
+exist so a hook or a skill can invoke one tool by path. The logic lives in a small
+set of shared modules:
+
+| Module | Owns |
+| --- | --- |
+| `eng_common.py` | Paths, the workspace contract, bounded filesystem scanning, IO, hook payload helpers |
+| `quality_tools.py` | Prompt intake, guards, verification, hygiene, council, and the `run_tool` dispatch |
+| `stack_detection.py` | Detecting frameworks, backends, databases and test tooling across a repo and its workspace members |
+| `questions.py` | The open-questions store: recording, answering, scraping artifacts, rendering the digest |
+| `initiatives.py` | The initiative registry, resolution, drift detection, and create/switch/close |
+| `data_model.py` | Parsing `schema.sql` into a machine-readable model, the ERD, and drift against shipped migrations |
+
+The last four were extracted from `quality_tools.py` once it passed 2,400 lines.
+They are re-exported from `quality_tools` so every existing caller keeps working;
+new code should import them directly.
+
+`initiatives.initiative_drift_detector` takes the classified intent as an
+argument rather than computing it. That is deliberate: prompt classification lives
+in `quality_tools`, and calling it from `initiatives` would make the two modules
+import each other.
+
+### Adding a tool
+
+`quality_tools.TOOLS` maps a tool name to a handler taking a single `ToolContext`
+(the resolved root, hook payload, prompt, text, command, path and files). To add
+one: write the function, add a line to `TOOLS`, and create a dispatcher shim in
+`scripts/` so a hook or skill can invoke it by path.
+
+Both halves are required. A test walks the table against every dispatcher and hook
+wrapper on disk and fails if a shim names a tool that is not registered, or if a
+registered tool has no way to be called.
 
 ## Runtime Boundaries
 

@@ -8,7 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-No unreleased repository-level changes are currently documented.
+### Added
+
+- Added `cli/`, an `npx johns-os` installer for the marketplace with `install`, `list`, `update`, `init` and `doctor`. It is dependency-free because it runs via `npx` on machines that have nothing set up. `doctor` reports where an installed plugin is actually executing from and how far behind the local checkout it is — a gap that is otherwise invisible, since plugins run from a version-pinned copy under `~/.claude/plugins/cache/` and a git-sourced marketplace fetches from the remote rather than from disk.
+- Added `scripts/check-cli-version.py`, run by `validate-repo.py`, so the installer can never advertise a marketplace version that does not exist.
+- Added `.github/workflows/e2e.yml`, an opt-in Playwright job covering the generated project dashboard. It is separate from CI because it is the only thing in the repository needing Node and a browser download.
+- Added `.github/workflows/publish-cli.yml`, manual-dispatch only, with a dry-run default.
+
+### Changed
+
+- CI now runs on Windows as well as Linux. The codebase is developed on Windows and contains Windows-specific guard patterns, so a Linux-only matrix could not see a whole class of breakage. Lint and formatting still run once, on Linux.
+- `validate-repo.py` excludes generated Node and fixture directories from `compileall`.
+
+### Fixed
+
+- Removed empty `interface.privacyPolicyURL` and `interface.termsOfServiceURL` from all three plugins' Codex manifests. Codex rejects those keys when provided but blank, so an empty string is strictly worse than omitting the key. `johns-os-marketplace.py validate` now enforces this across every plugin in the catalogue rather than leaving it to each plugin's own validator.
 
 ## [0.3.0] - 2026-07-16
 
