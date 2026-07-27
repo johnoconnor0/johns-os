@@ -36,6 +36,37 @@ class MarketplaceMetadataTests(unittest.TestCase):
         claude = load(ROOT / ".claude-plugin/marketplace.json")
         self.assertEqual({plugin["name"] for plugin in claude["plugins"]}, set(ACTIVE_PLUGINS))
 
+    def test_cli_installs_exactly_the_marketplace_plugins(self) -> None:
+        # The npx installer advertises this marketplace. If it names a plugin the
+        # marketplace does not declare, the failure only surfaces after a user has
+        # already run the install.
+        cli = load(ROOT / "cli/package.json")
+        marketplace = load(ROOT / ".claude-plugin/marketplace.json")
+        self.assertEqual(cli["version"], marketplace["version"])
+        self.assertEqual(cli["bin"], {"johns-os": "index.js"})
+
+        source = (ROOT / "cli/index.js").read_text(encoding="utf-8")
+        declared = {plugin["name"] for plugin in marketplace["plugins"]}
+        for name in ACTIVE_PLUGINS:
+            if name in source:
+                self.assertIn(name, declared, name)
+
+        # Dependency-free on purpose: it runs via npx on unprepared machines.
+        self.assertNotIn("dependencies", cli)
+
+    def test_codex_interface_fields_are_never_present_but_blank(self) -> None:
+        # Codex rejects interface.termsOfServiceURL / privacyPolicyURL when they
+        # are provided but empty, so a blank string fails validation where an
+        # absent key passes. Empty lists (screenshots) behave the same way.
+        for plugin_id in ACTIVE_PLUGINS:
+            interface = load(ROOT / plugin_id / ".codex-plugin/plugin.json").get("interface", {})
+            for key, value in interface.items():
+                with self.subTest(plugin=plugin_id, field=key):
+                    if isinstance(value, str):
+                        self.assertTrue(value.strip(), f"{plugin_id}: interface.{key} is empty; omit the key instead")
+                    if isinstance(value, list):
+                        self.assertTrue(value, f"{plugin_id}: interface.{key} is an empty list; omit the key instead")
+
     def test_public_metadata_has_website_and_no_runtime_workspace_in_marketplaces(self) -> None:
         for path in [ROOT / "marketplace.json", ROOT / ".agents/plugins/marketplace.json"]:
             for plugin in load(path)["plugins"]:

@@ -29,14 +29,11 @@
       "Write"
     ],
     "websiteURL": "https://weblifter.com.au",
-    "privacyPolicyURL": "",
-    "termsOfServiceURL": "",
     "defaultPrompt": [
       "Map the lifecycle state for this project.",
       "Create missing lifecycle artifacts for this feature.",
       "Review this change against the implementation plan."
     ],
-    "brandColor": "#1F6FEB",
-    "screenshots": []
+    "brandColor": "#1F6FEB"
   }
 }

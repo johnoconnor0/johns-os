@@ -32,14 +32,11 @@
       "Bash"
     ],
     "websiteURL": "https://weblifter.com.au",
-    "privacyPolicyURL": "",
-    "termsOfServiceURL": "",
     "defaultPrompt": [
       "Scaffold a new Claude Code skill for this purpose.",
       "Review this plugin or marketplace for security and quality before I install it.",
       "Audit this plan against the implementation, then resolve the findings."
     ],
-    "brandColor": "#7C3AED",
-    "screenshots": []
+    "brandColor": "#7C3AED"
   }
 }

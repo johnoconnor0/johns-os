@@ -28,14 +28,11 @@
       "Write"
     ],
     "websiteURL": "https://weblifter.com.au",
-    "privacyPolicyURL": "",
-    "termsOfServiceURL": "",
     "defaultPrompt": [
       "Draft a Service Outline for a new service.",
       "Update an existing service document from a file or Notion page.",
       "Create an internal service brief with tiered offers."
     ],
-    "brandColor": "#0F766E",
-    "screenshots": []
+    "brandColor": "#0F766E"
   }
 }

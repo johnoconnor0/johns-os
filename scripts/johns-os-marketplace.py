@@ -203,10 +203,38 @@ def validate_platform_surfaces(catalog_data: dict[str, Any]) -> list[str]:
     return errors
 
 
+def validate_codex_interfaces(catalog_data: dict[str, Any]) -> list[str]:
+    """Reject Codex `interface` fields that are present but blank.
+
+    Codex rejects `interface.termsOfServiceURL` / `interface.privacyPolicyURL`
+    when provided but empty, so a blank string is strictly worse than omitting
+    the key. Checked here rather than per-plugin so every plugin in the catalog
+    is covered, not just the ones with their own validator.
+    """
+    errors: list[str] = []
+    for entry in catalog_data.get("plugins", []):
+        if not isinstance(entry, dict) or not isinstance(entry.get("record"), str):
+            continue
+        record_path = ROOT / entry["record"]
+        if not record_path.exists():
+            continue
+        plugin_path = str(load_json(record_path).get("path", ""))
+        manifest = ROOT / plugin_path / ".codex-plugin" / "plugin.json"
+        if not manifest.is_file():
+            continue
+        interface = load_json(manifest).get("interface") or {}
+        for key, value in sorted(interface.items()):
+            empty = (isinstance(value, str) and not value.strip()) or (isinstance(value, list) and not value)
+            if empty:
+                errors.append(f"{manifest}: interface.{key} must not be empty when provided; omit the key instead")
+    return errors
+
+
 def command_validate(_: argparse.Namespace) -> int:
     data = catalog()
     errors = validate_catalog_shape(data)
     errors.extend(validate_platform_surfaces(data))
+    errors.extend(validate_codex_interfaces(data))
     for entry in data.get("plugins", []):
         if not isinstance(entry, dict) or not isinstance(entry.get("record"), str):
             continue

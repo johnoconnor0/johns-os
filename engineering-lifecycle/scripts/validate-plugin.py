@@ -13,10 +13,19 @@ from eng_common import parse_front_matter, plugin_root
 REQUIRED_DIRS = ["skills", "agents", "hooks", "scripts", "schemas", "references", "evals"]
 REQUIRED_FILES = [
     ".claude-plugin/plugin.json",
+    ".codex-plugin/plugin.json",
     "README.md",
     "hooks/hooks.json",
     "scripts/init-workspace.py",
     "scripts/profile-repo.py",
+    # Shared modules. Everything else imports through these, so a missing one
+    # breaks every hook rather than a single tool.
+    "scripts/eng_common.py",
+    "scripts/quality_tools.py",
+    "scripts/stack_detection.py",
+    "scripts/questions.py",
+    "scripts/initiatives.py",
+    "scripts/data_model.py",
     "scripts/validate-artifact.py",
     "scripts/validate-schemas.py",
     "scripts/validate-plugin.py",
@@ -39,6 +48,47 @@ def validate_skill(path: Path) -> list[str]:
     for section in ["Trigger", "When To Use", "Outputs", "Safety Constraints"]:
         if f"## {section}" not in body:
             errors.append(f"{path}: missing section {section}")
+    return errors
+
+
+def validate_codex_manifest(root: Path) -> list[str]:
+    """Reject interface fields that are present but blank.
+
+    The Codex plugin validator rejects `interface.termsOfServiceURL` and
+    `interface.privacyPolicyURL` when they are provided but empty, so a blank
+    string is strictly worse than omitting the key. The same applies to any
+    other empty interface string or list: declaring a capability you do not
+    have is a validation failure, not a placeholder.
+    """
+    path = root / ".codex-plugin" / "plugin.json"
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return [f"{path}: invalid JSON: {exc}"]
+
+    errors: list[str] = []
+    interface = data.get("interface") or {}
+    for key, value in sorted(interface.items()):
+        if isinstance(value, str) and not value.strip():
+            errors.append(f"{path}: interface.{key} must not be empty when provided; omit the key instead")
+        elif isinstance(value, list) and not value:
+            errors.append(f"{path}: interface.{key} must not be an empty list when provided; omit the key instead")
+    for key in ("privacyPolicyURL", "termsOfServiceURL", "websiteURL"):
+        value = interface.get(key)
+        if isinstance(value, str) and value.strip() and not value.startswith("https://"):
+            errors.append(f"{path}: interface.{key} must be an https URL")
+
+    claude_manifest = root / ".claude-plugin" / "plugin.json"
+    if claude_manifest.exists():
+        try:
+            claude = json.loads(claude_manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            claude = {}
+        for key in ("name", "version"):
+            if claude.get(key) and data.get(key) and claude[key] != data[key]:
+                errors.append(f"{path}: {key} ({data[key]}) does not match .claude-plugin/plugin.json ({claude[key]})")
     return errors
 
 
@@ -88,6 +138,7 @@ def main() -> int:
     for path in sorted((root / "scripts").glob("*.py")):
         if path.name != "__init__.py" and path.stat().st_size == 0:
             errors.append(f"empty script: {path.relative_to(root)}")
+    errors.extend(validate_codex_manifest(root))
     errors.extend(validate_hooks(root))
     if errors:
         print("\n".join(errors))
