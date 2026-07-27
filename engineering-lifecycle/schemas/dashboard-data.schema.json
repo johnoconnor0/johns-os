@@ -3,21 +3,40 @@
   "$id": "https://example.local/engineering-lifecycle/dashboard-data.schema.json",
   "title": "Engineering Lifecycle Dashboard Data",
   "type": "object",
-  "required": ["generated_at", "summary", "missing_artifact_groups", "open_action_items", "recent_artifacts", "risks"],
+  "required": [
+    "generated_at",
+    "summary",
+    "missing_artifact_groups",
+    "open_action_items",
+    "open_human_tasks",
+    "open_questions",
+    "recent_artifacts",
+    "risks"
+  ],
   "properties": {
     "generated_at": { "type": "string", "minLength": 1 },
     "summary": {
       "type": "object",
-      "required": ["artifact_count", "open_action_item_count", "council_run_count"],
+      "required": [
+        "artifact_count",
+        "open_action_item_count",
+        "open_human_task_count",
+        "open_question_count",
+        "council_run_count"
+      ],
       "properties": {
         "artifact_count": { "type": "integer", "minimum": 0 },
         "open_action_item_count": { "type": "integer", "minimum": 0 },
+        "open_human_task_count": { "type": "integer", "minimum": 0 },
+        "open_question_count": { "type": "integer", "minimum": 0 },
         "council_run_count": { "type": "integer", "minimum": 0 }
       },
       "additionalProperties": true
     },
     "missing_artifact_groups": { "type": "array", "items": { "type": "string" } },
     "open_action_items": { "type": "array", "items": { "type": "object" } },
+    "open_human_tasks": { "type": "array", "items": { "type": "object" } },
+    "open_questions": { "type": "array", "items": { "type": "object" } },
     "recent_artifacts": {
       "type": "array",
       "items": {

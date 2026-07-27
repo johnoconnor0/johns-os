@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from eng_common import plugin_root
+from eng_common import artifact_roots, plugin_root
 
 
 def load(path: Path) -> tuple[object | None, str | None]:
@@ -149,7 +149,12 @@ def validate_json_against_schema(path: Path, schemas: dict[str, dict[str, Any]])
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", default=None)
+    parser.add_argument("--root", default=None, help="Plugin root that supplies the schemas and fixtures")
+    parser.add_argument(
+        "--project-root",
+        default=None,
+        help="Also validate this repo's generated artifacts (both .project trees). Opt-in.",
+    )
     args = parser.parse_args()
     root = Path(args.root).resolve() if args.root else plugin_root()
     errors: list[str] = []
@@ -159,7 +164,17 @@ def main() -> int:
             errors.append(f"{path}: empty schema")
         else:
             errors.extend(validate_schema(path))
-    json_roots = [root / "evals", root / "skills", root / "templates", root / ".project" / ".engineering"]
+    # Fixtures only. The plugin's own `.project` is transient runtime state that
+    # any test run or stray hook can recreate in an older shape, so validating it
+    # here made a green build depend on local litter rather than on the repo.
+    json_roots = [root / "evals", root / "skills", root / "templates"]
+    # A CONSUMING repo's generated data is validated on request. Without this the
+    # plugin only ever schema-checked its own fixtures, so a real
+    # dashboard-data.json or ledger that had drifted was never caught.
+    if args.project_root:
+        for base in artifact_roots(Path(args.project_root).resolve()):
+            if base.exists():
+                json_roots.append(base)
     for path in sorted({p for base in json_roots if base.exists() for p in base.rglob("*.json")}):
         if path.stat().st_size == 0:
             errors.append(f"{path}: empty JSON")

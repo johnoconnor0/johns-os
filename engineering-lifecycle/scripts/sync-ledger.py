@@ -10,7 +10,16 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from eng_common import engineering_root, now_iso, parse_front_matter, read_json, repo_root, write_json, write_text
+from eng_common import (
+    docs_root,
+    engineering_root,
+    now_iso,
+    parse_front_matter,
+    read_json,
+    repo_root,
+    write_json,
+    write_text,
+)
 
 
 def rel(path: Path, root: Path) -> str:
@@ -103,6 +112,11 @@ def collect_ledger(root: Path) -> dict:
         and "ledger" not in path.relative_to(base).parts
         and path.name not in {"dashboard-data.json", "project-dashboard.html"}
     ]
+    # The narrative deliverables live in a second tree. Index them too, or the
+    # dashboard shows only machine state and none of the documents anyone reads.
+    docs = docs_root(root)
+    if docs.is_dir():
+        artifacts.extend(artifact_record(path, root) for path in sorted(docs.rglob("*")) if path.is_file())
     action_items: list[dict] = []
     for path in sorted(base.rglob("*action-items*.json")):
         data = read_json(path, {})
@@ -113,6 +127,10 @@ def collect_ledger(root: Path) -> dict:
     for path in sorted(base.rglob("*human-tasks*.json")):
         data = read_json(path, {})
         human_tasks.extend(data if isinstance(data, list) else data.get("human_tasks", []))
+    # Questions the assistant needs a human to answer. Collected here so they
+    # appear on the dashboard instead of only in the file that raised them.
+    questions = read_json(base / "questions" / "open-questions.json", {})
+    open_questions = questions.get("open_questions", []) if isinstance(questions, dict) else []
     hygiene = read_json(base / "hygiene" / "hygiene-report.json", {})
     council_runs = []
     council_root = base / "council"
@@ -131,12 +149,14 @@ def collect_ledger(root: Path) -> dict:
         "artifacts": artifacts,
         "action_items": sorted(action_items, key=lambda item: item.get("id", "")),
         "human_tasks": sorted(human_tasks, key=lambda item: item.get("id", "")),
+        "open_questions": open_questions,
         "hygiene": hygiene,
         "council_runs": council_runs,
         "summary": {
             "artifact_count": len(artifacts),
             "open_action_item_count": sum(1 for item in action_items if item.get("status") != "done"),
             "open_human_task_count": sum(1 for item in human_tasks if item.get("status") != "done"),
+            "open_question_count": sum(1 for item in open_questions if item.get("status") == "open"),
             "council_run_count": len(council_runs),
         },
     }
@@ -167,6 +187,7 @@ def dashboard_data(ledger: dict) -> dict:
         "missing_artifact_groups": missing,
         "open_action_items": [item for item in ledger["action_items"] if item.get("status") != "done"],
         "open_human_tasks": [item for item in ledger.get("human_tasks", []) if item.get("status") != "done"],
+        "open_questions": [item for item in ledger.get("open_questions", []) if item.get("status") == "open"],
         "council_runs": ledger.get("council_runs", []),
         "recent_artifacts": sorted(ledger["artifacts"], key=lambda item: item["path"])[:50],
     }
@@ -210,10 +231,17 @@ def _tone(status) -> str:
 
 
 def _rel_link(path: str) -> str:
-    """Convert a workspace-root-relative path to one relative to the dashboards/ dir."""
+    """Convert a repo-relative artifact path to one relative to the dashboards/ dir.
+
+    The dashboard sits at `.project/.engineering/dashboards/`, so workspace paths
+    climb one level and docs paths climb three.
+    """
     p = str(path).replace("\\", "/")
-    prefix = ".project/.engineering/"
-    return "../" + p[len(prefix) :] if p.startswith(prefix) else p
+    if p.startswith(".project/.engineering/"):
+        return "../" + p[len(".project/.engineering/") :]
+    if p.startswith(".project/"):
+        return "../../" + p[len(".project/") :]
+    return p
 
 
 def _chip(label, value, tone: str = "muted") -> str:
@@ -267,6 +295,18 @@ def _human_task_item(item) -> str:
     status = item.get("status")
     badge = ('<span class="badge badge-' + _tone(status) + '">' + e(str(status)) + "</span> ") if status else ""
     return "<li>" + badge + title + sub + "</li>"
+
+
+def _question_item(item) -> str:
+    e = html.escape
+    question = e(str(item.get("question", "Untitled")))
+    kind = str(item.get("kind", ""))
+    source = str(item.get("source_artifact") or "")
+    meta = " &middot; ".join(part for part in (e(kind) if kind else "", e(source) if source else "") if part)
+    sub = (' <small class="sub">' + meta + "</small>") if meta else ""
+    options = item.get("options") or []
+    choices = (' <small class="sub">options: ' + e(", ".join(str(o) for o in options)) + "</small>") if options else ""
+    return "<li>" + question + sub + choices + "</li>"
 
 
 def _council_item(run) -> str:
@@ -404,6 +444,7 @@ def render_dashboard(data: dict) -> str:
     missing = data.get("missing_artifact_groups", [])
     actions = data.get("open_action_items", [])
     human = data.get("open_human_tasks", [])
+    questions = data.get("open_questions", [])
     councils = data.get("council_runs", [])
     summary = data.get("summary", {})
     stale_count = sum(1 for a in arts if a.get("freshness") == "stale")
@@ -415,6 +456,11 @@ def render_dashboard(data: dict) -> str:
             _chip("Artifacts", summary.get("artifact_count", len(arts))),
             _chip("Open actions", summary.get("open_action_item_count", len(actions)), "warn" if actions else "muted"),
             _chip("Human tasks", summary.get("open_human_task_count", len(human)), "warn" if human else "muted"),
+            _chip(
+                "Open questions",
+                summary.get("open_question_count", len(questions)),
+                "warn" if questions else "muted",
+            ),
             _chip("Council runs", summary.get("council_run_count", len(councils))),
             _chip("Risks", len(risks), "bad" if risks else "muted"),
             _chip("Missing groups", len(missing), "warn" if missing else "muted"),
@@ -427,6 +473,9 @@ def render_dashboard(data: dict) -> str:
     )
     actions_html = "".join(_action_item(a) for a in actions) or '<li class="empty">No open action items.</li>'
     human_html = "".join(_human_task_item(h) for h in human) or '<li class="empty">No open human tasks.</li>'
+    questions_html = (
+        "".join(_question_item(q) for q in questions) or '<li class="empty">No questions awaiting an answer.</li>'
+    )
     council_html = "".join(_council_item(c) for c in councils) or '<li class="empty">No council runs.</li>'
     rows = "".join(_artifact_row(a) for a in arts) or '<tr><td colspan="7" class="empty">No artifacts.</td></tr>'
     status_filters = "".join(
@@ -451,6 +500,7 @@ def render_dashboard(data: dict) -> str:
         '<section class="panel"><h2>Missing artifact groups</h2><ul class="clean">' + missing_html + "</ul></section>\n"
         '<section class="panel"><h2>Open action items</h2><ul class="clean">' + actions_html + "</ul></section>\n"
         '<section class="panel"><h2>Open human tasks</h2><ul class="clean">' + human_html + "</ul></section>\n"
+        '<section class="panel"><h2>Open questions</h2><ul class="clean">' + questions_html + "</ul></section>\n"
         '<section class="panel"><h2>Council runs</h2><ul class="clean">' + council_html + "</ul></section>\n"
         '<section class="panel"><h2>Recent artifacts</h2>'
         '<div class="toolbar"><input id="search" type="search" placeholder="Filter by path…" aria-label="Filter artifacts by path">'
