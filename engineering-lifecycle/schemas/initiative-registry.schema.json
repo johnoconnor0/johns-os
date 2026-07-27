@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/engineering-lifecycle/initiative-registry.schema.json",
+  "title": "Engineering Lifecycle Initiative Registry",
+  "description": "Which initiatives exist and which one new work belongs to.",
+  "type": "object",
+  "required": ["active", "initiatives"],
+  "properties": {
+    "active": {
+      "type": ["string", "null"],
+      "description": "Initiative that new lifecycle artifacts belong to. Null when it is ambiguous and must be confirmed."
+    },
+    "updated_at": { "type": "string" },
+    "initiatives": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "status"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string" },
+          "status": { "type": "string", "enum": ["active", "closed"] },
+          "created_at": { "type": ["string", "null"] },
+          "last_active_at": { "type": ["string", "null"] },
+          "closed_at": { "type": ["string", "null"] },
+          "branch": { "type": ["string", "null"] }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
