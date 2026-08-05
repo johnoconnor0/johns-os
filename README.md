@@ -1,5 +1,6 @@
 # johns-os
 
+[![npm](https://img.shields.io/npm/v/johns-os?logo=npm)](https://www.npmjs.com/package/johns-os)
 [![CI](https://github.com/johnoconnor0/johns-os/actions/workflows/ci.yml/badge.svg)](https://github.com/johnoconnor0/johns-os/actions/workflows/ci.yml)
 [![E2E](https://github.com/johnoconnor0/johns-os/actions/workflows/e2e.yml/badge.svg)](https://github.com/johnoconnor0/johns-os/actions/workflows/e2e.yml)
 [![License: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
@@ -23,7 +24,7 @@ Plugin candidates under `_unreleased/` are intentionally excluded from active ma
 
 ### CLI (any platform)
 
-The quickest route. Installs the marketplace and the plugins without leaving your shell:
+The quickest route. Published to npm as [`johns-os`](https://www.npmjs.com/package/johns-os), so it runs without installing anything first:
 
 ```bash
 npx johns-os install
@@ -48,6 +49,18 @@ npx johns-os doctor
 ```
 
 `install` accepts specific plugin names and a `--scope user|project|local` flag (default `user`). `init` creates the Engineering Lifecycle workspace in the current repository, and `doctor` reports where the running copy came from and whether it is stale. Requires Node.js 18 or newer. See [`cli/README.md`](cli/README.md).
+
+Install it globally instead if you prefer:
+
+```bash
+npm install -g johns-os
+```
+
+Each release is published from CI with [SLSA build provenance](https://registry.npmjs.org/-/npm/v1/attestations/johns-os@0.3.0), so the package on the registry is verifiable against the commit and workflow that built it:
+
+```bash
+npm audit signatures
+```
 
 ### Claude Code
 
@@ -74,7 +87,7 @@ The Codex marketplace manifests are `marketplace.json` and `.agents/plugins/mark
 | Codex marketplace | `marketplace.json`, `.agents/plugins/marketplace.json` | Codex discovery metadata. |
 | Local catalog | `marketplace/catalog.json`, `marketplace/plugins/` | Deterministic repository discovery and validation. |
 | Active plugins | `engineering-lifecycle/`, `business-development/`, `ai-utilities/` | Self-contained plugin source and manifests. |
-| Installer CLI | `cli/` | The `johns-os` npm package published by `publish-cli.yml`. |
+| Installer CLI | `cli/` | Source of the [`johns-os`](https://www.npmjs.com/package/johns-os) npm package, published from `publish-cli.yml` with build provenance. |
 | Repository tooling | `scripts/`, `tests/` | Cross-surface validation and its test suite. |
 | Continuous integration | `.github/workflows/` | `ci.yml` (lint, format, validation, suites), `e2e.yml` (browser coverage), `publish-cli.yml`. |
 | Public docs | `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md` | Contribution, safety, and support guidance. |
