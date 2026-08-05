@@ -56,7 +56,7 @@ Install it globally instead if you prefer:
 npm install -g johns-os
 ```
 
-Each release is published from CI with [SLSA build provenance](https://registry.npmjs.org/-/npm/v1/attestations/johns-os@0.3.0), so the package on the registry is verifiable against the commit and workflow that built it:
+Each release is published from CI with [build provenance](https://docs.npmjs.com/generating-provenance-statements), so the package on the registry is verifiable against the commit and workflow that built it. The attestation for whichever version you installed is linked from the [package page](https://www.npmjs.com/package/johns-os), and verified locally with:
 
 ```bash
 npm audit signatures
