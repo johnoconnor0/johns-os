@@ -13,7 +13,7 @@ Repository: [github.com/johnoconnor0/johns-os](https://github.com/johnoconnor0/j
 
 | Plugin | Version | Role |
 | --- | --- | --- |
-| `engineering-lifecycle` | 0.7.1 | Structured discovery, requirements, UX, design systems, architecture, data modelling, API contracts, implementation, review, testing, release, and repository hygiene. |
+| `engineering-lifecycle` | 0.8.0 | Structured discovery, requirements, UX, design systems, architecture, data modelling, API contracts, implementation, review, testing, release, and repository hygiene. |
 | `business-development` | 0.2.0 | Interview-first Service Outline generation and updating. |
 | `ai-utilities` | 0.1.0 | Claude Code extension authoring/review and plan-completion auditing. |
 
