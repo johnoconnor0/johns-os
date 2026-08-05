@@ -14,12 +14,14 @@ from pathlib import Path
 from typing import Any
 
 from eng_common import (
-    ENV_VAR_RE,
     append_jsonl,
+    builds_env_names_dynamically,
     changed_files,
     classify_file_path,
+    configured_env_accessors,
     emit_json,
     engineering_root,
+    env_names_in,
     git_files,
     hook_additional_context,
     hook_output,
@@ -545,15 +547,17 @@ def classify_changed(root: Path, explicit: list[str] | None = None) -> dict[str,
 
 def env_example_sync(root: Path, apply: bool = False) -> dict[str, Any]:
     found: dict[str, set[str]] = {}
+    dynamic: set[str] = set()
+    accessors = configured_env_accessors(root)
     for path in git_files(root):
         full = root / path
         if classify_file_path(path) not in {"source", "config"} or not full.exists():
             continue
         text = full.read_text(encoding="utf-8", errors="ignore")
-        for name in ENV_VAR_RE.findall(text):
-            if name in {"PATH", "HOME", "USER", "SHELL"}:
-                continue
+        for name in env_names_in(full, text, accessors):
             found.setdefault(name, set()).add(relpath(full, root))
+        if builds_env_names_dynamically(text):
+            dynamic.add(relpath(full, root))
 
     # A variable is documented if it appears in the nearest .env.example above ANY
     # file that references it (per-package resolution). This fixes the monorepo case
@@ -586,7 +590,10 @@ def env_example_sync(root: Path, apply: bool = False) -> dict[str, Any]:
             f.write("# Added by Engineering Lifecycle\n")
             for item in missing:
                 f.write(item["placeholder"] + "\n")
-    result = {"missing": missing, "applied": apply}
+    # Files that reach the environment with a computed name. Reported separately
+    # from `missing` so they never inflate the actionable list, but reported at all
+    # so a repo the detector cannot fully read is not implied to be clean.
+    result = {"missing": missing, "applied": apply, "dynamic_env_access": sorted(dynamic)}
     write_json(engineering_root(root) / "reports" / "validation" / "env-example-sync.json", result)
     return result
 

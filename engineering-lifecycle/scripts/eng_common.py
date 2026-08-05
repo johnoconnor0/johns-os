@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -369,9 +370,195 @@ def classify_file_path(path: Path) -> str:
     return "unknown"
 
 
-ENV_VAR_RE = re.compile(
-    r"(?:process\.env\.|os\.environ(?:\.get)?\(['\"]|getenv\(['\"]|\$env:|\$\{?)([A-Z][A-Z0-9_]{2,})"
+# Explicit accessors only. A bare `$NAME` used to be part of this pattern and was
+# the single largest source of noise in the hygiene reports: in a shell script it
+# matches locals far more often than environment variables (65 hits on this repo,
+# 6 of them genuine), and in TypeScript it matches every `${...}` template
+# literal. Shell references are handled by `shell_env_names` below, which can tell
+# an inherited variable from a local. `$env:` stays — it is unambiguous PowerShell.
+ENV_VAR_RE = re.compile(r"(?:process\.env\.|os\.environ(?:\.get)?[\(\[]['\"]|getenv\(['\"]|\$env:)([A-Z][A-Z0-9_]{2,})")
+
+# Names that are always supplied by the shell, the OS or the agent harness, and so
+# never belong in a project's .env.example. Without these the shell pass below
+# reports `BASH_SOURCE` and friends, which are read-but-never-assigned by
+# definition and so pass its test.
+IGNORED_ENV_NAMES = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "USER",
+        "SHELL",
+        "PWD",
+        "OLDPWD",
+        "IFS",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "LANG",
+        "LC_ALL",
+        "TERM",
+        "EDITOR",
+        "VISUAL",
+        "SHLVL",
+        "HOSTNAME",
+        "LOGNAME",
+        "OSTYPE",
+        "MACHTYPE",
+        "HOSTTYPE",
+        "UID",
+        "EUID",
+        "PPID",
+        "SECONDS",
+        "RANDOM",
+        "LINENO",
+        "REPLY",
+        "FUNCNAME",
+        "PIPESTATUS",
+        "GROUPS",
+        "COLUMNS",
+        "LINES",
+        "BASH",
+        "BASH_SOURCE",
+        "BASH_VERSION",
+        "BASHOPTS",
+        "BASHPID",
+        # Supplied by the Claude Code harness, never by a project .env. ARGUMENTS is
+        # the skill/slash-command placeholder, which appears as `$ARGUMENTS` in hook
+        # scripts that check for it.
+        "CLAUDE_PLUGIN_ROOT",
+        "CLAUDE_PROJECT_DIR",
+        "CLAUDE_CONFIG_DIR",
+        "ARGUMENTS",
+    }
 )
+
+SHELL_SUFFIXES = frozenset({".sh", ".bash", ".zsh", ".ksh"})
+
+# An assignment is not always at the start of a line: `cmd && X=0 || X=$?` assigns
+# X twice, mid-line, and anchoring to ^ misses both. Accepting any shell separator
+# before the name is what keeps the five `*_EXIT` variables in this repo's own
+# audit scripts from being reported as undocumented environment variables.
+_SHELL_ASSIGN_RE = re.compile(
+    r"(?:^|[\s;&|(){}])(?:export\s+|local\s+|readonly\s+|declare\s+(?:-\w+\s+)*)?([A-Za-z_]\w*)\+?=", re.M
+)
+# `declare -a NAMES HOSTS PORTS` declares locals without ever writing `=`. Missing
+# this form reported six array locals in one audit script as environment variables.
+_SHELL_DECLARE_RE = re.compile(r"\b(?:declare|local|readonly|typeset)\b(?:\s+-\w+)*((?:\s+[A-Za-z_]\w*)+)")
+_SHELL_FOR_RE = re.compile(r"\bfor\s+([A-Za-z_]\w*)\s+in\b")
+# Only `read` in command position. Matching it anywhere on the line would let the
+# word "read" in a comment or an echo mark a genuine variable as locally assigned.
+_SHELL_READ_RE = re.compile(r"(?:^|[;&|])\s*read\b(?P<rest>[^\n]*)", re.M)
+_SHELL_REF_RE = re.compile(r"\$\{?([A-Z][A-Z0-9_]{2,})")
+
+
+def _shell_assigned_names(text: str) -> set[str]:
+    """Every shell variable `text` sets, by assignment, loop binding or `read`."""
+    assigned = set(_SHELL_ASSIGN_RE.findall(text))
+    assigned |= set(_SHELL_FOR_RE.findall(text))
+    for names in _SHELL_DECLARE_RE.findall(text):
+        assigned |= set(names.split())
+    for rest in _SHELL_READ_RE.findall(text):
+        # `read -r -d '' MESSAGE` — drop quoted flag arguments first, then the flags,
+        # and whatever bare identifiers remain are the variables being bound.
+        cleaned = re.sub(r"'[^']*'|\"[^\"]*\"", " ", rest)
+        cleaned = re.sub(r"(?:^|\s)-\w+", " ", cleaned)
+        assigned |= set(re.findall(r"\b([A-Za-z_]\w*)\b", cleaned))
+    return assigned
+
+
+def shell_env_names(text: str) -> set[str]:
+    """Shell variables `text` reads but never assigns — i.e. inherited from the environment.
+
+    A `$NAME` reference on its own proves nothing, because most shell variables are
+    locals. What distinguishes an environment variable is that the script reads it
+    without ever setting it: `SUPABASE_DB_URL` is read three times and assigned
+    never, while `PYTHON_BIN` and `DRY_RUN` are assigned a few lines above their use.
+    """
+    assigned = _shell_assigned_names(text)
+    return {name for name in _SHELL_REF_RE.findall(text) if name not in assigned}
+
+
+# A helper is an env accessor when its body reaches the environment through its own
+# parameter rather than a literal — indexing the env object with the argument it was
+# handed. Matching the definition and the dynamic access separately, then requiring
+# the parameter to connect them, is what keeps this from firing on any function that
+# happens to sit near an env read. (Written without a literal example on purpose:
+# `builds_env_names_dynamically` below would match the comment itself.)
+_ENV_HELPER_DEF_RE = re.compile(
+    r"(?:function\s+(?P<fn>\w+)\s*\(\s*(?P<fnarg>\w+)"
+    r"|(?:const|let|var)\s+(?P<js>\w+)\s*=\s*(?:async\s+)?\(?\s*(?P<jsarg>\w+)"
+    r"|def\s+(?P<py>\w+)\s*\(\s*(?P<pyarg>\w+))"
+)
+_DYNAMIC_ACCESS_TEMPLATE = r"(?:process\.env\[\s*{p}|os\.environ\[\s*{p}|os\.environ\.get\(\s*{p}|getenv\(\s*{p})"
+# The same accessors reached with something other than a string literal. Used to
+# report where enumeration is impossible rather than implying coverage.
+_DYNAMIC_ENV_RE = re.compile(r"(?:process\.env\[|os\.environ\[|os\.environ\.get\(|getenv\()\s*(?!['\"])")
+
+
+def env_accessor_names(text: str, window: int = 400) -> set[str]:
+    """Names of single-argument helpers in `text` that read the environment by their parameter."""
+    names: set[str] = set()
+    for match in _ENV_HELPER_DEF_RE.finditer(text):
+        name = match.group("fn") or match.group("js") or match.group("py")
+        arg = match.group("fnarg") or match.group("jsarg") or match.group("pyarg")
+        if not name or not arg:
+            continue
+        body = text[match.end() : match.end() + window]
+        if re.search(_DYNAMIC_ACCESS_TEMPLATE.format(p=re.escape(arg)), body):
+            names.add(name)
+    return names
+
+
+def indirect_env_names(text: str, accessors: Iterable[str] = ()) -> set[str]:
+    """Variables read through a helper, e.g. `required('REPORT_LINK_SECRET')`.
+
+    A regex anchored on `process.env.` sees the helper's single internal access and
+    none of the call sites that name real variables, so a codebase that centralises
+    its config reads — the disciplined case — is exactly the one a plain scan
+    reports as clean.
+    """
+    names: set[str] = set()
+    for helper in env_accessor_names(text) | {name for name in accessors if name}:
+        names |= set(re.findall(rf"\b{re.escape(helper)}\s*\(\s*['\"]([A-Z][A-Z0-9_]{{2,}})['\"]", text))
+    return names
+
+
+def builds_env_names_dynamically(text: str) -> bool:
+    """True when `text` reaches the environment with a computed name.
+
+    Names assembled at runtime (an interpolated prefix, a loop over a list) cannot
+    be enumerated statically by anything short of executing the code. Callers
+    surface this so a file the detector cannot read is reported as unknown rather
+    than silently counted as clean.
+    """
+    return bool(_DYNAMIC_ENV_RE.search(text))
+
+
+def configured_env_accessors(root: Path) -> list[str]:
+    """Accessor helper names the repo declares, for wrappers auto-detection cannot reach."""
+    config = engineering_root(root) / "workspace.json"
+    if not config.exists():
+        return []
+    try:
+        data = json.loads(config.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    declared = data.get("env_accessors")
+    return [str(name) for name in declared if str(name).strip()] if isinstance(declared, list) else []
+
+
+def env_names_in(path: Path, text: str, accessors: Iterable[str] = ()) -> set[str]:
+    """Every environment variable `text` references, by whichever mechanism.
+
+    The single place any tool asks "what env vars does this file use?". Two
+    detectors maintaining their own patterns is how they came to disagree about the
+    same repository in the first place.
+    """
+    names = set(ENV_VAR_RE.findall(text))
+    names |= indirect_env_names(text, accessors)
+    if path.suffix.lower() in SHELL_SUFFIXES:
+        names |= shell_env_names(text)
+    return names - IGNORED_ENV_NAMES
 
 
 def placeholder_for_env(name: str) -> str:
@@ -430,16 +617,21 @@ def nearest_env_example(start: Path, stop: Path | None = None) -> Path | None:
         current = current.parent
 
 
-def env_example_keys(start: Path | None = None) -> set[str]:
-    """Union of keys from every .env.example from `start` (or cwd) up to the repo root.
+def env_example_keys(start: Path | None = None, stop: Path | None = None) -> set[str]:
+    """Union of keys from every .env.example from `start` (or cwd) up to `stop` (or the repo root).
 
     Ancestor-walk only. A repo-wide descendant scan is deliberately avoided: on a
     hygiene/secrets tool it would let one package's .env.example mask another
     package's genuinely undocumented variable — a false negative worse than the
     noisy false positives this replaces.
+
+    Because the walk only ever goes up, callers must start it from the file that
+    references the variable, not from the working directory. Starting from a
+    monorepo root resolves nothing but a root-level template and reports every
+    package-level variable as undocumented forever.
     """
     start = (start or Path.cwd()).resolve()
-    stop = repo_root(start)
+    stop = (stop or repo_root(start)).resolve()
     keys: set[str] = set()
     current = start if start.is_dir() else start.parent
     while True:
