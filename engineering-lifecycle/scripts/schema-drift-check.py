@@ -38,12 +38,15 @@ def main() -> int:
     args = parser.parse_args()
     root = repo_root(Path(args.root))
 
-    sources = find_live_schema_sources(root)
+    # Each model records the dialect it was built in, so the migration directories
+    # searched follow that model rather than a fixed Postgres/Supabase list.
     reports = []
     for path in find_models(root):
         model = read_json(path) or {}
+        sources = find_live_schema_sources(root, model.get("dialect"))
         report = drift_report(model, sources, root)
         report["model"] = relpath(path, root)
+        report["dialect"] = model.get("dialect", "postgresql")
         reports.append(report)
 
     drifted = [report for report in reports if report["checked"] and not report["in_sync"]]

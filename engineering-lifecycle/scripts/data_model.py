@@ -11,44 +11,57 @@ thing that actually ships. `data-model.json` is generated from it, and is what
 hooks, the ledger and the ERD read. Generating the sidecar rather than
 hand-maintaining it means the two can never disagree.
 
-The parser targets PostgreSQL DDL (which is also what Supabase speaks). It is
-deliberately a structural reader, not a full SQL grammar: it extracts tables,
-columns, types, nullability, keys, foreign keys and enums, and ignores anything
-it does not recognise rather than guessing.
+The parser is deliberately a structural reader, not a full SQL grammar: it extracts
+tables, columns, types, nullability, keys, foreign keys and enums, and ignores
+anything it does not recognise rather than guessing.
+
+It reads whichever dialect it is given (see `dialects.py`). It used to read only
+PostgreSQL and stamp `"dialect": "postgresql"` on the result whatever the repo
+actually ran, so a MySQL project got a model that was wrong about its identifiers,
+its enums, and — every table, every run — its row level security.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
 
+from dialects import DEFAULT_DIALECT, Dialect, get_dialect
 from eng_common import now_iso
+
+# Identifiers may be bare, "quoted", `backticked` (MySQL) or [bracketed] (SQL
+# Server). One character class covers every dialect; `_clean` strips whatever
+# wrapper was actually used.
+_IDENT = r"[\"`\[\]\w.]+"
 
 # `CREATE TABLE [IF NOT EXISTS] [schema.]name (` up to its matching paren.
 _CREATE_TABLE = re.compile(
-    r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<name>[\"\w.]+)\s*\(",
+    rf"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<name>{_IDENT})\s*\(",
     re.IGNORECASE,
 )
 _CREATE_ENUM = re.compile(
-    r"CREATE\s+TYPE\s+(?P<name>[\"\w.]+)\s+AS\s+ENUM\s*\((?P<values>[^)]*)\)",
+    rf"CREATE\s+TYPE\s+(?P<name>{_IDENT})\s+AS\s+ENUM\s*\((?P<values>[^)]*)\)",
     re.IGNORECASE,
 )
+# MySQL writes its enums as a column type rather than declaring them.
+_INLINE_ENUM = re.compile(r"^\s*ENUM\s*\((?P<values>.*)\)\s*$", re.IGNORECASE | re.DOTALL)
 _CREATE_INDEX = re.compile(
-    r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"
-    r"(?P<name>[\"\w.]+)\s+ON\s+(?P<table>[\"\w.]+)\s*(?:USING\s+\w+\s*)?\((?P<columns>[^)]*)\)",
+    rf"CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"
+    rf"(?P<name>{_IDENT})\s+ON\s+(?P<table>{_IDENT})\s*(?:USING\s+\w+\s*)?\((?P<columns>[^)]*)\)",
     re.IGNORECASE,
 )
 _ENABLE_RLS = re.compile(
-    r"ALTER\s+TABLE\s+(?P<table>[\"\w.]+)\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY",
+    rf"ALTER\s+TABLE\s+(?P<table>{_IDENT})\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY",
     re.IGNORECASE,
 )
 _CREATE_POLICY = re.compile(
-    r"CREATE\s+POLICY\s+(?P<name>\"[^\"]+\"|\S+)\s+ON\s+(?P<table>[\"\w.]+)",
+    rf"CREATE\s+POLICY\s+(?P<name>\"[^\"]+\"|\S+)\s+ON\s+(?P<table>{_IDENT})",
     re.IGNORECASE,
 )
 _REFERENCES = re.compile(
-    r"REFERENCES\s+(?P<table>[\"\w.]+)\s*(?:\(\s*(?P<column>[\"\w]+)\s*\))?",
+    rf"REFERENCES\s+(?P<table>{_IDENT})\s*(?:\(\s*(?P<column>[\"`\[\]\w]+)\s*\))?",
     re.IGNORECASE,
 )
 _TABLE_CONSTRAINT = re.compile(
@@ -79,8 +92,16 @@ _SENSITIVE_HINTS = (
 )
 
 
+_QUOTE_CHARS = re.compile(r"[\"`\[\]]")
+
+
 def _clean(identifier: str) -> str:
-    return identifier.strip().strip('"').strip()
+    """Remove whichever quoting a dialect used around an identifier.
+
+    Removing rather than stripping the ends, because a schema-qualified name quotes
+    each part separately: `[dbo].[Orders]` must become `dbo.Orders`, not `dbo].[Orders`.
+    """
+    return _QUOTE_CHARS.sub("", identifier).strip()
 
 
 def _strip_comments(sql: str) -> str:
@@ -132,27 +153,19 @@ def _split_top_level(body: str) -> list[str]:
     return [part.strip() for part in parts if part.strip()]
 
 
-def _parse_column(clause: str) -> dict[str, Any] | None:
+def _parse_column(clause: str, dialect: Dialect = DEFAULT_DIALECT) -> dict[str, Any] | None:
     tokens = clause.split()
     if len(tokens) < 2:
         return None
     name = _clean(tokens[0])
     upper = clause.upper()
-    # Type is everything up to the first constraint keyword.
+    # Type is everything up to the first constraint keyword. Which words count as a
+    # constraint is dialect-specific: without MySQL's AUTO_INCREMENT in the set,
+    # `id BIGINT AUTO_INCREMENT PRIMARY KEY` yields the type "BIGINT AUTO_INCREMENT".
+    keywords = dialect.column_keywords
     type_tokens: list[str] = []
     for token in tokens[1:]:
-        if token.upper().rstrip(",").strip("(") in {
-            "PRIMARY",
-            "NOT",
-            "NULL",
-            "UNIQUE",
-            "REFERENCES",
-            "DEFAULT",
-            "CHECK",
-            "GENERATED",
-            "CONSTRAINT",
-            "COLLATE",
-        }:
+        if token.upper().rstrip(",").split("(")[0] in keywords:
             break
         type_tokens.append(token)
     column: dict[str, Any] = {
@@ -177,19 +190,31 @@ def _parse_column(clause: str) -> dict[str, Any] | None:
     return column
 
 
-def parse_schema_sql(sql: str) -> dict[str, Any]:
-    """Structure a PostgreSQL DDL file into entities, relationships and enums."""
+def parse_schema_sql(sql: str, dialect: Dialect | str | None = None) -> dict[str, Any]:
+    """Structure a SQL DDL file into entities, relationships and enums.
+
+    `dialect` decides how identifiers are unquoted, which keywords end a column
+    type, where enums come from, and whether row level security means anything.
+    """
+    dialect = dialect if isinstance(dialect, Dialect) else get_dialect(dialect)
+    if not dialect.sql:
+        raise ValueError(
+            f"{dialect.label} is a document store with no DDL to parse. "
+            f"Author the model as schema.json and use parse_document_model()."
+        )
     sql = _strip_comments(sql)
     entities: list[dict[str, Any]] = []
     relationships: list[dict[str, Any]] = []
+    enums: list[dict[str, Any]] = []
 
-    enums = [
-        {
-            "name": _clean(match.group("name")),
-            "values": [value.strip().strip("'\"") for value in match.group("values").split(",") if value.strip()],
-        }
-        for match in _CREATE_ENUM.finditer(sql)
-    ]
+    if dialect.declared_enums:
+        enums = [
+            {
+                "name": _clean(match.group("name")),
+                "values": [value.strip().strip("'\"") for value in match.group("values").split(",") if value.strip()],
+            }
+            for match in _CREATE_ENUM.finditer(sql)
+        ]
 
     for match in _CREATE_TABLE.finditer(sql):
         table = _clean(match.group("name"))
@@ -221,10 +246,24 @@ def parse_schema_sql(sql: str) -> dict[str, Any]:
                             }
                         )
                 continue
-            column = _parse_column(clause)
+            column = _parse_column(clause, dialect)
             if not column:
                 continue
             columns.append(column)
+            if dialect.inline_enums:
+                inline = _INLINE_ENUM.match(column["type"])
+                if inline:
+                    enums.append(
+                        {
+                            "name": f"{table}.{column['name']}",
+                            "values": [
+                                value.strip().strip("'\"")
+                                for value in _split_top_level(inline.group("values"))
+                                if value.strip()
+                            ],
+                            "inline": True,
+                        }
+                    )
             if column["primary_key"]:
                 primary_key.append(column["name"])
             if "references" in column:
@@ -260,32 +299,37 @@ def parse_schema_sql(sql: str) -> dict[str, Any]:
                     "columns": [_clean(item) for item in match.group("columns").split(",")],
                 }
             )
-    for match in _ENABLE_RLS.finditer(sql):
-        entity = by_name.get(_clean(match.group("table")))
-        if entity is not None:
-            entity["rls_enabled"] = True
-    for match in _CREATE_POLICY.finditer(sql):
-        entity = by_name.get(_clean(match.group("table")))
-        if entity is not None:
-            entity["policies"].append(_clean(match.group("name")))
+    # Only Postgres spells row level security this way. Parsing it unconditionally
+    # was harmless; warning about its absence on engines that have no such feature
+    # was not — it produced one dead warning per table on every MySQL and SQLite
+    # model, which is how a warnings list stops being read.
+    if dialect.supports_row_level_security:
+        for match in _ENABLE_RLS.finditer(sql):
+            entity = by_name.get(_clean(match.group("table")))
+            if entity is not None:
+                entity["rls_enabled"] = True
+        for match in _CREATE_POLICY.finditer(sql):
+            entity = by_name.get(_clean(match.group("table")))
+            if entity is not None:
+                entity["policies"].append(_clean(match.group("name")))
 
     return {
         "generated_at": now_iso(),
-        "dialect": "postgresql",
+        "dialect": dialect.name,
         "enums": enums,
         "entities": sorted(entities, key=lambda item: item["name"]),
         "relationships": sorted(relationships, key=lambda item: (item["from"], item["from_column"])),
-        "warnings": _model_warnings(entities),
+        "warnings": _model_warnings(entities, dialect),
     }
 
 
-def _model_warnings(entities: list[dict[str, Any]]) -> list[str]:
+def _model_warnings(entities: list[dict[str, Any]], dialect: Dialect = DEFAULT_DIALECT) -> list[str]:
     """Structural problems worth surfacing before they reach a migration."""
     warnings: list[str] = []
     for entity in entities:
         if not entity["primary_key"]:
             warnings.append(f"{entity['name']}: no primary key")
-        if entity["columns"] and not entity["rls_enabled"]:
+        if dialect.supports_row_level_security and entity["columns"] and not entity["rls_enabled"]:
             warnings.append(f"{entity['name']}: row level security not enabled")
         sensitive = [column["name"] for column in entity["columns"] if column.get("sensitive_hint")]
         if sensitive:
@@ -293,6 +337,88 @@ def _model_warnings(entities: list[dict[str, Any]]) -> list[str]:
                 f"{entity['name']}: confirm handling of possibly sensitive column(s): {', '.join(sensitive)}"
             )
     return warnings
+
+
+def parse_document_model(text: str) -> dict[str, Any]:
+    """Structure a `schema.json` collection spec into the same model shape.
+
+    A document store has no DDL, so the alternative to modelling it badly as SQL is
+    a small explicit format: collections, their fields, and which fields point at
+    another collection. Everything downstream — the ERD, the backend context hook,
+    the drift check — reads the shared shape and does not care which produced it.
+
+        {"collections": [
+          {"name": "users", "fields": [
+            {"name": "_id", "type": "objectId", "primary_key": true},
+            {"name": "org_id", "type": "objectId", "references": {"table": "orgs", "column": "_id"}}]}]}
+    """
+    data = json.loads(text)
+    collections = data.get("collections")
+    if not isinstance(collections, list):
+        raise ValueError("schema.json must contain a top-level 'collections' array")
+
+    entities: list[dict[str, Any]] = []
+    relationships: list[dict[str, Any]] = []
+    for collection in collections:
+        name = str(collection.get("name", "")).strip()
+        if not name:
+            continue
+        columns: list[dict[str, Any]] = []
+        primary_key: list[str] = []
+        for raw in collection.get("fields", []) or []:
+            field_name = str(raw.get("name", "")).strip()
+            if not field_name:
+                continue
+            column: dict[str, Any] = {
+                "name": field_name,
+                "type": str(raw.get("type", "unknown")),
+                "nullable": not bool(raw.get("required", False)) and not bool(raw.get("primary_key", False)),
+                "primary_key": bool(raw.get("primary_key", False)),
+                "unique": bool(raw.get("unique", False)),
+            }
+            reference = raw.get("references")
+            if isinstance(reference, dict) and reference.get("table"):
+                column["references"] = {
+                    "table": str(reference["table"]),
+                    "column": str(reference.get("column", "_id")),
+                }
+                relationships.append(
+                    {
+                        "from": name,
+                        "from_column": field_name,
+                        "to": column["references"]["table"],
+                        "to_column": column["references"]["column"],
+                        "cardinality": "one-to-one" if column["unique"] else "many-to-one",
+                    }
+                )
+            if any(hint in field_name.lower() for hint in _SENSITIVE_HINTS):
+                column["sensitive_hint"] = True
+            columns.append(column)
+            if column["primary_key"]:
+                primary_key.append(field_name)
+        entities.append(
+            {
+                "name": name,
+                "columns": columns,
+                "primary_key": primary_key,
+                "unique_constraints": [],
+                "indexes": [
+                    {"name": str(index.get("name", "")), "columns": list(index.get("columns", []))}
+                    for index in collection.get("indexes", []) or []
+                ],
+                "rls_enabled": False,
+                "policies": [],
+            }
+        )
+
+    return {
+        "generated_at": now_iso(),
+        "dialect": "mongodb",
+        "enums": [],
+        "entities": sorted(entities, key=lambda item: item["name"]),
+        "relationships": sorted(relationships, key=lambda item: (item["from"], item["from_column"])),
+        "warnings": _model_warnings(entities, get_dialect("mongodb")),
+    }
 
 
 def render_erd(model: dict[str, Any]) -> str:
@@ -338,18 +464,19 @@ def summarize(model: dict[str, Any], max_entities: int = 40) -> str:
     return "\n".join(lines)
 
 
-def find_live_schema_sources(root: Path) -> list[Path]:
-    """Migration and schema files that represent what is actually deployed."""
+def find_live_schema_sources(root: Path, dialect: Dialect | str | None = None) -> list[Path]:
+    """Migration and schema files that represent what is actually deployed.
+
+    ORM schemas are searched for every dialect — Prisma and Drizzle run on all of
+    them — while the migration directories come from the adapter, so a Mongo repo
+    is not scanned for `supabase/migrations`.
+    """
+    dialect = dialect if isinstance(dialect, Dialect) else get_dialect(dialect)
+    patterns = [*dialect.migration_sources, "prisma/schema.prisma", "drizzle/*.sql"]
     candidates: list[Path] = []
-    for pattern in (
-        "supabase/migrations/*.sql",
-        "migrations/*.sql",
-        "db/migrate/*.sql",
-        "prisma/schema.prisma",
-        "drizzle/*.sql",
-    ):
+    for pattern in patterns:
         candidates.extend(sorted(root.glob(pattern)))
-    return candidates
+    return sorted(set(candidates))
 
 
 def drift_report(model: dict[str, Any], sources: list[Path], root: Path) -> dict[str, Any]:

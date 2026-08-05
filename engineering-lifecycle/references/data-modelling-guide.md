@@ -30,7 +30,7 @@ Write the schema in dependency order, because that is also the order it must run
 2. Tables, parents before children.
 3. Constraints (primary keys, foreign keys, unique, check).
 4. Indexes for the query patterns that actually exist.
-5. Row level security: enable, then write policies.
+5. Access control, in whatever form the engine offers (see below).
 6. Functions and triggers.
 7. Seed data.
 
@@ -61,16 +61,36 @@ Index for the queries you have, not the queries you imagine.
 - Partial indexes where the query always filters the same subset.
 - Every index costs write throughput. An unused index is pure cost.
 
-## Row Level Security
+## Access Control
 
-For any table a client can query directly (Supabase and PostgREST especially),
-security lives in the database, not the application layer.
+Every table a client can reach needs a decided access rule. *How* you express it
+is the most dialect-dependent part of a schema — see
+`references/data-model-adapters.md`.
+
+**PostgreSQL and SQL Server** have row level security, so for any table a client
+queries directly (Supabase and PostgREST especially), security lives in the
+database rather than the application layer.
 
 - Enable RLS on every client-exposed table.
 - RLS enabled with no policy denies everything. That is safe, but unfinished.
 - Write separate policies per operation rather than one permissive catch-all.
 - Service-role paths bypass RLS. Anything running with that key is trusted code
   and must do its own authorisation.
+- SQL Server spells it differently: a predicate function plus `CREATE SECURITY
+  POLICY`, not `CREATE POLICY`.
+
+**MySQL, SQLite and MongoDB have no row level security at all.** Do not carry the
+pattern across; the statements will not run. Instead:
+
+- *MySQL* — `GRANT`s on a dedicated application user, per-row rules in the
+  application or behind views.
+- *SQLite* — the database is a file. Filesystem permissions plus application
+  enforcement; there are no users or grants.
+- *MongoDB* — role-based access at collection level, per-document rules in the
+  application.
+
+The rule that survives every engine: the access decision must be written down. An
+unanswered "who can read this row?" is the finding, not the mechanism used.
 
 ## Migrations
 
