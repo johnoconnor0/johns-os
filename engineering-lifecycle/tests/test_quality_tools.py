@@ -16,6 +16,7 @@ SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import data_model
+import dialects
 import eng_common
 import quality_tools
 
@@ -158,6 +159,7 @@ class QualityToolTests(unittest.TestCase):
                 "quality_tools.py",
                 "eng_common.py",
                 "data_model.py",
+                "dialects.py",
                 "stack_detection.py",
                 "questions.py",
                 "initiatives.py",
@@ -262,6 +264,221 @@ class QualityToolTests(unittest.TestCase):
             sync_missing = {m["name"] for m in sync["missing"]}
             self.assertNotIn("FOO_KEY", sync_missing)
             self.assertIn("UNDOCUMENTED_KEY", sync_missing)
+
+    def test_env_detector_sees_package_templates_from_the_monorepo_root(self) -> None:
+        # Regression (JOS-24): run at the repo root of a monorepo with no root-level
+        # template, the detector used to resolve keys once from the cwd. That walk only
+        # goes UP, so it started and ended at the root and reported every package-level
+        # variable as undocumented forever. Resolution must happen per referencing file.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".claude-plugin").mkdir()
+            (root / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+            self.assertFalse((root / ".env.example").exists(), "no root-level template, on purpose")
+
+            alpha = root / "apps" / "alpha"
+            (alpha / "src").mkdir(parents=True)
+            (alpha / ".env.example").write_text("ALPHA_KEY=example\nALPHA_ONLY_SECRET=example\n", encoding="utf-8")
+            (alpha / "src" / "a.ts").write_text(
+                "const a = process.env.ALPHA_KEY;\nconst b = process.env.ALPHA_MISSING;\n",
+                encoding="utf-8",
+            )
+            beta = root / "apps" / "beta"
+            (beta / "src").mkdir(parents=True)
+            (beta / ".env.example").write_text("BETA_KEY=example\n", encoding="utf-8")
+            # beta also reads a variable only alpha documents — a sibling's template is
+            # not an ancestor, so this must still be reported (no cross-package masking).
+            (beta / "src" / "b.ts").write_text(
+                "const a = process.env.BETA_KEY;\nconst b = process.env.ALPHA_ONLY_SECRET;\n",
+                encoding="utf-8",
+            )
+
+            self.run_checked(
+                [sys.executable, str(ROOT / "hooks" / "scripts" / "detect-new-env-vars.py"), "--ensure-workspace"],
+                cwd=str(root),
+            )
+            report = json.loads(
+                (root / ".project" / ".engineering" / "hygiene" / "hygiene-report.json").read_text(encoding="utf-8")
+            )
+            missing = {item["name"] for item in report["new_env_vars"]}
+            self.assertNotIn("ALPHA_KEY", missing)  # documented in its own package
+            self.assertNotIn("BETA_KEY", missing)  # documented in its own package
+            self.assertIn("ALPHA_MISSING", missing)  # genuinely undocumented
+            self.assertIn("ALPHA_ONLY_SECRET", missing)  # sibling's template must not mask it
+
+            inv = {i["name"]: i["in_env_example"] for i in report["env_var_inventory"]}
+            self.assertTrue(inv["ALPHA_KEY"])
+            self.assertTrue(inv["BETA_KEY"])
+            self.assertFalse(inv["ALPHA_MISSING"])
+            self.assertFalse(inv["ALPHA_ONLY_SECRET"])
+            # The repo-wide tool must agree — the two reports disagreeing is the bug.
+            sync_missing = {m["name"] for m in quality_tools.env_example_sync(root, apply=False)["missing"]}
+            self.assertEqual(missing & {"ALPHA_KEY", "BETA_KEY"}, sync_missing & {"ALPHA_KEY", "BETA_KEY"})
+
+    def test_shell_locals_are_not_environment_variables(self) -> None:
+        # Regression (JOS-25): ENV_VAR_RE carried a bare `$NAME` branch, so every
+        # shell local counted as an environment variable — 65 hits on this repo, 6
+        # of them real. What separates the two is assignment: a variable the script
+        # sets is a local, one it only ever reads is inherited.
+        script = """#!/usr/bin/env bash
+SCRIPT_DIR=$(dirname "$0")
+export BUILD_DIR=/tmp/out
+readonly MAX_RETRIES=3
+for TARGET in a b c; do echo "$TARGET"; done
+read -r -d '' MESSAGE <<'EOF'
+hello
+EOF
+lint . && LINT_EXIT=0 || LINT_EXIT=$?
+echo "$SCRIPT_DIR $BUILD_DIR $MAX_RETRIES $MESSAGE $LINT_EXIT"
+psql "$SUPABASE_DB_URL" -c 'select 1'
+if [ -n "${DEPLOY_TOKEN:-}" ]; then echo "$DEPLOY_TOKEN"; fi
+"""
+        names = eng_common.shell_env_names(script)
+        # Assigned somewhere in the file — locals, whatever the assignment form.
+        for local in ("SCRIPT_DIR", "BUILD_DIR", "MAX_RETRIES", "TARGET", "MESSAGE", "LINT_EXIT"):
+            self.assertNotIn(local, names, f"{local} is assigned in the script, so it is a local")
+        # Read and never assigned — genuinely inherited from the environment.
+        self.assertIn("SUPABASE_DB_URL", names)
+        self.assertIn("DEPLOY_TOKEN", names)
+
+    def test_template_literals_are_not_environment_variables(self) -> None:
+        # The same `$NAME` branch matched every TS template literal.
+        source = """
+const greeting = `hello ${USER_NAME}, you have ${COUNT} items`;
+const url = `${BASE_PATH}/v1/${RESOURCE_ID}`;
+const key = process.env.STRIPE_SECRET_KEY;
+"""
+        names = eng_common.env_names_in(Path("app.ts"), source)
+        self.assertEqual(names, {"STRIPE_SECRET_KEY"})
+
+    def test_env_detection_follows_accessor_helper_indirection(self) -> None:
+        # Regression (JOS-26): a codebase that centralises its config reads behind a
+        # `required()` wrapper was the one a plain regex scan reported as clean — the
+        # literal accessor appears once, inside the helper, against a parameter.
+        source = """
+function required(name) {
+  const value = process.env[name];
+  if (value === undefined) throw new Error(`missing ${name}`);
+  return value;
+}
+export const config = {
+  secret: required('REPORT_LINK_SECRET'),
+  baseUrl: required('PUBLIC_BASE_URL'),
+  direct: process.env.PLAIN_KEY,
+};
+"""
+        names = eng_common.env_names_in(Path("config.ts"), source)
+        self.assertIn("REPORT_LINK_SECRET", names)
+        self.assertIn("PUBLIC_BASE_URL", names)
+        self.assertIn("PLAIN_KEY", names)  # the literal accessor still works
+
+        # A function that merely sits near an env read must not be treated as an
+        # accessor, or every string constant in the file becomes an env var.
+        unrelated = """
+const label = process.env.REAL_KEY;
+function formatDate(fmt) { return fmt.toUpperCase(); }
+const shown = formatDate('YYYY_MM_DD');
+"""
+        self.assertEqual(eng_common.env_names_in(Path("util.ts"), unrelated), {"REAL_KEY"})
+
+    def test_workspace_can_declare_accessors_auto_detection_misses(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".claude-plugin").mkdir()
+            (root / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+            workspace = root / ".project" / ".engineering"
+            workspace.mkdir(parents=True)
+            (workspace / "workspace.json").write_text(
+                json.dumps({"workspace": ".project/.engineering", "env_accessors": ["cfg"]}), encoding="utf-8"
+            )
+            self.assertEqual(eng_common.configured_env_accessors(root), ["cfg"])
+            # The helper is imported from elsewhere, so nothing in this file connects
+            # it to process.env and auto-detection cannot see it.
+            source = "import { cfg } from './env';\nconst a = cfg('IMPORTED_HELPER_KEY');\n"
+            self.assertEqual(eng_common.env_names_in(Path("a.ts"), source), set())
+            self.assertIn("IMPORTED_HELPER_KEY", eng_common.env_names_in(Path("a.ts"), source, ["cfg"]))
+
+    def test_dynamically_built_env_names_are_reported_as_unreadable(self) -> None:
+        # Names assembled at runtime cannot be enumerated statically. The tool must
+        # say so rather than report clean, which is the false-negative half of JOS-26.
+        self.assertTrue(eng_common.builds_env_names_dynamically("const v = process.env[`${prefix}_URL`];"))
+        self.assertTrue(eng_common.builds_env_names_dynamically("value = os.environ[key]"))
+        self.assertFalse(eng_common.builds_env_names_dynamically("const v = process.env.PLAIN_KEY;"))
+        self.assertFalse(eng_common.builds_env_names_dynamically("value = os.environ['PLAIN_KEY']"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".claude-plugin").mkdir()
+            (root / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+            (root / "config.ts").write_text(
+                "const prefix = 'APP';\nexport const url = process.env[`${prefix}_BASE_URL`];\n", encoding="utf-8"
+            )
+            result = quality_tools.env_example_sync(root, apply=False)
+            self.assertIn("config.ts", result["dynamic_env_access"])
+            # It is a gap, not an actionable missing key — the name is not knowable.
+            self.assertEqual(result["missing"], [])
+
+    def test_both_env_tools_agree_because_they_share_one_detector(self) -> None:
+        # The two tools disagreeing about the same repo is the defect class behind
+        # both JOS-24 and JOS-25. They now resolve names through one function.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".claude-plugin").mkdir()
+            (root / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+            (root / "app.ts").write_text(
+                "const a = process.env.REAL_ONE;\nconst b = `${NOT_AN_ENV_VAR}`;\n", encoding="utf-8"
+            )
+            (root / "run.sh").write_text('LOCAL_VAR=1\necho "$LOCAL_VAR $INHERITED_VAR"\n', encoding="utf-8")
+
+            self.run_checked(
+                [sys.executable, str(ROOT / "hooks" / "scripts" / "detect-new-env-vars.py"), "--ensure-workspace"],
+                cwd=str(root),
+            )
+            report = json.loads(
+                (root / ".project" / ".engineering" / "hygiene" / "hygiene-report.json").read_text(encoding="utf-8")
+            )
+            detector = {item["name"] for item in report["new_env_vars"]}
+            sync = {item["name"] for item in quality_tools.env_example_sync(root, apply=False)["missing"]}
+
+            self.assertEqual(detector, sync, "the two tools must not disagree about the same repo")
+            self.assertEqual(detector, {"REAL_ONE", "INHERITED_VAR"})
+
+    def test_env_detector_skips_test_fixtures_and_ignored_trees(self) -> None:
+        # The last reason the two tools disagreed after sharing one detector: the
+        # hook walked the filesystem while env_example_sync went through git and
+        # filtered to source/config. On this repo that meant eleven findings out of a
+        # gitignored shelved plugin and nine more out of this very test file's
+        # fixtures — none of them configuration anything ships.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.run_checked(["git", "init"], cwd=str(root))
+            (root / ".gitignore").write_text("shelved/\n", encoding="utf-8")
+            (root / "shelved").mkdir()
+            (root / "shelved" / "old.sh").write_text('echo "$SHELVED_ONLY_VAR"\n', encoding="utf-8")
+            (root / "tests").mkdir()
+            (root / "tests" / "test_app.py").write_text("os.environ.get('FIXTURE_KEY')\n", encoding="utf-8")
+            (root / "app.py").write_text("os.environ.get('REAL_APP_KEY')\n", encoding="utf-8")
+            # env_example_sync reads `git ls-files`, which lists tracked files only.
+            # Staging is what puts both tools in front of the same set here; the hook
+            # deliberately also sees untracked-but-not-ignored files, since it fires
+            # immediately after an edit that may have just created one.
+            self.run_checked(["git", "add", "-A"], cwd=str(root))
+
+            self.run_checked(
+                [sys.executable, str(ROOT / "hooks" / "scripts" / "detect-new-env-vars.py"), "--ensure-workspace"],
+                cwd=str(root),
+            )
+            report = json.loads(
+                (root / ".project" / ".engineering" / "hygiene" / "hygiene-report.json").read_text(encoding="utf-8")
+            )
+            names = {item["name"] for item in report["new_env_vars"]}
+            self.assertEqual(names, {"REAL_APP_KEY"})
+            self.assertNotIn("SHELVED_ONLY_VAR", names, "gitignored trees are not part of the repo")
+            self.assertNotIn("FIXTURE_KEY", names, "test fixtures configure nothing")
+            self.assertEqual(
+                names,
+                {item["name"] for item in quality_tools.env_example_sync(root, apply=False)["missing"]},
+            )
 
     def test_automatic_hooks_never_autocreate_workspace(self) -> None:
         # The workspace is opt-in per repo. Every hook wired into hooks.json must
@@ -811,6 +1028,208 @@ class QualityToolTests(unittest.TestCase):
         # unusable for anyone who has turned transparency off.
         markup = (ROOT / "references/design-styles/glassmorphism/starter.html").read_text(encoding="utf-8")
         self.assertIn("prefers-reduced-transparency", markup)
+
+    def test_dialect_resolves_from_the_detected_database(self) -> None:
+        # The skill always listed context/stack.json "for the detected database" as
+        # its first input, then modelled in Postgres regardless. Detection covers
+        # MySQL, SQLite, MongoDB and SQL Server; the model has to follow it.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".claude-plugin").mkdir()
+            (root / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+            context = root / ".project" / ".engineering" / "context"
+            context.mkdir(parents=True)
+
+            def write_stack(*databases: str) -> None:
+                (context / "stack.json").write_text(json.dumps({"database": list(databases)}), encoding="utf-8")
+
+            write_stack("MySQL")
+            dialect, reason = dialects.resolve_dialect(root)
+            self.assertEqual(dialect.name, "mysql")
+            self.assertIn("MySQL", reason)
+
+            write_stack("Supabase")
+            self.assertEqual(dialects.resolve_dialect(root)[0].name, "postgresql")
+            write_stack("MongoDB")
+            self.assertEqual(dialects.resolve_dialect(root)[0].name, "mongodb")
+
+            # An ORM runs on several engines, so it must not decide the dialect.
+            write_stack("Prisma")
+            dialect, reason = dialects.resolve_dialect(root)
+            self.assertEqual(dialect.name, "postgresql")
+            self.assertIn("no adapter", reason)
+
+            # An explicit override always wins, and the reason says so.
+            write_stack("MySQL")
+            dialect, reason = dialects.resolve_dialect(root, "sqlite")
+            self.assertEqual(dialect.name, "sqlite")
+            self.assertIn("--dialect", reason)
+
+        self.assertEqual(dialects.get_dialect("Postgres").name, "postgresql")
+        self.assertEqual(dialects.get_dialect("MariaDB").name, "mysql")
+        self.assertEqual(dialects.get_dialect("sql-server").name, "sqlserver")
+        self.assertEqual(dialects.get_dialect(None).name, "postgresql")
+
+    def test_parser_reads_each_sql_dialect_on_its_own_terms(self) -> None:
+        mysql = data_model.parse_schema_sql(
+            "CREATE TABLE `users` (\n"
+            "  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,\n"
+            "  status ENUM('active','suspended') NOT NULL,\n"
+            "  PRIMARY KEY (id)\n"
+            ");\n"
+            "CREATE TABLE `orders` (id BIGINT UNSIGNED PRIMARY KEY, user_id BIGINT REFERENCES `users`(id));",
+            "mysql",
+        )
+        self.assertEqual(mysql["dialect"], "mysql")
+        self.assertEqual([e["name"] for e in mysql["entities"]], ["orders", "users"])  # backticks stripped
+        users = next(e for e in mysql["entities"] if e["name"] == "users")
+        # UNSIGNED is part of the type; AUTO_INCREMENT is not.
+        self.assertEqual(next(c["type"] for c in users["columns"] if c["name"] == "id"), "BIGINT UNSIGNED")
+        self.assertEqual(mysql["enums"], [{"name": "users.status", "values": ["active", "suspended"], "inline": True}])
+        self.assertEqual(mysql["relationships"][0]["to"], "users")
+
+        # SQL Server quotes each part of a qualified name separately.
+        sqlserver = data_model.parse_schema_sql(
+            "CREATE TABLE [dbo].[Orders] ([Id] uniqueidentifier PRIMARY KEY, "
+            "[UserId] uniqueidentifier REFERENCES [dbo].[Users]([Id]));",
+            "sqlserver",
+        )
+        self.assertEqual(sqlserver["entities"][0]["name"], "dbo.Orders")
+        self.assertEqual(sqlserver["relationships"][0]["to"], "dbo.Users")
+
+        # Postgres behaviour is unchanged: declared enums, RLS, policies.
+        postgres = data_model.parse_schema_sql(
+            "CREATE TYPE mood AS ENUM ('up','down');\n"
+            "CREATE TABLE public.users (id uuid PRIMARY KEY, feeling mood);\n"
+            "ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;\n"
+            'CREATE POLICY "sel" ON public.users FOR SELECT USING (true);',
+            "postgresql",
+        )
+        self.assertEqual(postgres["enums"], [{"name": "mood", "values": ["up", "down"]}])
+        self.assertTrue(postgres["entities"][0]["rls_enabled"])
+        self.assertEqual(postgres["entities"][0]["policies"], ["sel"])
+
+    def test_no_row_level_security_warnings_on_engines_without_it(self) -> None:
+        # The warning fired for every table on every dialect. On MySQL and SQLite it
+        # describes a feature that does not exist, and a warnings list full of
+        # impossible advice is one nobody reads.
+        ddl = "CREATE TABLE items (id INTEGER PRIMARY KEY, label TEXT NOT NULL);"
+        for name in ("mysql", "sqlite"):
+            warnings = data_model.parse_schema_sql(ddl, name)["warnings"]
+            self.assertEqual(warnings, [], f"{name} has no row level security to warn about")
+        # Still warned where the feature is real.
+        self.assertIn(
+            "row level security not enabled",
+            " ".join(data_model.parse_schema_sql(ddl, "postgresql")["warnings"]),
+        )
+        # Warnings that are not dialect-specific survive everywhere.
+        no_pk = "CREATE TABLE t (email TEXT NOT NULL);"
+        for name in ("mysql", "sqlite", "postgresql", "sqlserver"):
+            joined = " ".join(data_model.parse_schema_sql(no_pk, name)["warnings"])
+            self.assertIn("no primary key", joined)
+            self.assertIn("email", joined)
+
+    def test_document_store_is_modelled_not_mis_parsed(self) -> None:
+        # Running a document store through the SQL parser produced an empty model
+        # stamped "postgresql" — worse than refusing, because it looked like an answer.
+        with self.assertRaises(ValueError):
+            data_model.parse_schema_sql("CREATE TABLE x (id int);", "mongodb")
+        self.assertEqual(dialects.model_filename(dialects.get_dialect("mongodb")), "schema.json")
+        self.assertEqual(dialects.model_filename(dialects.get_dialect("mysql")), "schema.sql")
+
+        model = data_model.parse_document_model(
+            json.dumps(
+                {
+                    "collections": [
+                        {
+                            "name": "users",
+                            "fields": [
+                                {"name": "_id", "type": "objectId", "primary_key": True},
+                                {"name": "email", "type": "string", "required": True},
+                            ],
+                        },
+                        {
+                            "name": "orders",
+                            "fields": [
+                                {"name": "_id", "type": "objectId", "primary_key": True},
+                                {
+                                    "name": "user_id",
+                                    "type": "objectId",
+                                    "references": {"table": "users", "column": "_id"},
+                                },
+                            ],
+                        },
+                    ]
+                }
+            )
+        )
+        self.assertEqual(model["dialect"], "mongodb")
+        self.assertEqual([e["name"] for e in model["entities"]], ["orders", "users"])
+        self.assertEqual(
+            model["relationships"][0],
+            {
+                "from": "orders",
+                "from_column": "user_id",
+                "to": "users",
+                "to_column": "_id",
+                "cardinality": "many-to-one",
+            },
+        )
+        # Same shape as any SQL model, so everything downstream still works.
+        self.assertIn("erDiagram", data_model.render_erd(model))
+        self.assertIn("users", data_model.summarize(model))
+        self.assertIn("email", " ".join(model["warnings"]))  # sensitive hints are engine-independent
+
+    def test_generated_migration_runs_on_its_own_engine(self) -> None:
+        script = str(ROOT / "scripts" / "generate-migration.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+
+            def emit(dialect: str) -> str:
+                self.run_checked(
+                    [sys.executable, script, "orders", "id uuid PK, user_id uuid FK:users.id", "--dialect", dialect],
+                    cwd=str(out),
+                )
+                written = sorted((out / f"{dialect}").glob("*.sql")) if (out / dialect).is_dir() else []
+                if not written:
+                    written = sorted(out.glob("*_create_orders.sql"))
+                text = written[-1].read_text(encoding="utf-8")
+                written[-1].unlink()
+                return text
+
+            postgres = emit("postgresql")
+            self.assertIn("CREATE TABLE IF NOT EXISTS public.orders", postgres)
+            self.assertIn("ENABLE ROW LEVEL SECURITY", postgres)
+
+            mysql = emit("mysql")
+            self.assertNotIn("public.", mysql)
+            self.assertNotIn("ROW LEVEL SECURITY;", mysql)  # statement, not the explanatory comment
+            self.assertIn("GRANT", mysql)
+
+            # SQLite cannot add a foreign key later, so it must be inline or the
+            # migration simply fails.
+            sqlite = emit("sqlite")
+            self.assertNotIn("ADD CONSTRAINT", sqlite)
+            self.assertIn("REFERENCES users(id)", sqlite)
+            self.assertIn("PRAGMA foreign_keys = ON", sqlite)
+            # And it must not be told to use grants, which SQLite does not have.
+            self.assertIn("no users, roles or grants", sqlite)
+            self.assertIn("filesystem permissions", sqlite)
+
+            sqlserver = emit("sqlserver")
+            self.assertNotIn("IF NOT EXISTS", sqlserver)  # unsupported syntax there
+            self.assertIn("dbo.orders", sqlserver)
+            self.assertIn("SECURITY POLICY", sqlserver)
+
+            # A document store has no DDL migration at all.
+            proc = subprocess.run(
+                [sys.executable, script, "orders", "id uuid PK", "--dialect", "mongodb"],
+                cwd=str(out),
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("schema.json", proc.stderr)
 
     def test_schema_sql_parses_into_a_usable_model(self) -> None:
         # The old skill emitted prose plus a nine-line Mermaid sketch, so nothing
