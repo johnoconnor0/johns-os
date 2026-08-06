@@ -39,6 +39,31 @@ servers are connected, so the first attempt is necessarily a guess — `reconcil
 records the one that worked, and the guess happens once per repository rather than
 once per run.
 
+## Why this plugin's `.mcp.json` is empty
+
+It ships as `{}` on purpose. Declaring a tracker there would bind every install of
+this plugin to one server name, which is the opposite of what the adapters are for:
+
+- If you already reach the tracker through a **workspace connector**, declaring it
+  again gives you two live connections to the same service and two different tool
+  names for it.
+- The declared name only applies to people who have no connector — and they are
+  better served choosing their own than inheriting one from a plugin.
+
+**To declare one anyway**, add it to the *consuming project's* `.mcp.json` rather
+than here, and point `settings.json` `mcp_server` at whatever name you gave it:
+
+```json
+{
+  "mcpServers": {
+    "linear": { "type": "http", "url": "https://mcp.linear.app/mcp" }
+  }
+}
+```
+
+Either way the operations carry `tool_candidates`, so whichever name actually
+resolves is the one used.
+
 ## Adding a provider without touching any code
 
 Drop a JSON file in `.project/.engineering/tracker/providers/<name>.json`. Every
