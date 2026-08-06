@@ -136,9 +136,7 @@ def from_markdown(path: Path) -> dict[str, Any]:
         ],
         "findings": findings,
         "plan_items": [],
-        "totals": {
-            severity: sum(1 for item in findings if item["severity"] == severity) for severity in SEVERITIES
-        },
+        "totals": {severity: sum(1 for item in findings if item["severity"] == severity) for severity in SEVERITIES},
         "unconverted_rows": unparsed,
     }
 
