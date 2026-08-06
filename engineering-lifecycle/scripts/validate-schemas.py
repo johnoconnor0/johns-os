@@ -104,6 +104,12 @@ def schema_key_for(path: Path) -> str | None:
     parts = {part.lower() for part in path.parts}
     if name == "action-items.json":
         return "action-items"
+    if name == "settings.json":
+        return "tracker-settings"
+    if name == "surfaced-issues.json":
+        return "surfaced-issues"
+    if name == "dispatch-state.json":
+        return "tracker-state"
     if name == "handoff.json":
         return "handoff"
     if name == "human-tasks.json":

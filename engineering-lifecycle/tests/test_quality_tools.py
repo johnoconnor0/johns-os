@@ -163,6 +163,9 @@ class QualityToolTests(unittest.TestCase):
                 "stack_detection.py",
                 "questions.py",
                 "initiatives.py",
+                "references.py",
+                "trackers.py",
+                "tracker.py",
             }:
                 continue
             proc = subprocess.run([sys.executable, str(path), "--help"], text=True, capture_output=True)
@@ -1775,6 +1778,721 @@ const shown = formatDate('YYYY_MM_DD');
         # is dead weight nothing can call.
         unreachable = registered - set(invoked.values())
         self.assertEqual(unreachable, set(), f"registered tools no script can invoke: {sorted(unreachable)}")
+
+    def test_the_ledger_reconciles_checklist_items_nothing_ever_emitted(self) -> None:
+        # Regression (JOS-33): open questions were scraped from artifacts, action
+        # items were only read back from `*action-items*.json`, and the only thing
+        # that writes that file has to be invoked by hand with a plan path. On a
+        # real project that meant 768 artifacts indexed, 121 open questions found,
+        # 257 unchecked boxes on disk, and `open_action_item_count: 0` reported as
+        # "no outstanding work".
+        sync_ledger = self.load_hyphenated("_sl", "sync-ledger.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            base = target / ".project" / ".engineering"
+            (base / "council" / "run-1").mkdir(parents=True, exist_ok=True)
+            (base / "council" / "run-1" / "synthesis.md").write_text(
+                "# Synthesis\n\n- [ ] Decide the retention window\n- [x] Already handled\n",
+                encoding="utf-8",
+            )
+            (base / "initiatives" / "alpha").mkdir(parents=True, exist_ok=True)
+            (base / "initiatives" / "alpha" / "task-breakdown.md").write_text(
+                "# Tasks\n\n- [ ] Ship the importer\n", encoding="utf-8"
+            )
+
+            items = sync_ledger.collect_action_items(target, base, target / ".project" / "docs" / "engineering")
+            titles = {item["title"] for item in items}
+            self.assertIn("Decide the retention window", titles)
+            self.assertIn("Ship the importer", titles)
+            # A completed box is not outstanding work.
+            self.assertNotIn("Already handled", titles)
+
+            # An emitted item wins over a scraped one on id collision, because it is
+            # the copy carrying whatever the tracker wrote back.
+            quality_tools.write_json(
+                base / "ledger" / "action-items.json",
+                {
+                    "action_items": [
+                        {"id": sorted(item["id"] for item in items)[0], "title": "Emitted", "linear_id": "JOS-1"}
+                    ]
+                },
+            )
+            merged = sync_ledger.collect_action_items(target, base, target / ".project" / "docs" / "engineering")
+            kept = [item for item in merged if item.get("linear_id") == "JOS-1"]
+            self.assertEqual(len(kept), 1, "the emitted copy, with its tracker id, must survive")
+
+    def test_intake_reports_are_pruned_rather_than_accumulating_forever(self) -> None:
+        # Regression (M8): one file per turn with no rotation reached seventy-eight
+        # entries in this repo, and nothing had ever read the old ones. The same
+        # defect JOS-7 was filed for, in a second location.
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            for index in range(50):
+                (directory / f"2026-01-01T00-00-{index:02d}.json").write_text("{}", encoding="utf-8")
+            removed = quality_tools._prune_intake(directory, keep=10)
+            remaining = sorted(path.name for path in directory.glob("*.json"))
+            self.assertEqual(removed, 40)
+            self.assertEqual(len(remaining), 10)
+            # The newest survive, because those are the ones worth keeping.
+            self.assertEqual(remaining[-1], "2026-01-01T00-00-49.json")
+
+    def test_a_question_asked_and_answered_in_one_turn_ends_up_answered(self) -> None:
+        # Regression (M11): capture_asked_questions ran at PreToolUse and nothing
+        # ran after it, so every question a human answered stayed `open` forever and
+        # the intake hook re-surfaced it every turn. Four questions answered in one
+        # session were still being reported as open at the end of it.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            asked = {
+                "tool_input": {
+                    "questions": [
+                        {"question": "Which tracker should this use?", "options": [{"label": "Linear"}]},
+                    ]
+                }
+            }
+            quality_tools.capture_asked_questions(target, asked)
+            store = quality_tools.load_open_questions(target)
+            self.assertEqual(store["open_questions"][0]["status"], "open")
+
+            quality_tools.capture_given_answers(
+                target, {**asked, "tool_response": {"Which tracker should this use?": "Linear"}}
+            )
+            resolved = quality_tools.load_open_questions(target)["open_questions"][0]
+            self.assertEqual(resolved["status"], "answered")
+            self.assertEqual(resolved["answer"], "Linear")
+
+            # And the intake hook stops reporting it.
+            self.assertEqual(quality_tools.sync_open_questions(target)["open_count"], 0)
+
+    def test_answering_by_substring_refuses_when_ambiguous(self) -> None:
+        # Regression (JOS-28): `answer_question` documented "a unique substring" but
+        # stopped at the first match, so answering by a fragment that matched three
+        # questions silently resolved one of them and reported success.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            quality_tools.record_questions(
+                target,
+                [
+                    {"question": "Which registry hosts the plugin?", "kind": "general"},
+                    {"question": "What registry policy governs releases?", "kind": "general"},
+                ],
+            )
+            result = quality_tools.answer_question(target, "registry", "The local one.")
+            self.assertFalse(result["updated"])
+            self.assertIn("matches 2 questions", result["reason"])
+            self.assertEqual(len(result["candidates"]), 2)
+            # Nothing was written.
+            store = quality_tools.load_open_questions(target)
+            self.assertTrue(all(entry["status"] == "open" for entry in store["open_questions"]))
+
+            # An exact id still resolves, and reports which one it resolved.
+            chosen = store["open_questions"][0]["id"]
+            ok = quality_tools.answer_question(target, chosen, "The local one.")
+            self.assertTrue(ok["updated"])
+            self.assertEqual(ok["id"], chosen)
+
+    def test_answering_refuses_to_overwrite_an_answered_question(self) -> None:
+        # Regression (JOS-28): there was no status filter, so an already-answered
+        # question could be silently re-answered and its recorded answer lost -
+        # while the failure path claimed to only ever match *open* questions. On a
+        # store where every entry was answered, the next call was certain to clobber.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            quality_tools.record_questions(target, [{"question": "Which region hosts billing?", "kind": "general"}])
+            first = quality_tools.answer_question(target, "region", "ap-southeast-2.")
+            self.assertTrue(first["updated"])
+
+            second = quality_tools.answer_question(target, "region", "Somewhere else.")
+            self.assertFalse(second["updated"])
+            self.assertIn("already answered", second["reason"])
+            self.assertEqual(len(second["candidates"]), 1)
+            self.assertEqual(
+                quality_tools.load_open_questions(target)["open_questions"][0]["answer"], "ap-southeast-2."
+            )
+
+            forced = quality_tools.answer_question(target, "region", "Somewhere else.", allow_answered=True)
+            self.assertTrue(forced["updated"])
+
+    def test_an_exact_id_beats_a_substring_in_another_question(self) -> None:
+        # Regression (JOS-28): the id test and the substring test were OR'd inside a
+        # single iteration, so whichever entry sorted first won - and an entry whose
+        # *text* contained an id-shaped token could shadow the entry that *had* that id.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            quality_tools.record_questions(target, [{"question": "Genuine question about scope?", "kind": "general"}])
+            real_id = quality_tools.load_open_questions(target)["open_questions"][0]["id"]
+            quality_tools.record_questions(
+                target, [{"question": f"Should we drop {real_id} entirely?", "kind": "general"}]
+            )
+
+            result = quality_tools.answer_question(target, real_id, "Keep it.")
+            self.assertTrue(result["updated"])
+            self.assertEqual(result["id"], real_id)
+
+    def test_emit_action_items_preserves_tracker_ids(self) -> None:
+        # Regression (JOS-31 / C3): `emit-action-items.py` wrote the freshly parsed
+        # list straight over the file, destroying the linear_id that
+        # `linear-sync.py reconcile` had written back - so the next plan saw the task
+        # as untracked and created a second issue for it.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            plan = target / "PLAN.md"
+            plan.write_text("# Plan\n\n- [ ] Ship the thing\n", encoding="utf-8")
+            out = target / ".project" / ".engineering" / "ledger" / "action-items.json"
+
+            for _ in range(2):
+                subprocess.run(
+                    [sys.executable, "-B", str(SCRIPTS / "emit-action-items.py"), "--root", str(target), "PLAN.md"],
+                    cwd=target,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+                data = json.loads(out.read_text(encoding="utf-8"))
+                self.assertEqual(len(data["action_items"]), 1)
+                # Stand in for what reconcile writes back after the first emit.
+                data["action_items"][0]["linear_id"] = "JOS-999"
+                data["action_items"][0]["linear_url"] = "https://example.invalid/JOS-999"
+                out.write_text(json.dumps(data), encoding="utf-8")
+
+            final = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(final["action_items"][0]["linear_id"], "JOS-999")
+
+    def test_linear_sync_sees_action_items_outside_the_ledger_folder(self) -> None:
+        # Regression (H4): `load_tasks` read only `ledger/action-items.json` while
+        # `sync-ledger.py` aggregated `*action-items*.json` from anywhere under the
+        # workspace. Items a skill wrote into an initiative folder appeared on the
+        # dashboard and were invisible to tracker sync forever.
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("linear_sync", SCRIPTS / "linear-sync.py")
+        linear_sync = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(spec and linear_sync or linear_sync)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            base = target / ".project" / ".engineering"
+            (base / "ledger").mkdir(parents=True, exist_ok=True)
+            (base / "ledger" / "action-items.json").write_text(
+                json.dumps({"action_items": [{"id": "a-001", "title": "In the ledger", "status": "open"}]}),
+                encoding="utf-8",
+            )
+            nested = base / "initiatives" / "alpha" / "implementation"
+            nested.mkdir(parents=True, exist_ok=True)
+            (nested / "action-items.json").write_text(
+                json.dumps({"action_items": [{"id": "a-002", "title": "In an initiative", "status": "open"}]}),
+                encoding="utf-8",
+            )
+
+            keys = {task["key"] for task in linear_sync.load_tasks(target)}
+            self.assertEqual(keys, {"action:a-001", "action:a-002"})
+
+            # ...and reconcile writes the id back into the file it actually came from.
+            linear_sync.reconcile(target, [{"key": "action:a-002", "linear_id": "JOS-2", "linear_url": "u"}])
+            written = json.loads((nested / "action-items.json").read_text(encoding="utf-8"))
+            self.assertEqual(written["action_items"][0]["linear_id"], "JOS-2")
+
+    def test_tracker_registry_resolves_aliases_and_decodes_a_project_url(self) -> None:
+        import trackers
+
+        self.assertEqual(trackers.get_tracker("Linear").name, "linear")
+        self.assertEqual(trackers.get_tracker("gh").name, "github")
+        # Unknown and empty both fall back to the local file provider, which files
+        # nowhere - so surfacing keeps working on a project with no tracker at all.
+        self.assertEqual(trackers.get_tracker("nonesuch").name, "file")
+        self.assertEqual(trackers.get_tracker(None).name, "file")
+
+        # LINEAR_PROJECT_ID *or* LINEAR_PROJECT_URL, one code path.
+        scope = trackers.parse_scope_url(
+            trackers.LINEAR, "https://linear.app/web-lifter/project/mission-control-b12b639b157d"
+        )
+        self.assertEqual(scope["project"], "b12b639b157d")
+
+    def test_tool_names_carry_both_the_configured_server_and_the_fallback(self) -> None:
+        # A workspace connector gets a UUID; a .mcp.json declaration gets its
+        # declared name. Hooks cannot see which servers are connected, so the plan
+        # has to offer both rather than assert one.
+        import trackers
+
+        candidates = trackers.tool_candidates(trackers.LINEAR, "save_issue", "some-uuid")
+        self.assertEqual(candidates, ["mcp__some-uuid__save_issue", "mcp__linear__save_issue"])
+        self.assertEqual(
+            trackers.qualified_tool(trackers.LINEAR, "save_issue", "some-uuid"), "mcp__some-uuid__save_issue"
+        )
+        # The local provider has no tools at all.
+        self.assertEqual(trackers.tool_candidates(trackers.FILE, "save_issue", "x"), [])
+
+    def test_settings_layer_env_over_file_over_legacy(self) -> None:
+        import tracker as tracker_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            base = target / ".project" / ".engineering"
+            quality_tools.write_json(base / "ledger" / "linear-config.json", {"team": "LEGACY", "status_map": {}})
+            self.assertEqual(tracker_mod.load_settings(target)["scope"]["team"], "LEGACY")
+
+            quality_tools.write_json(
+                base / "settings.json",
+                {"version": 1, "issue_filing": {"enabled": True, "provider": "linear", "scope": {"team": "FILE"}}},
+            )
+            self.assertEqual(tracker_mod.load_settings(target)["scope"]["team"], "FILE")
+
+            os.environ["LINEAR_TEAM_ID"] = "ENV"
+            try:
+                self.assertEqual(tracker_mod.load_settings(target)["scope"]["team"], "ENV")
+            finally:
+                del os.environ["LINEAR_TEAM_ID"]
+
+            # The provider's provenance names the layer that actually supplied it,
+            # not whichever layer happened to be checked last.
+            self.assertEqual(
+                tracker_mod.load_settings(target)["provider_reason"], "settings.json issue_filing.provider: linear"
+            )
+            os.environ["ISSUE_MANAGEMENT_SOFTWARE"] = "github"
+            try:
+                settings = tracker_mod.load_settings(target)
+                self.assertEqual(settings["provider"], "github")
+                self.assertEqual(settings["provider_reason"], "ISSUE_MANAGEMENT_SOFTWARE: github")
+            finally:
+                del os.environ["ISSUE_MANAGEMENT_SOFTWARE"]
+
+    def test_the_queue_is_idempotent_and_filed_items_survive_a_rescan(self) -> None:
+        # The same invariant record_questions protects: a detector runs on every
+        # edit, and without a content-derived id that becomes a thousand rows.
+        import tracker as tracker_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            entry = {"title": "workspace.json declares a directory that is missing", "rule": "workspace-dir-drift"}
+            first = tracker_mod.record_issues(target, [entry])
+            self.assertEqual(len(first["issues"]), 1)
+            identifier = first["issues"][0]["id"]
+
+            tracker_mod.reconcile(target, [{"key": identifier, "id": "JOS-1", "url": "u", "identifier": "JOS-1"}])
+            self.assertEqual(tracker_mod.load_queue(target)["issues"][0]["status"], "filed")
+
+            # Re-detecting the same anomaly must not reopen it or duplicate it.
+            second = tracker_mod.record_issues(target, [entry])
+            self.assertEqual(len(second["issues"]), 1)
+            self.assertEqual(second["issues"][0]["status"], "filed")
+            self.assertEqual(second["issues"][0]["occurrences"], 2)
+            self.assertEqual(second["issues"][0]["external"]["id"], "JOS-1")
+
+    def test_plan_reconcile_round_trip_is_idempotent(self) -> None:
+        import tracker as tracker_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            quality_tools.write_json(
+                target / ".project" / ".engineering" / "settings.json",
+                {
+                    "version": 1,
+                    "issue_filing": {
+                        "enabled": True,
+                        "provider": "linear",
+                        "mcp_server": "uuid-1",
+                        "scope": {"team": "JOS"},
+                    },
+                },
+            )
+            tracker_mod.record_issues(target, [{"title": "Something is wrong", "severity": "high"}])
+            plan = tracker_mod.build_plan(target)
+            self.assertTrue(plan["configured"])
+            self.assertEqual(len(plan["operations"]), 1)
+            operation = plan["operations"][0]
+            self.assertEqual(operation["action"], "create")
+            self.assertEqual(operation["tool"], "mcp__uuid-1__save_issue")
+            # Linear's own argument names, verified against the tool schema.
+            self.assertEqual(operation["arguments"]["team"], "JOS")
+            self.assertIn("description", operation["arguments"])
+            self.assertEqual(operation["arguments"]["priority"], 2)
+            # The identity marker is what makes cross-machine dedup possible at all,
+            # since .project/ is gitignored and the state file does not travel.
+            self.assertIn(f"<!-- jos-issue: {operation['key']} -->", operation["arguments"]["description"])
+
+            tracker_mod.reconcile(target, [{"key": operation["key"], "id": "JOS-9", "url": "u"}], "uuid-1")
+            self.assertEqual(tracker_mod.build_plan(target)["operations"], [])
+
+    def test_an_unconfigured_project_reports_rather_than_failing(self) -> None:
+        import tracker as tracker_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            tracker_mod.record_issues(target, [{"title": "Something is wrong"}])
+            plan = tracker_mod.build_plan(target)
+            self.assertFalse(plan["configured"])
+            self.assertEqual(plan["provider"], "file")
+            self.assertIn("does not file anywhere", plan["note"])
+
+    def test_every_kill_switch_layer_disables_filing(self) -> None:
+        import tracker as tracker_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            quality_tools.write_json(
+                target / ".project" / ".engineering" / "settings.json",
+                {"version": 1, "issue_filing": {"enabled": True, "provider": "linear", "scope": {"team": "JOS"}}},
+            )
+            self.assertTrue(tracker_mod.load_settings(target)["enabled"])
+
+            # 1. The sentinel, checked before any JSON is parsed.
+            sentinel = tracker_mod.disabled_path(target)
+            sentinel.parent.mkdir(parents=True, exist_ok=True)
+            sentinel.write_text("off\n", encoding="utf-8")
+            self.assertFalse(tracker_mod.load_settings(target)["enabled"])
+            sentinel.unlink()
+
+            # 2. The environment override, using the key name JOS-31 named.
+            os.environ["ENABLE_ISSUE_FILING"] = "false"
+            try:
+                self.assertFalse(tracker_mod.load_settings(target)["enabled"])
+            finally:
+                del os.environ["ENABLE_ISSUE_FILING"]
+
+            # 3. The settings flag itself.
+            quality_tools.write_json(
+                target / ".project" / ".engineering" / "settings.json",
+                {"version": 1, "issue_filing": {"enabled": False, "provider": "linear"}},
+            )
+            self.assertFalse(tracker_mod.load_settings(target)["enabled"])
+
+    def test_the_sentinel_still_works_when_settings_are_malformed(self) -> None:
+        # The moment you most want to be able to switch something off is the moment
+        # its config is broken, which is why the sentinel is a file and not a key.
+        import tracker as tracker_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            (target / ".project" / ".engineering" / "settings.json").write_text("{not json", encoding="utf-8")
+            sentinel = tracker_mod.disabled_path(target)
+            sentinel.parent.mkdir(parents=True, exist_ok=True)
+            sentinel.write_text("off\n", encoding="utf-8")
+            settings = tracker_mod.load_settings(target)
+            self.assertFalse(settings["enabled"])
+
+    def test_ledger_items_are_collected_from_anywhere_in_the_workspace(self) -> None:
+        import tracker as tracker_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            base = target / ".project" / ".engineering"
+            quality_tools.write_json(
+                base / "initiatives" / "alpha" / "action-items.json",
+                {"action_items": [{"id": "a-1", "title": "In an initiative", "status": "open"}]},
+            )
+            quality_tools.write_json(
+                base / "ledger" / "action-items.json",
+                {"action_items": [{"id": "a-2", "title": "Already done", "status": "done"}]},
+            )
+            entries = tracker_mod.items_from_ledger(target)
+            titles = {entry["title"] for entry in entries}
+            self.assertIn("In an initiative", titles)
+            # A completed task is not an issue to file.
+            self.assertNotIn("Already done", titles)
+
+    def test_tracker_status_reports_what_the_severity_filter_dropped(self) -> None:
+        # Otherwise the intake count and the queue count legitimately disagree and
+        # the first person to compare them files a bug about it.
+        import tracker as tracker_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            tracker_mod.record_issues(
+                target,
+                [
+                    {"title": "Serious", "severity": "high", "rule": "r1"},
+                    {"title": "Cosmetic", "severity": "low", "rule": "r2"},
+                ],
+            )
+            status = tracker_mod.tracker_status(target)
+            self.assertEqual(status["queued"], 1)
+            self.assertEqual(status["below_min_severity"], 1)
+
+    @staticmethod
+    def load_hyphenated(name: str, filename: str):
+        """Import a hyphenated script as a module.
+
+        Registered in `sys.modules` before execution because `@dataclass` resolves
+        `cls.__module__` through it, and a module absent from there makes the
+        decorator fail at import time.
+        """
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(name, SCRIPTS / filename)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    def _dispatch(self, target: Path, payload: dict | None = None) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-B", str(ROOT / "hooks" / "scripts" / "tracker-dispatch.py")],
+            input=json.dumps(payload or {}),
+            text=True,
+            capture_output=True,
+            cwd=target,
+            check=False,
+        )
+
+    def _enable_dispatch(self, target: Path) -> None:
+        quality_tools.write_json(
+            target / ".project" / ".engineering" / "settings.json",
+            {
+                "version": 1,
+                "issue_filing": {
+                    "enabled": True,
+                    "provider": "linear",
+                    "scope": {"team": "JOS"},
+                    "dispatch": {"on_stop": True, "min_severity": "medium"},
+                },
+            },
+        )
+
+    def test_stop_dispatch_blocks_at_most_once_per_queue_state(self) -> None:
+        # The brake that matters. The endless "(Standing by.)" loop this repo hit
+        # came from a Stop hook that spoke unconditionally and statelessly: the
+        # model replies, stops again, nothing has changed, the hook says the same
+        # thing forever. A content token over the pending queue makes the second
+        # call a no-op, because the same queue hashes the same way.
+        import tracker as tracker_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            self._enable_dispatch(target)
+            tracker_mod.record_issues(target, [{"title": "Something is wrong", "severity": "high"}])
+
+            first = self._dispatch(target)
+            self.assertTrue(first.stdout.strip(), "the first Stop with a pending queue must block")
+            decision = json.loads(first.stdout)
+            self.assertEqual(decision["decision"], "block")
+            self.assertIn("Something is wrong", decision["reason"])
+
+            second = self._dispatch(target)
+            self.assertEqual(second.stdout.strip(), "", "the same queue must not block twice")
+
+    def test_stop_dispatch_is_silent_on_an_empty_queue(self) -> None:
+        # This is also what keeps test_stop_hook_stays_silent passing verbatim:
+        # that test runs against an empty workspace, so this hook never reaches
+        # the printing branch at all.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            self._enable_dispatch(target)
+            self.assertEqual(self._dispatch(target).stdout.strip(), "")
+
+    def test_stop_dispatch_honours_stop_hook_active_when_the_harness_sends_it(self) -> None:
+        # Opportunistic only: this field is not in the documented Stop-hook input
+        # schema, so the design has to be correct without it. Honoured when present.
+        import tracker as tracker_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            self._enable_dispatch(target)
+            tracker_mod.record_issues(target, [{"title": "Something is wrong", "severity": "high"}])
+            result = self._dispatch(target, {"stop_hook_active": True})
+            self.assertEqual(result.stdout.strip(), "")
+
+    def test_stop_dispatch_respects_every_off_switch(self) -> None:
+        import tracker as tracker_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            self._enable_dispatch(target)
+            tracker_mod.record_issues(target, [{"title": "Something is wrong", "severity": "high"}])
+
+            # The sentinel.
+            sentinel = tracker_mod.disabled_path(target)
+            sentinel.parent.mkdir(parents=True, exist_ok=True)
+            sentinel.write_text("off\n", encoding="utf-8")
+            self.assertEqual(self._dispatch(target).stdout.strip(), "")
+            sentinel.unlink()
+
+            # dispatch.on_stop turned off, with the queue untouched.
+            quality_tools.write_json(
+                target / ".project" / ".engineering" / "settings.json",
+                {
+                    "version": 1,
+                    "issue_filing": {"enabled": True, "provider": "linear", "dispatch": {"on_stop": False}},
+                },
+            )
+            self.assertEqual(self._dispatch(target).stdout.strip(), "")
+
+    def test_stop_dispatch_says_nothing_when_settings_are_malformed(self) -> None:
+        # A broken config must not produce a traceback on stdout - on a Stop hook
+        # that would be injected into the conversation as context.
+        import tracker as tracker_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            tracker_mod.record_issues(target, [{"title": "Something is wrong", "severity": "high"}])
+            (target / ".project" / ".engineering" / "settings.json").write_text("{not json", encoding="utf-8")
+            result = self._dispatch(target)
+            self.assertEqual(result.stdout.strip(), "")
+
+    def test_the_anomaly_detector_finds_the_patterns_it_claims_to(self) -> None:
+        detector = self.load_hyphenated("_pac", "project-anomaly-check.py")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            base = target / ".project" / ".engineering"
+
+            (base / "ledger" / "broken.json").write_text("{not json", encoding="utf-8")
+            (base / "ledger" / "empty.json").write_text("", encoding="utf-8")
+            quality_tools.write_json(base / "workspace.json", {"directories": ["ledger", "nonexistent"]})
+            quality_tools.write_json(
+                base / "initiatives" / "registry.json",
+                {"active": "alpha", "initiatives": [{"id": "gone"}]},
+            )
+            (base / "initiatives" / "alpha").mkdir(parents=True, exist_ok=True)
+            quality_tools.write_json(
+                base / "initiatives" / "alpha" / "action-items.json",
+                {"action_items": [{"id": "a-1", "title": "Stray", "status": "open"}]},
+            )
+            quality_tools.write_json(
+                base / "settings.json",
+                {"version": 1, "issue_filing": {"enabled": False, "provider": "linear", "api_token": "sk-real-value"}},
+            )
+
+            found = {item["rule"] for item in detector.scan(target)["findings"]}
+            for expected in (
+                "malformed-json",
+                "empty-artifact",
+                "workspace-dir-drift",
+                "orphan-initiative-folder",
+                "orphan-registry-entry",
+                "unreachable-action-items",
+                "tracker-secret-in-settings",
+            ):
+                self.assertIn(expected, found, f"{expected} did not fire on a fixture built to trigger it")
+
+    def test_the_anomaly_detector_reports_a_rule_that_crashes(self) -> None:
+        # A detector that swallows its own exception turns a broken rule into a
+        # clean report, which is the exact failure this subsystem exists to prevent.
+        detector = self.load_hyphenated("_pac2", "project-anomaly-check.py")
+
+        def explode(_root):
+            raise RuntimeError("deliberate")
+
+        original = detector.RULES
+        detector.RULES = (*original, detector.Rule("boom", "high", "Explodes", explode))
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                result = detector.scan(self.init_target(tmp))
+            self.assertEqual([item["rule"] for item in result["rules_errored"]], ["boom"])
+            self.assertEqual(result["rules_run"], len(original))
+        finally:
+            detector.RULES = original
+
+    def test_orphan_initiative_rule_reads_the_raw_registry(self) -> None:
+        # load_initiative_registry adopts unknown directories into its reconciled
+        # view by design, so a rule built on it could never fire. This asserts the
+        # rule sees what is actually in the file.
+        detector = self.load_hyphenated("_pac3", "project-anomaly-check.py")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            base = target / ".project" / ".engineering" / "initiatives"
+            (base / "unregistered").mkdir(parents=True, exist_ok=True)
+            quality_tools.write_json(base / "registry.json", {"active": None, "initiatives": []})
+            rules = {item.rule for item in detector.check_initiative_registry(target)}
+            self.assertIn("orphan-initiative-folder", rules)
+            # And the reconciled view would have hidden it.
+            reconciled = quality_tools.load_initiative_registry(target)
+            self.assertIn("unregistered", {entry["id"] for entry in reconciled["initiatives"]})
+
+    def test_no_checker_claims_a_verdict_it_did_not_compute(self) -> None:
+        # Regression (JOS-30): `artifact_consistency_check` returned "No deterministic
+        # cross-artifact contradictions detected" with an empty warnings list, having
+        # inspected nothing; `naming_consistency_check` hardcoded `warnings: []`; and
+        # `example_output_validator` / `skill_trigger_audit` globbed `root/"skills"`,
+        # so on any repository that is not this plugin they found nothing and reported
+        # `valid: True`. Four instances of one bug.
+        #
+        # The fix that holds is structural, not four edits: a result may only assert a
+        # verdict if it also says whether it looked. Anything answering `valid`,
+        # `in_sync`, `complete` or `complete_enough` must carry `checked`.
+        verdict_keys = {"valid", "in_sync", "complete", "complete_enough"}
+        offenders: dict[str, list[str]] = {}
+        with tempfile.TemporaryDirectory() as tmp:
+            bare = Path(tmp)
+            for name in sorted(quality_tools.TOOLS):
+                args = argparse.Namespace(
+                    root=str(bare),
+                    hook=False,
+                    prompt="",
+                    question="",
+                    text="",
+                    command="",
+                    path="",
+                    file=[],
+                    run_dir=None,
+                    role="executor",
+                    name="council-fixture",
+                    task_type="implementation",
+                    action="list",
+                    apply=False,
+                    id="",
+                    answer="",
+                    kind="general",
+                    status="answered",
+                )
+                try:
+                    result = quality_tools.run_tool(name, args)
+                except Exception:
+                    # A tool that refuses a bare directory outright has not claimed
+                    # anything, which is the behaviour this test is protecting.
+                    continue
+                if not isinstance(result, dict):
+                    continue
+                claimed = verdict_keys & set(result)
+                if claimed and "checked" not in result:
+                    offenders[name] = sorted(claimed)
+        self.assertEqual(
+            offenders,
+            {},
+            "these tools assert a verdict without saying whether they looked: " + json.dumps(offenders, sort_keys=True),
+        )
+
+    def test_replaced_stub_checkers_actually_inspect_something(self) -> None:
+        # Regression (JOS-30): the two checkers below used to return a hardcoded
+        # empty warnings list. A fixture with a real contradiction in it must now
+        # produce a real warning, or the replacement did not replace anything.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.init_target(tmp)
+            base = target / ".project" / ".engineering" / "initiatives" / "alpha" / "architecture"
+            base.mkdir(parents=True, exist_ok=True)
+            (base / "architecture-plan.md").write_text(
+                "---\ninitiative_id: beta\nskill: create-system-map\nstatus: draft\n"
+                "source_artifacts:\n  - docs/does-not-exist.md\n---\n\n# Plan\n",
+                encoding="utf-8",
+            )
+            consistency = quality_tools.artifact_consistency_check(target)
+            self.assertTrue(consistency["checked"])
+            self.assertTrue(
+                any("does-not-exist.md" in warning for warning in consistency["warnings"]),
+                consistency["warnings"],
+            )
+            self.assertTrue(
+                any("sits outside it" in warning for warning in consistency["warnings"]),
+                consistency["warnings"],
+            )
+
+            (base / "notes.md").write_text("# Notes\n\ndataModel and data-model and DataModel\n", encoding="utf-8")
+            naming = quality_tools.naming_consistency_check(target)
+            self.assertTrue(naming["checked"])
+            self.assertTrue(any("written 3 ways" in warning for warning in naming["warnings"]), naming["warnings"])
+
+    def test_plugin_only_validators_refuse_a_non_plugin_root(self) -> None:
+        # Regression (JOS-30): both globbed `root/"skills"`, found nothing on an
+        # ordinary repository, and returned `valid: True` for it.
+        with tempfile.TemporaryDirectory() as tmp:
+            bare = Path(tmp)
+            for result in (quality_tools.example_output_validator(bare), quality_tools.skill_trigger_audit(bare)):
+                self.assertFalse(result["checked"])
+                self.assertNotIn("valid", result)
+                self.assertIn("not a Claude plugin", result["reason"])
+        # ...and still work when the root really is one.
+        self.assertTrue(quality_tools.example_output_validator(ROOT)["checked"])
 
     def test_unknown_tool_name_is_rejected(self) -> None:
         args = argparse.Namespace(root=str(ROOT), hook=False)

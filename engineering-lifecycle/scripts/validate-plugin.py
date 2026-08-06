@@ -26,6 +26,11 @@ REQUIRED_FILES = [
     "scripts/questions.py",
     "scripts/initiatives.py",
     "scripts/data_model.py",
+    "scripts/references.py",
+    "scripts/trackers.py",
+    "scripts/tracker.py",
+    "schemas/tracker-settings.schema.json",
+    "schemas/surfaced-issues.schema.json",
     "scripts/validate-artifact.py",
     "scripts/validate-schemas.py",
     "scripts/validate-plugin.py",
@@ -115,11 +120,33 @@ def validate_hooks(root: Path) -> list[str]:
     return errors
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", default=None)
-    args = parser.parse_args()
-    root = Path(args.root).resolve() if args.root else plugin_root()
+def validate_plugin(root: Path) -> list[str]:
+    """Checks that apply to any Claude plugin, not only this one.
+
+    Split out because the scaffold requirements below (`REQUIRED_DIRS`,
+    `REQUIRED_FILES`) describe *this* plugin, while everything here - skill
+    sections, manifest agreement, hook targets, empty files - is true of every
+    plugin in the marketplace. Keeping them together is why `ai-utilities` shipped
+    four skills with none of the four required sections and nothing ever complained:
+    no validator had ever been pointed at it.
+    """
+    errors: list[str] = []
+    for path in sorted((root / "skills").glob("*/SKILL.md")):
+        errors.extend(validate_skill(path))
+    for path in sorted((root / "schemas").glob("*.json")):
+        if path.stat().st_size == 0:
+            errors.append(f"empty schema: {path.relative_to(root)}")
+    for path in sorted((root / "scripts").glob("*.py")):
+        if path.name != "__init__.py" and path.stat().st_size == 0:
+            errors.append(f"empty script: {path.relative_to(root)}")
+    errors.extend(validate_codex_manifest(root))
+    if (root / "hooks" / "hooks.json").is_file():
+        errors.extend(validate_hooks(root))
+    return errors
+
+
+def validate_scaffold(root: Path) -> list[str]:
+    """The Engineering Lifecycle plugin's own required layout."""
     errors: list[str] = []
     for dirname in REQUIRED_DIRS:
         if not (root / dirname).is_dir():
@@ -130,20 +157,42 @@ def main() -> int:
             errors.append(f"missing file: {filename}")
         elif path.stat().st_size == 0:
             errors.append(f"empty required file: {filename}")
-    for path in sorted((root / "skills").glob("*/SKILL.md")):
-        errors.extend(validate_skill(path))
-    for path in sorted((root / "schemas").glob("*.json")):
-        if path.stat().st_size == 0:
-            errors.append(f"empty schema: {path.relative_to(root)}")
-    for path in sorted((root / "scripts").glob("*.py")):
-        if path.name != "__init__.py" and path.stat().st_size == 0:
-            errors.append(f"empty script: {path.relative_to(root)}")
-    errors.extend(validate_codex_manifest(root))
-    errors.extend(validate_hooks(root))
+    return errors
+
+
+def marketplace_plugins(start: Path) -> list[Path]:
+    """Every plugin directory in the marketplace this plugin is installed from."""
+    for candidate in [start, *start.parents]:
+        found = sorted(path.parent.parent for path in candidate.glob("*/.claude-plugin/plugin.json"))
+        if found:
+            return found
+    return []
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", default=None)
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Validate every plugin in the marketplace, not only this one.",
+    )
+    args = parser.parse_args()
+    root = Path(args.root).resolve() if args.root else plugin_root()
+
+    errors = validate_scaffold(root) + validate_plugin(root)
+    checked = [root.name]
+    if args.all:
+        for other in marketplace_plugins(root):
+            if other == root:
+                continue
+            checked.append(other.name)
+            errors.extend(f"{other.name}: {error}" for error in validate_plugin(other))
+
     if errors:
         print("\n".join(errors))
         return 1
-    print("plugin scaffold is valid")
+    print(f"plugin scaffold is valid ({', '.join(checked)})")
     return 0
 
 

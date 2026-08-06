@@ -307,6 +307,29 @@ def slugify(value: str) -> str:
     return slug or "item"
 
 
+# A markdown checklist line, which is how a plan states a discrete piece of work.
+# This lived in `emit-action-items.py`, whose hyphenated name makes it unimportable,
+# so anything else needing to read a plan the same way had to re-declare the pattern
+# and drift from it. It belongs beside the other shared parsers.
+ACTION_RE = re.compile(r"^\s*[-*]\s+\[(?P<state>[ xX])\]\s+(?P<title>.+)$")
+
+
+def item_from_text(line: str, source: str, index: int) -> dict[str, Any] | None:
+    """One ledger action item from one checklist line, or None."""
+    match = ACTION_RE.match(line)
+    if not match:
+        return None
+    return {
+        "id": f"{slugify(Path(source).stem)}-{index:03d}",
+        "title": match.group("title").strip(),
+        "status": "done" if match.group("state").lower() == "x" else "open",
+        "source": source,
+        "created_at": now_iso(),
+        "owner": "unassigned",
+        "priority": "normal",
+    }
+
+
 def load_hook_payload() -> dict[str, Any]:
     try:
         if os.isatty(0):

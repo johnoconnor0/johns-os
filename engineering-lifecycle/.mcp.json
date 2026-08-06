@@ -1,1 +1,9 @@
-{}
+{
+  "$comment": "Declaring Linear here yields tools named mcp__linear__*. A workspace connector for the same Linear yields mcp__<uuid>__* instead, and a repo can have both. settings.json issue_filing.mcp_server is the authority on which name to use; the plan's tool_candidates covers both so whichever exists wins. Leave this empty if you already reach Linear through a connector and do not want two live connections.",
+  "mcpServers": {
+    "linear": {
+      "type": "http",
+      "url": "https://mcp.linear.app/mcp"
+    }
+  }
+}

@@ -13,6 +13,7 @@ human-readable digest so the folder is useful without a tool.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -127,7 +128,7 @@ def record_questions(root: Path, entries: list[dict[str, Any]]) -> dict[str, Any
 
     payload = {
         "generated_at": now_iso(),
-        "open_questions": sorted(existing.values(), key=lambda item: (item["status"] != "open", item["asked_at"])),
+        "open_questions": _sorted_questions(existing.values()),
     }
     if workspace_exists(root):
         write_json(questions_path(root), payload)
@@ -135,25 +136,94 @@ def record_questions(root: Path, entries: list[dict[str, Any]]) -> dict[str, Any
     return payload
 
 
-def answer_question(root: Path, target: str, answer: str, status: str = "answered") -> dict[str, Any]:
-    """Resolve a question by id, or by a unique substring of its text."""
+def _sorted_questions(entries: Any) -> list[dict[str, Any]]:
+    """Open questions first, then by when they were asked.
+
+    Extracted so `answer_question` re-sorts on write the same way `record_questions`
+    does. It did not, so answering a question left the store in an order that no
+    longer matched its own invariant - and the next substring match walked that
+    stale order.
+    """
+    return sorted(entries, key=lambda item: (item.get("status") != "open", item.get("asked_at", "")))
+
+
+def answer_question(
+    root: Path,
+    target: str,
+    answer: str,
+    status: str = "answered",
+    allow_answered: bool = False,
+) -> dict[str, Any]:
+    """Resolve a question by exact id, or by a substring that matches exactly one open question.
+
+    Three defects lived on the single condition this replaces
+    (`entry.id == target or needle and needle in entry.question`):
+
+    1. The docstring promised a *unique* substring, but the loop stopped at the
+       first hit. Three of this repo's questions contain the word "registry"; a
+       caller answering by substring silently resolved whichever sorted first and
+       was told it had succeeded.
+    2. The id test and the substring test were OR'd inside one iteration, so an
+       earlier entry whose *text* happened to contain an id-shaped token beat the
+       later entry whose `id` genuinely equalled the target.
+    3. There was no status filter, so an already-answered question could be
+       silently re-answered and its recorded answer overwritten - while the failure
+       path still reported "no *open* question matched". That contradicted the
+       invariant `record_questions` maintains at every rescan, and it was live
+       rather than theoretical: with every entry in the store already answered, the
+       next call was guaranteed to clobber one.
+
+    Exact ids are now resolved in a full first pass. Substring matching is a
+    fallback, restricted to open questions, and ambiguity is an error that returns
+    the candidates rather than a guess that returns success.
+    """
     store = load_open_questions(root)
+    entries = store["open_questions"]
     needle = target.lower().strip()
-    matched = None
-    for entry in store["open_questions"]:
-        if entry.get("id") == target or needle and needle in entry.get("question", "").lower():
-            matched = entry
-            break
+
+    matched = next((entry for entry in entries if entry.get("id") == target), None)
+    if matched is None and needle:
+        pool = entries if allow_answered else [entry for entry in entries if entry.get("status") == "open"]
+        candidates = [entry for entry in pool if needle in entry.get("question", "").lower()]
+        if len(candidates) > 1:
+            return {
+                "updated": False,
+                "reason": f"{target!r} matches {len(candidates)} questions; pass an exact id",
+                "candidates": [{"id": entry["id"], "question": entry["question"]} for entry in candidates],
+            }
+        matched = candidates[0] if candidates else None
+        if matched is None and not allow_answered:
+            # Distinguish "there is no such question" from "there is, and it is
+            # already answered". Reporting the first for the second is what the
+            # original made impossible to notice.
+            resolved = [entry for entry in entries if needle in entry.get("question", "").lower()]
+            if resolved:
+                names = ", ".join(f"{entry['id']} ({entry.get('status')})" for entry in resolved)
+                return {
+                    "updated": False,
+                    "reason": f"{target!r} matches only questions that are already answered: {names}. "
+                    "Pass --allow-answered to overwrite one.",
+                    "candidates": [{"id": entry["id"], "question": entry["question"]} for entry in resolved],
+                }
     if matched is None:
-        return {"updated": False, "reason": f"no open question matched {target!r}"}
+        scope = "question" if allow_answered else "open question"
+        return {"updated": False, "reason": f"no {scope} matched {target!r}"}
+    if matched.get("status") != "open" and not allow_answered:
+        return {
+            "updated": False,
+            "reason": f"{matched['id']} is already {matched.get('status')}; pass --allow-answered to overwrite",
+            "question": matched,
+        }
+
     matched["status"] = status if status in QUESTION_STATUSES else "answered"
     matched["answer"] = answer
     matched["answered_at"] = now_iso()
+    store["open_questions"] = _sorted_questions(entries)
     store["generated_at"] = now_iso()
     if workspace_exists(root):
         write_json(questions_path(root), store)
         write_text(engineering_root(root).joinpath(*_QUESTIONS_DIGEST), render_questions_digest(store))
-    return {"updated": True, "question": matched}
+    return {"updated": True, "id": matched["id"], "question": matched}
 
 
 def extract_open_questions(text: str) -> list[str]:
@@ -251,3 +321,50 @@ def capture_asked_questions(root: Path, payload: dict[str, Any] | None) -> dict[
         return {"recorded": 0}
     record_questions(root, entries)
     return {"recorded": len(entries)}
+
+
+def capture_given_answers(root: Path, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Record what the human answered, once the tool has returned.
+
+    The other half of the loop. `capture_asked_questions` runs at `PreToolUse` and
+    its own docstring says "before the answer arrives" - and nothing ever ran after
+    it, so every question a human answered stayed `open` forever and was re-surfaced
+    on every subsequent turn. Four questions answered in one session were still
+    being reported as open at the end of it.
+
+    Matching is by exact question text, which is what the capture side stored, so
+    this never has to guess the way answering by substring does.
+    """
+    if not payload or not workspace_exists(root):
+        return {"answered": 0}
+    asked = (payload.get("tool_input") or {}).get("questions")
+    response = payload.get("tool_response")
+    if isinstance(response, str):
+        try:
+            response = json.loads(response)
+        except ValueError:
+            response = None
+    if not isinstance(asked, list) or not isinstance(response, dict):
+        return {"answered": 0}
+
+    # The harness returns answers keyed by the question text it was given.
+    answers = response.get("answers") if isinstance(response.get("answers"), dict) else response
+    if not isinstance(answers, dict):
+        return {"answered": 0}
+
+    answered = 0
+    for item in asked:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("question", "")).strip()
+        chosen = answers.get(text)
+        if not text or not chosen:
+            continue
+        result = answer_question(root, question_id(text, ""), str(chosen))
+        if not result.get("updated"):
+            # The id is derived from the text with an empty source, matching how
+            # `capture_asked_questions` records it. If that misses, fall back to the
+            # exact text rather than a substring, which could hit the wrong entry.
+            result = answer_question(root, text, str(chosen))
+        answered += 1 if result.get("updated") else 0
+    return {"answered": answered}

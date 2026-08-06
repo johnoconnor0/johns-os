@@ -19,15 +19,33 @@ ultrathink
 
 ## Description
 
-Turns the structured output of `[[plan-completion-audit]]` into executed fixes. Reads the report, parses every finding, classifies each (auto-fix / sub-skill dispatch / plan-first / human-input / defer), shows the plan, gets confirmation, and applies fixes in batches with verifier checks between each batch.
+Turns the structured output of `[[plan-completion-audit]]` into executed fixes. Reads `findings.json`, classifies every finding (auto-fix / delegation / plan-first / human-input / defer), shows the plan, gets confirmation, and applies fixes in batches with verifier checks between each batch.
 
-Use this skill when:
+## Trigger
 
-- You've just run `/ai-utilities:plan-completion-audit` and want to action the findings
-- You're triaging an audit's CRITICAL backlog before shipping
-- You want a quantified "closed N findings of M" record for a release
+Use when the user asks to action, resolve, fix or close out the findings from an audit that has already run.
 
-The skill never commits, pushes, resets, or deletes files outside its working artefacts. Branch/commit/push are user decisions.
+## When To Use
+
+- Straight after `/ai-utilities:plan-completion-audit`, to act on what it found.
+- Triaging a critical backlog before shipping.
+- When a release needs a quantified "closed N findings of M" record.
+
+Do **not** use it to *produce* an audit — that is `[[plan-completion-audit]]`. This skill requires one to already exist and stops if none does.
+
+## Outputs
+
+- `.project/audits/audit-resolver/<date>/audit-resolver-ledger.md` — the durable record, and the resume state
+- `.project/audits/audit-resolver/<date>/subplans/<id>-<slug>.md` — one per PLAN-FIRST finding
+- `.project/audits/audit-resolver/<date>/reaudit-diff.md` — only when `--reaudit` ran
+
+## Safety Constraints
+
+- **Never commit, push, reset, or delete outside this skill's own artefacts.** Branch and commit strategy belong to the user. `git commit`, `git push`, `git reset` and `rm` are deliberately absent from `allowed-tools`.
+- **Never proceed past a failing verifier** without explicit direction.
+- **Never decide something the audit flagged as needing a human.**
+- **Never claim the repository is clean when families did not run.** Report `families_not_run` before anything else; `not-applicable` and `not-checked` mean different things.
+- **Never name a marketplace you have not verified** in an install suggestion.
 
 ---
 
@@ -47,46 +65,63 @@ The user invoked audit-resolver with: `$ARGUMENTS`
 
 Accepted argument forms:
 
-- Bare invocation → auto-discover the latest report: the newest `*.md` directly under `.project/audits/plan-completion-audit/` (timestamped filenames `YYYY-MM-DD_HHMMSS.md`, sorted descending). Report filenames are timestamps, so this is unambiguous and never matches resolver ledgers.
-- Path to a specific report `.md`
+- Bare invocation → auto-discover the newest run under `.project/audits/plan-completion-audit/`.
+- Path to a specific `findings.json`, or to a legacy markdown report.
 - Flags (combinable):
   - `--dry-run` — produce action plan + diff preview without executing
   - `--severity=critical[,warning,suggestion]` — restrict severity (default: all three)
-  - `--phase=N[,N,...]` — restrict to specific audit phases
+  - `--family=<id>[,<id>,...]` — restrict to specific check families
   - `--reaudit` — at the end, re-run plan-completion-audit and diff verdicts
   - `--no-confirm` — skip per-batch confirmation (still pauses on HUMAN-INPUT)
-  - `--ledger=<path>` — override ledger location (default `.project/audits/<date>/audit-resolver-ledger.md`)
+  - `--ledger=<path>` — override ledger location (default `.project/audits/audit-resolver/<date>/audit-resolver-ledger.md`)
 
 ---
 
-## Phase 1: Report Discovery + Parse
+## Phase 1: Load the findings
 
 ### Objective
-Locate the audit report and extract every finding as a structured action.
+Get the audit's findings as structured data, and know what the audit did *not* cover.
 
 ### Steps
 
-1. **Resolve the report path.** If `$ARGUMENTS` contains a path, use it. Otherwise discover the latest report: list `*.md` files directly inside `.project/audits/plan-completion-audit/` and pick the newest by filename (the timestamped `YYYY-MM-DD_HHMMSS.md` name sorts chronologically; fall back to mtime if names are non-standard). Scope discovery to that single folder — do NOT glob `**/*audit*.md` across the whole tree, as that also matches resolver ledgers (`audit-resolver-ledger.md`) and other stray files, which is what previously caused the wrong file to be picked. If the folder is empty or missing, **STOP** with message: "Run `/ai-utilities:plan-completion-audit` first, then re-invoke this skill."
-2. **Read the full report.**
-3. **Parse into a structured ledger.** Each finding gets a row:
+1. **Load them.** One command does discovery, format detection and filtering:
 
-   | Field | Source |
-   |---|---|
-   | `id` | Auto-generated `F001`, `F002`, ... |
-   | `severity` | CRITICAL / WARNING / SUGGESTION (from the finding's tag) |
-   | `phase` | Phase 1–11 of the audit |
-   | `file` | File path from the finding |
-   | `line` | Line number if available |
-   | `description` | The finding text |
-   | `suggested_fix` | The report's "fix" column / sentence if present |
-   | `category` | Inferred — see `reference.md` mapping table |
-   | `handling` | (filled in Phase 2) |
+   ```bash
+   python "${CLAUDE_PLUGIN_ROOT}/scripts/resolver.py" --root . --summary
+   ```
 
-   Use `bash scripts/parse-audit-report.sh <report.md>` for the mechanical parse; fall back to inline reading if unavailable.
+   It finds the newest run, reads `findings.json`, and prints counts by severity and
+   family. Add `--report <path>` for a specific one. If it reports no audit exists,
+   **STOP**: "Run `/ai-utilities:plan-completion-audit` first, then re-invoke."
 
-4. Print a 5-line summary: total findings, breakdown by severity, breakdown by phase.
+   There is no markdown scraping any more. The audit emits `findings.json`, and the
+   parser this replaces described itself as heuristic and asked the caller to
+   sanity-check its own output count. Legacy markdown reports still load, converted
+   to the same shape and stamped `source: "markdown-fallback"` with a count of rows
+   it could not convert — so a degraded input is visible instead of assumed.
 
-5. **GATE:** if the report has 0 findings, stop with "nothing to do; ledger not written."
+2. **Read `families_not_run` in the summary, and report it to the user.** This is
+   the number that stops a resolution being mistaken for a completed audit: closing
+   every finding while three families never ran does not mean the repository is
+   clean, it means part of it was never examined. Distinguish the two reasons —
+   `not-applicable` is fine, `not-checked` means something was missing and may be
+   worth fixing before resolving.
+
+3. **Read `plan_items_unverifiable`.** These name artefacts that do not resolve.
+   They are not fixable findings; they are questions for the user.
+
+4. **Get the findings themselves** when you need the detail:
+
+   ```bash
+   python "${CLAUDE_PLUGIN_ROOT}/scripts/resolver.py" --root . --severity critical,warning
+   ```
+
+   Each carries `family`, `rule`, `severity`, `evidence[]`, `route` and
+   `suggested_strategy`. The `route` was chosen by the audit against the family
+   registry, so Phase 2 confirms it rather than inferring it from scratch.
+
+5. **GATE:** zero findings → stop with "nothing to do; ledger not written." Still
+   report `families_not_run` first.
 
 ---
 
@@ -97,17 +132,24 @@ Assign a handling strategy to every finding; build the dependency graph; produce
 
 ### Steps
 
-1. For each finding, assign one of:
+1. **Start from the finding's own `suggested_strategy`.** The audit set it against
+   the family registry. Override it when the specific finding warrants, and say why
+   in the ledger — do not re-derive every strategy from scratch.
 
    | Strategy | When to choose |
    |---|---|
    | **AUTO** | Mechanical, low-risk, single-pass — unused imports, lint formatting, dead exports, missing `await` on single sites, dangling refs, doc drift, version bumps |
-   | **SUB-SKILL** | Maps to another Web Lifter plugin — RLS/migration/index → `database-design`; A/B test design hole → `experimentation`; pricing hole → `business-economics` |
+   | **DELEGATE** | Maps to an agent or skill this marketplace ships — see the delegation map in `reference.md`. Schema and access-control work to the database engineer; test gaps to the QA strategist; security to the security reviewer |
    | **PLAN-FIRST** | Multi-file change with judgement — god-file split, refactor, new feature impl |
    | **HUMAN-INPUT** | Needs a decision the audit explicitly flagged — descope vs ship, pattern choice |
-   | **DEFER** | Skipped due to severity / phase filter |
+   | **DEFER** | Skipped due to a severity or family filter |
 
-2. For SUB-SKILL findings, name the target `plugin:skill` (see `reference.md` mapping).
+2. **For DELEGATE findings, confirm the target exists before dispatching.** The
+   finding carries `route.target`; `route.available` is `null` until something
+   checks. Confirm the plugin is installed in this session. If it is not, mark the
+   finding deferred, name the missing plugin, and fall back to `general-purpose`
+   only when the user asks. Never emit an install command naming a marketplace you
+   have not verified.
 
 3. **Build the dependency graph.** Common edges:
    - Type errors block test runs → types first
@@ -117,7 +159,7 @@ Assign a handling strategy to every finding; build the dependency graph; produce
 
 4. **Order findings:** dependencies first, then severity (CRITICAL → WARNING → SUGGESTION), then file proximity (cluster fixes per file).
 
-5. **Apply flag filters** (`--severity`, `--phase`).
+5. **Apply flag filters** (`--severity`, `--family`).
 
 6. Print the **planned action list** with strategy + ordered ID column.
 
@@ -136,7 +178,7 @@ Show the plan; get explicit approval before any writes.
    |---|---|
    | Proceed — fix everything in the plan | Continue to Phase 4 |
    | Proceed — CRITICAL only | Re-filter and re-show summary |
-   | Proceed — skip SUB-SKILL items this run | Skip cross-plugin routing |
+   | Proceed — skip DELEGATE items this run | Skip cross-plugin routing |
    | Stop — let me review the plan first | Write parsed plan to disk; exit |
 
 2. If `--dry-run`: skip this gate, write the plan, stop.
@@ -171,7 +213,7 @@ Apply fixes in priority order, one batch at a time, verifying between batches.
 1. **Define batch.** Group by:
    - Same file (cluster Edits)
    - Same category (e.g. all unused-imports)
-   - Same sub-skill (if SUB-SKILL strategy)
+   - Same delegation target (if DELEGATE strategy)
    - Max 10 findings per batch
 
 2. **Execute by strategy:**
@@ -182,14 +224,16 @@ Apply fixes in priority order, one batch at a time, verifying between batches.
    - Apply Edits
    - Run the category's verifier (see `reference.md` verifier matrix)
 
-   **SUB-SKILL:**
+   **DELEGATE:**
    - For each finding, invoke the target skill via `Agent` (subagent type matches the plugin's typical pattern)
-   - Capture the sub-skill's output to the ledger
+   - Capture the delegated output to the ledger
    - Verify per category
 
    **PLAN-FIRST:**
-   - Write a mini-plan to `.project/audits/<date>/audit-resolver-subplans/<id>-<slug>.md`
-   - Dispatch a planner-then-coder pair via `Agent` (`engineering-team:planner` then `engineering-team:coder` if available, otherwise general-purpose)
+   - Write a mini-plan to `.project/audits/audit-resolver/<date>/subplans/<id>-<slug>.md`
+   - Dispatch the `create-engineering-plan` skill, then `implement-feature-safely`, if
+     the Engineering Lifecycle plugin is installed. Otherwise use the
+     `general-purpose` agent and record the downgrade in the ledger
    - Diff-preview confirmation before apply
    - Verify
 
@@ -199,7 +243,7 @@ Apply fixes in priority order, one batch at a time, verifying between batches.
 
 3. **Between batches:**
    - `git diff --stat` — show what changed
-   - Run the relevant verifier (`bash scripts/verify-stack.sh`)
+   - Run the verifier: `python "${CLAUDE_PLUGIN_ROOT}/scripts/verify.py" --root .`
    - If verifier fails: HALT; show failing diff; offer revert/continue-with-knowledge/stop
 
 4. **Failure handling:** never auto-continue past a broken verifier. Always halt and ask.
@@ -223,10 +267,10 @@ Verify the fixes actually closed the findings.
    - **Closed** — in original, not in new
    - **Unchanged** — in both
    - **New** — in new only (regression risk)
-5. **Write** diff to `.project/audits/<date>/audit-resolver-reaudit-diff.md`.
+5. **Write** diff to `.project/audits/audit-resolver/<date>/reaudit-diff.md`.
 
 ### Output
-A re-audit diff file at `.project/audits/<date>/audit-resolver-reaudit-diff.md` and a Re-audit Diff section appended to the main ledger. If skipped, neither is written and the ledger notes "re-audit not run".
+A re-audit diff file at `.project/audits/audit-resolver/<date>/reaudit-diff.md` and a Re-audit Diff section appended to the main ledger. If skipped, neither is written and the ledger notes "re-audit not run".
 
 ---
 
@@ -237,7 +281,7 @@ Durable record of every action.
 
 ### Steps
 
-1. Write `.project/audits/<date>/audit-resolver-ledger.md` (or `--ledger=<path>`) using `templates/output-template.md`. Sections:
+1. Write `.project/audits/audit-resolver/<date>/audit-resolver-ledger.md` (or `--ledger=<path>`) using `templates/output-template.md`. Sections:
    - Baseline (ref hash, plan path, original audit path)
    - Findings inventory (Phase 1 ledger)
    - Plan (Phase 2 triage)
@@ -266,7 +310,7 @@ Durable record of every action.
 | `Bash(git:diff)` / `git:status` / `git:log` / `git:stash` | Working-tree safety + final diff |
 | `Bash(npx|npm|pnpm|yarn|python|bash|node)` | Verifiers — type-check, lint, tests, build, smoke tests |
 | `AskUserQuestion` | Confirmation gates + HUMAN-INPUT handling |
-| `Agent` | Per-finding subagent dispatch (SUB-SKILL + PLAN-FIRST) |
+| `Agent` | Per-finding subagent dispatch (DELEGATE + PLAN-FIRST) |
 
 **Deliberately omitted** from `allowed-tools`: `git commit`, `git push`, `git reset`, `rm`. The skill never commits, pushes, resets, or deletes outside its own ledger/subplan files.
 
@@ -274,10 +318,10 @@ Durable record of every action.
 
 ## Output Format
 
-Single resolution ledger at `.project/audits/<date>/audit-resolver-ledger.md` using `templates/output-template.md`. Optional companion artefacts:
+Single resolution ledger at `.project/audits/audit-resolver/<date>/audit-resolver-ledger.md` using `templates/output-template.md`. Optional companion artefacts:
 
-- `.project/audits/<date>/audit-resolver-subplans/<id>-<slug>.md` — per-PLAN-FIRST finding
-- `.project/audits/<date>/audit-resolver-reaudit-diff.md` — if `--reaudit` ran
+- `.project/audits/audit-resolver/<date>/subplans/<id>-<slug>.md` — per-PLAN-FIRST finding
+- `.project/audits/audit-resolver/<date>/reaudit-diff.md` — if `--reaudit` ran
 
 The ledger is **the resume state**. Re-invoking audit-resolver picks up where it left off by reading prior ledger entries and skipping already-completed findings.
 
@@ -290,7 +334,7 @@ The ledger is **the resume state**. Re-invoking audit-resolver picks up where it
 3. **Verify after every batch.** Small, validated steps; no piling up un-verified changes.
 4. **Halt on verifier failure.** Never proceed past a broken state without user direction.
 5. **Respect severity flags.** Don't sneak warnings in when `--severity=critical` was set.
-6. **Sub-skill dispatch where appropriate.** Use the right tool; don't reinvent.
+6. **Delegation where appropriate.** Use the right tool; don't reinvent.
 7. **Ledger everything.** Every action + every skipped item with reason.
 8. **Australian English.**
 
@@ -304,9 +348,9 @@ The ledger is **the resume state**. Re-invoking audit-resolver picks up where it
 4. **Uncommitted changes** — Phase 4 stash flow; never silently overwrite.
 5. **Mid-run interruption** — Ledger writes are append-only; resume skips completed findings.
 6. **Verifier unavailable** (no `npm`, no `tsc`) — Mark findings "applied unverified"; user must verify manually.
-7. **Sub-skill not installed** — Mark "deferred — install required plugin first"; do not attempt fix.
+7. **Delegation target not installed** — Mark "deferred", name the missing plugin, and state which marketplace the user is actually running. Never invent an install command for a marketplace you cannot see. Do not attempt the fix.
 8. **Cyclic dependency in findings** — Surface as manual review item; don't auto-order.
-9. **Web Lifter plugin marketplace itself** — `scripts/verify-stack.sh` detects via `scripts/check-versions.mjs` presence and uses that + `python tests/scripts/test_smoke.py` as the verifier.
+9. **A repository with one validation entrypoint** — when a repo exposes a single command that runs everything (this one does, as `python scripts/validate-repo.py`), `scripts/verify.py` uses it and skips stack detection entirely. Run it with `--dry-run` first to see which command it chose and why.
 10. **User says stop mid-batch** — Finish current edit safely; write ledger; exit cleanly.
 11. **Malformed report structure** — Best-effort parse + warn user that some findings may be missed.
 12. **Multiple audit reports in the folder** — Default to the newest by timestamp filename (this is now deterministic). Only pause to ask if the user passed `$ARGUMENTS` that are ambiguous or if filenames are non-standard and mtime ordering is unclear.

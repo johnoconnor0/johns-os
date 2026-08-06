@@ -4,29 +4,19 @@
 from __future__ import annotations
 
 import argparse
-import re
 from pathlib import Path
 
-from eng_common import WORKSPACE, now_iso, read_json, relpath, repo_root, slugify, write_json
-
-ACTION_RE = re.compile(r"^\s*[-*]\s+\[(?P<state>[ xX])\]\s+(?P<title>.+)$")
-
-
-def item_from_text(line: str, source: str, index: int) -> dict | None:
-    match = ACTION_RE.match(line)
-    if not match:
-        return None
-    title = match.group("title").strip()
-    status = "done" if match.group("state").lower() == "x" else "open"
-    return {
-        "id": f"{slugify(Path(source).stem)}-{index:03d}",
-        "title": title,
-        "status": status,
-        "source": source,
-        "created_at": now_iso(),
-        "owner": "unassigned",
-        "priority": "normal",
-    }
+from eng_common import (  # noqa: F401  (ACTION_RE re-exported for existing callers)
+    ACTION_RE,
+    WORKSPACE,
+    item_from_text,
+    now_iso,
+    read_json,
+    relpath,
+    repo_root,
+    slugify,
+    write_json,
+)
 
 
 def collect_from_markdown(path: Path, root: Path) -> list[dict]:
@@ -63,6 +53,42 @@ def collect(root: Path, inputs: list[Path]) -> list[dict]:
     return sorted(items, key=lambda item: (item["source"], item["id"]))
 
 
+# Fields written back by something other than this script, which must therefore
+# survive a re-emit. `linear-sync.py reconcile` writes the first two after an issue
+# is created; a human or a pull sets the status.
+_PRESERVED = ("linear_id", "linear_url", "external", "owner", "priority")
+
+
+def merge_with_existing(path: Path, items: list[dict]) -> list[dict]:
+    """Re-emitted items, keeping what only the tracker round trip knows.
+
+    This function used to not exist: `main` wrote the freshly parsed list straight
+    over the file. Every `linear_id` and `linear_url` that `linear-sync.py reconcile`
+    had written back was destroyed on the next plan edit, so the following `plan`
+    saw the task as untracked and created a second issue for it.
+    """
+    previous = read_json(path, {})
+    known = {
+        item.get("id"): item
+        for item in (previous.get("action_items", []) if isinstance(previous, dict) else [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    for item in items:
+        prior = known.get(item["id"])
+        if not prior:
+            continue
+        for field in _PRESERVED:
+            if prior.get(field) is not None and item.get(field) in (None, "", "unassigned", "normal"):
+                item[field] = prior[field]
+        # A status advanced elsewhere - closed in the tracker, or marked in-progress
+        # by hand - outranks the checkbox state re-parsed from the plan, unless the
+        # plan itself now says done.
+        if prior.get("status") not in (None, "open") and item.get("status") == "open":
+            item["status"] = prior["status"]
+        item["created_at"] = prior.get("created_at", item["created_at"])
+    return items
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("inputs", nargs="+")
@@ -70,9 +96,10 @@ def main() -> int:
     parser.add_argument("--out", default=str(WORKSPACE / "ledger" / "action-items.json").replace("\\", "/"))
     args = parser.parse_args()
     root = repo_root(Path(args.root))
-    items = collect(root, [Path(p) for p in args.inputs])
+    out = root / args.out
+    items = merge_with_existing(out, collect(root, [Path(p) for p in args.inputs]))
     payload = {"generated_at": now_iso(), "action_items": items}
-    write_json(root / args.out, payload)
+    write_json(out, payload)
     print(f"wrote {len(items)} action item(s) to {args.out}")
     return 0
 

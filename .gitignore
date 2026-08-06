@@ -3,7 +3,15 @@
 # (The plugin's own workspace under engineering-lifecycle/.project/ is ignored
 # by engineering-lifecycle/.gitignore. The leading slash anchors this rule to
 # the repo root only.)
-/.project/
+#
+# settings.json is the one exception: it is hand-authored, intentional, and
+# belongs to the project rather than to a session. Git cannot re-include a file
+# whose parent directory is excluded, so the whole stanza has to be spelled out
+# rather than a single negation added.
+/.project/*
+!/.project/.engineering/
+/.project/.engineering/*
+!/.project/.engineering/settings.json
 /docs/
 /NOTES.md
 
@@ -42,5 +50,3 @@ service-account.json
 Thumbs.db
 .idea/
 .vscode/
-
-_unreleased

@@ -21,6 +21,7 @@ DIRS = [
     "dashboards",
     "reports",
     "context",
+    "tracker",
 ]
 
 

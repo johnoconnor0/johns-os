@@ -19,6 +19,7 @@ from eng_common import (
     changed_files,
     classify_file_path,
     configured_env_accessors,
+    docs_root,
     emit_json,
     engineering_root,
     env_names_in,
@@ -59,6 +60,7 @@ from questions import (  # noqa: F401  (re-exported for backwards compatibility)
     QUESTION_STATUSES,
     answer_question,
     capture_asked_questions,
+    capture_given_answers,
     extract_open_questions,
     load_open_questions,
     question_id,
@@ -68,6 +70,7 @@ from questions import (  # noqa: F401  (re-exported for backwards compatibility)
     scan_artifact_questions,
     sync_open_questions,
 )
+from references import claim_check, reference_check_scoped
 from stack_detection import (  # noqa: F401  (re-exported for backwards compatibility)
     detect_stack,
     find_markers,
@@ -75,6 +78,7 @@ from stack_detection import (  # noqa: F401  (re-exported for backwards compatib
     workspace_globs,
     workspace_manifests,
 )
+from tracker import tracker_status
 
 INTENT_KEYWORDS = {
     "profile": [
@@ -618,16 +622,23 @@ def gitignore_sync(root: Path, apply: bool = False) -> dict[str, Any]:
 
 def schema_validator(root: Path) -> dict[str, Any]:
     errors: list[str] = []
-    for path in (
+    targets = (
         sorted((root / "schemas").glob("*.json"))
         + sorted((engineering_root(root)).rglob("*.json"))
         + sorted((root / "evals").rglob("*.json"))
-    ):
+    )
+    for path in targets:
         try:
             json.loads(path.read_text(encoding="utf-8"))
         except Exception as exc:
             errors.append(f"{relpath(path, root)}: {exc}")
-    result = {"valid": not errors, "errors": errors}
+    # No JSON on disk is not a clean bill of health for the JSON on disk.
+    result = {
+        "checked": bool(targets),
+        "files_checked": len(targets),
+        "valid": bool(targets) and not errors,
+        "errors": errors,
+    }
     write_json(engineering_root(root) / "reports" / "validation" / "schema-validator.json", result)
     return result
 
@@ -647,7 +658,12 @@ def markdown_artifact_validator(root: Path, files: list[str]) -> dict[str, Any]:
             errors.append(f"{relpath(path, root)}: unresolved placeholder")
         if "```mermaid" in body and "```" not in body.split("```mermaid", 1)[1]:
             errors.append(f"{relpath(path, root)}: unclosed Mermaid block")
-    result = {"valid": not errors, "errors": errors}
+    result = {
+        "checked": bool(targets),
+        "files_checked": len(targets),
+        "valid": bool(targets) and not errors,
+        "errors": errors,
+    }
     write_json(engineering_root(root) / "reports" / "validation" / "markdown-artifact-validator.json", result)
     return result
 
@@ -696,26 +712,55 @@ def plan_quality_gate(text: str) -> dict[str, Any]:
     lower = text.lower()
     missing = [item for item in required if item not in lower]
     return {
-        "complete": not missing,
+        "checked": bool(text.strip()),
+        "complete": bool(text.strip()) and not missing,
         "missing": missing,
         "score": round((len(required) - len(missing)) / len(required) * 100),
     }
 
 
+# Commands whose presence in a final message is evidence something was actually run,
+# as opposed to the word "test" appearing in a sentence about testing.
+_VERIFIER_MENTION = re.compile(
+    r"\b(?:npm|pnpm|yarn|npx)\s+(?:run\s+)?(?:test|build|lint)\b"
+    r"|\bpytest\b|\bunittest\b|\bruff\b|\bmypy\b|\btsc\b|\bcargo\s+test\b|\bgo\s+test\b"
+    r"|validate-repo\.py|eng-life\s+validate|pre-commit\s+run"
+)
+
+
 def completion_contract_check(root: Path, text: str = "") -> dict[str, Any]:
+    """Whether a final message claiming completion also shows evidence of it.
+
+    Keyword matching, and labelled as such. "Claims completion" is genuinely a
+    keyword judgement and always will be; what this adds is one signal that is not -
+    files changed with no verifier command named anywhere in the message. The
+    `method` and `confidence` keys exist so the JSON this writes stops reading like
+    a verdict when it is a heuristic.
+    """
     lower = text.lower()
     claims_done = any(word in lower for word in ["completed", "done", "implemented", "fixed"])
     validation_mentions = any(word in lower for word in ["test", "validated", "verified", "not run"])
+    verifier_named = bool(_VERIFIER_MENTION.search(text))
     blockers_hidden = "blocker" in lower and "unresolved" not in lower
+    changed = [str(p).replace("\\", "/") for p in changed_files(root)]
     result = {
+        "checked": True,
+        "method": "keyword-match",
+        "confidence": "low",
         "complete_enough": (not claims_done or validation_mentions) and not blockers_hidden,
         "claims_completion": claims_done,
         "validation_mentioned": validation_mentions,
-        "changed_files": [str(p).replace("\\", "/") for p in changed_files(root)],
+        "verifier_command_named": verifier_named,
+        "changed_files": changed,
         "recommendations": [],
     }
     if claims_done and not validation_mentions:
         result["recommendations"].append("Mention validation performed or explicitly state why validation was not run.")
+    if claims_done and changed and not verifier_named:
+        result["recommendations"].append(
+            f"{len(changed)} file(s) changed and completion is claimed, but no verifier command is named. "
+            "Name the command that was run, or say it was not."
+        )
     if blockers_hidden:
         result["recommendations"].append("State unresolved blockers clearly before finishing.")
     write_json(engineering_root(root) / "reports" / "completion" / "completion-contract-check.json", result)
@@ -741,7 +786,9 @@ def final_answer_structure_check(task_type: str, text: str) -> dict[str, Any]:
     )
     lower = text.lower()
     missing = [item for item in required if item not in lower]
-    return {"valid": not missing, "missing": missing}
+    # An empty answer is not a well-structured one; it is one nothing was checked
+    # against. Saying `valid: True` for it is the bug this key exists to prevent.
+    return {"checked": bool(text.strip()), "valid": bool(text.strip()) and not missing, "missing": missing}
 
 
 def artifact_completeness_score(root: Path, files: list[str]) -> dict[str, Any]:
@@ -776,26 +823,95 @@ def artifact_completeness_score(root: Path, files: list[str]) -> dict[str, Any]:
 
 
 def artifact_consistency_check(root: Path) -> dict[str, Any]:
-    artifacts = [
-        relpath(p, root) for p in engineering_root(root).rglob("*") if p.suffix in {".md", ".json", ".yaml", ".yml"}
-    ]
+    """Contradictions between artifacts that can be established, not inferred.
+
+    This function used to return "No deterministic cross-artifact contradictions
+    detected" with an empty warnings list, having inspected nothing but the file
+    names. A checker that asserts a verdict it never computed is worse than no
+    checker: it converts an unexamined tree into a clean bill of health.
+
+    Three checks, each with an enumerable other side. Anything needing judgement is
+    deliberately absent, and `checks_skipped` says so by name rather than silently
+    narrowing the claim.
+    """
+    warnings: list[str] = []
+    checks_run: list[str] = []
+    checks_skipped: list[dict[str, str]] = []
+    artifacts = [p for p in engineering_root(root).rglob("*.md") if p.is_file()]
+    docs = [p for p in docs_root(root).rglob("*.md") if p.is_file()]
+
+    checks_run.append("source-artifact-resolves")
+    checks_run.append("initiative-matches-location")
+    declared: dict[str, list[tuple[str, str]]] = {}
+    for path in sorted(artifacts + docs):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        front, _ = parse_front_matter(text)
+        rel = relpath(path, root)
+        for source in front.get("source_artifacts") or []:
+            if not isinstance(source, str) or not source.strip() or source.strip().startswith("<"):
+                continue
+            if not (root / source).exists() and not (path.parent / source).exists():
+                warnings.append(f"{rel}: source_artifacts names `{source}`, which does not exist")
+        initiative = front.get("initiative_id")
+        if isinstance(initiative, str) and initiative and initiative not in {"<id>", "unknown"}:
+            parts = set(path.parts)
+            if initiative not in parts:
+                warnings.append(f"{rel}: front matter says initiative `{initiative}` but the file sits outside it")
+            declared.setdefault(f"{initiative}/{path.name}", []).append((rel, str(front.get("status", ""))))
+
+    checks_run.append("status-agrees-across-copies")
+    for key, entries in sorted(declared.items()):
+        statuses = {status for _, status in entries if status}
+        if len(entries) > 1 and len(statuses) > 1:
+            where = ", ".join(f"{rel} ({status})" for rel, status in entries)
+            warnings.append(f"{key}: the same artifact is declared with conflicting status in {where}")
+
+    if not artifacts and not docs:
+        checks_skipped.append({"check": "all", "reason": "no artifacts on disk"})
+
     return {
-        "checked_artifacts": artifacts,
-        "warnings": [],
-        "recommendation": "No deterministic cross-artifact contradictions detected.",
+        "checked": True,
+        "artifact_count": len(artifacts) + len(docs),
+        "checks_run": checks_run,
+        "checks_skipped": checks_skipped,
+        "warnings": warnings,
     }
 
 
+# Split on case boundaries and separators so `dataModel`, `DataModel` and
+# `data-model` collapse to one key. That collision IS the naming inconsistency, and
+# it is establishable, unlike "is this the right name", which is not.
+_IDENTIFIER = re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+|[A-Z][a-z0-9]+)+\b")
+
+
+def _normalised_identifier(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", re.sub(r"(?<!^)(?=[A-Z])", "-", name).lower())
+
+
 def naming_consistency_check(root: Path) -> dict[str, Any]:
-    names: dict[str, int] = {}
-    for path in [p for p in engineering_root(root).rglob("*.md") if p.is_file()]:
-        for name in re.findall(
-            r"\b[A-Z][A-Za-z0-9]+(?:[A-Z][A-Za-z0-9]+)+\b", path.read_text(encoding="utf-8", errors="ignore")
-        ):
-            names[name] = names.get(name, 0) + 1
+    """Identifiers written more than one way across the artifact trees.
+
+    Previously this counted CamelCase tokens and then returned a hardcoded empty
+    warnings list, so it could report nothing no matter what it found.
+    """
+    spellings: dict[str, dict[str, int]] = {}
+    files = [p for p in engineering_root(root).rglob("*.md") if p.is_file()]
+    files += [p for p in docs_root(root).rglob("*.md") if p.is_file()]
+    for path in sorted(files):
+        for name in _IDENTIFIER.findall(path.read_text(encoding="utf-8", errors="ignore")):
+            spellings.setdefault(_normalised_identifier(name), {}).setdefault(name, 0)
+            spellings[_normalised_identifier(name)][name] += 1
+    warnings = [
+        f"`{key}` is written {len(variants)} ways: "
+        + ", ".join(f"{name} ({count})" for name, count in sorted(variants.items()))
+        for key, variants in sorted(spellings.items())
+        if len(variants) > 1
+    ]
     return {
-        "canonical_candidates": dict(sorted(names.items(), key=lambda item: (-item[1], item[0]))[:50]),
-        "warnings": [],
+        "checked": True,
+        "files_checked": len(files),
+        "identifiers": len(spellings),
+        "warnings": warnings,
     }
 
 
@@ -809,12 +925,24 @@ def diagram_sync_check(root: Path) -> dict[str, Any]:
     return {"diagrams": diagrams, "warnings": warnings}
 
 
+def is_plugin_root(root: Path) -> bool:
+    """True when `root` is a Claude plugin, not just some repository.
+
+    Two tools below glob `root/"skills"`, which only means anything when the root IS
+    a plugin. Run against an ordinary repository they found nothing and returned
+    `valid: True` - a pass earned by looking in the wrong place.
+    """
+    return (root / ".claude-plugin" / "plugin.json").is_file() and (root / "skills").is_dir()
+
+
 def example_output_validator(root: Path) -> dict[str, Any]:
+    if not is_plugin_root(root):
+        return {"checked": False, "reason": "root is not a Claude plugin, so it has no skills to validate"}
     missing = []
     for skill in sorted((root / "skills").glob("*")):
         if not any((skill / name).exists() for name in ["examples", "templates"]):
             missing.append(relpath(skill, root))
-    return {"valid": not missing, "skills_missing_examples_or_templates": missing}
+    return {"checked": True, "valid": not missing, "skills_missing_examples_or_templates": missing}
 
 
 def prompt_outcome_logger(root: Path, prompt: str, outcome: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -829,6 +957,8 @@ def prompt_outcome_logger(root: Path, prompt: str, outcome: dict[str, Any] | Non
 
 
 def skill_trigger_audit(root: Path) -> dict[str, Any]:
+    if not is_plugin_root(root):
+        return {"checked": False, "reason": "root is not a Claude plugin, so it has no skill triggers to audit"}
     skills = [p.name for p in sorted((root / "skills").glob("*")) if (p / "SKILL.md").exists()]
     trigger_data = (
         json.loads((root / "evals" / "trigger-evals.json").read_text(encoding="utf-8"))
@@ -853,9 +983,14 @@ def skill_trigger_audit(root: Path) -> dict[str, Any]:
         if routed == case["should_not_trigger"]:
             negative_failures.append({"id": case.get("id"), "forbidden": case["should_not_trigger"], "actual": routed})
     return {
+        "checked": True,
         "unused_skills": unused,
-        "overlapping_skills": [],
-        "poor_trigger_descriptions": [],
+        # Named, not omitted: both need judgement about what two skills are *for*,
+        # which no amount of reading their front matter establishes.
+        "checks_skipped": [
+            {"check": "overlapping_skills", "reason": "requires judgement about scope overlap"},
+            {"check": "poor_trigger_descriptions", "reason": "requires judgement about description quality"},
+        ],
         "prompt_case_count": len(prompt_cases),
         "trigger_failures": failures,
         "negative_trigger_failures": negative_failures,
@@ -1214,9 +1349,26 @@ def _ask_user_question_bridge(c: ToolContext) -> Any:
     return hook_output("PreToolUse", permissionDecision="allow")
 
 
+def _capture_question_answers(c: ToolContext) -> Any:
+    # The other half. Without this the bridge above records questions that can
+    # never be closed, and the intake hook re-surfaces them as open on every
+    # subsequent turn - which it did, for questions answered minutes earlier.
+    return capture_given_answers(c.root, c.payload)
+
+
 def _open_questions(c: ToolContext) -> Any:
     if c.args.answer:
-        return answer_question(c.root, c.args.id or c.args.question, c.args.answer, c.args.status)
+        # `--id` and `--question` are distinct targets. Collapsing them into one
+        # string is what forced `answer_question` to guess whether it had been
+        # handed an id or a fragment of text, which is where its ambiguity came from.
+        target = c.args.id or c.args.question
+        return answer_question(
+            c.root,
+            target,
+            c.args.answer,
+            c.args.status,
+            allow_answered=getattr(c.args, "allow_answered", False),
+        )
     if c.args.question:
         record_questions(c.root, [{"question": c.args.question, "kind": c.args.kind}])
     return sync_open_questions(c.root)
@@ -1267,6 +1419,7 @@ def _user_prompt_intake(c: ToolContext) -> Any:
         "skill_route": skill_router(c.prompt),
         "council": {**council_trigger_detector(c.prompt), "enforcement": council_enforcement(c.root)},
         "linear": linear_pending(c.root),
+        "tracker": tracker_status(c.root) if workspace_exists(c.root) else {"checked": False, "enabled": False},
         "questions": sync_open_questions(c.root) if workspace_exists(c.root) else {"open_count": 0},
         # Answers "which initiative is this?" every turn. The resolver existed
         # but was never called from anywhere, so nothing ever noticed a pivot.
@@ -1276,8 +1429,29 @@ def _user_prompt_intake(c: ToolContext) -> Any:
     # persist the intake log once the workspace exists. A UserPromptSubmit hook
     # must never create .project just because the user typed a prompt.
     if workspace_exists(c.root):
-        write_json(engineering_root(c.root) / "reports" / "intake" / f"{now_iso().replace(':', '-')}.json", result)
+        intake = engineering_root(c.root) / "reports" / "intake"
+        write_json(intake / f"{now_iso().replace(':', '-')}.json", result)
+        _prune_intake(intake)
     return result
+
+
+# One file per turn, forever, is how this directory reached seventy-eight entries
+# with nothing ever reading the old ones. Same defect as the hook-event log JOS-7
+# was filed for, in a second location. The recent ones are the useful ones.
+INTAKE_KEEP = 40
+
+
+def _prune_intake(directory: Path, keep: int = INTAKE_KEEP) -> int:
+    """Keep the newest `keep` timestamped intake reports, drop the rest."""
+    reports = sorted(path for path in directory.glob("*.json") if path.name != "prompt-outcomes.jsonl")
+    removed = 0
+    for path in reports[: max(0, len(reports) - keep)]:
+        try:
+            path.unlink()
+            removed += 1
+        except OSError:
+            continue
+    return removed
 
 
 # The dispatch table. Keys are tool names as invoked by the dispatcher scripts in
@@ -1303,6 +1477,7 @@ TOOLS: dict[str, Callable[[ToolContext], Any]] = {
     "user-prompt-intake": _user_prompt_intake,
     # questions and initiative identity
     "ask-user-question-bridge": _ask_user_question_bridge,
+    "capture-question-answers": _capture_question_answers,
     "open-questions": _open_questions,
     "active-initiative-resolver": lambda c: active_initiative_resolver(c.root, c.prompt),
     "initiative-drift-detector": lambda c: initiative_drift_detector(c.root, c.prompt, classify_user_intent(c.prompt)),
@@ -1334,6 +1509,9 @@ TOOLS: dict[str, Callable[[ToolContext], Any]] = {
     "artifact-completeness-score": lambda c: artifact_completeness_score(c.root, c.files),
     "artifact-consistency-check": lambda c: artifact_consistency_check(c.root),
     "naming-consistency-check": lambda c: naming_consistency_check(c.root),
+    "reference-check": lambda c: reference_check_scoped(c.root, c.path, c.files),
+    "claim-check": lambda c: claim_check(c.root, [Path(p) for p in c.files]),
+    "tracker-status": lambda c: tracker_status(c.root),
     "diagram-sync-check": lambda c: diagram_sync_check(c.root),
     "example-output-validator": lambda c: example_output_validator(c.root),
     "stop-completion-check": _stop_completion_check,
@@ -1481,6 +1659,22 @@ def render_hook(tool_name: str, result: dict[str, Any]) -> dict[str, Any] | None
                 f"{linear['pending']} task(s) are not yet tracked in Linear. "
                 "Run `eng-life linear-sync plan` to push them."
             )
+        # Surfaced here rather than on Stop for the reason recorded below: Stop
+        # output re-invokes the model. This fires every turn, which is strictly
+        # more visible than once at the end.
+        tracker = result.get("tracker") or {}
+        if tracker.get("enabled") and tracker.get("queued") and tracker.get("enforcement") != "off":
+            listed = "".join(f"\n  - {title}" for title in tracker.get("titles", []))
+            note = (
+                f" ({tracker['below_min_severity']} more below the {tracker['min_severity']} threshold)"
+                if tracker.get("below_min_severity")
+                else ""
+            )
+            messages.append(
+                f"{tracker['queued']} surfaced issue(s) are not yet filed in "
+                f"{tracker.get('provider')}{note}. Run `eng-life tracker plan` and execute the "
+                f"operations it returns.{listed}"
+            )
         # Surfaced every turn so a question the human never answered stops being
         # forgotten the moment the turn that raised it ends.
         questions = result.get("questions") or {}
@@ -1494,6 +1688,21 @@ def render_hook(tool_name: str, result: dict[str, Any]) -> dict[str, Any] | None
                 f"({questions.get('path', 'questions/open-questions.json')}):{listed}"
             )
         return hook_additional_context("UserPromptSubmit", "\n".join(messages))
+    if tool_name in {"reference-check", "claim-check"}:
+        # Silent when the file is clean, so editing prose does not add a line of
+        # context to every turn. Errors name a thing that does not exist, so they
+        # are worth interrupting for; path warnings are advisory and stay quiet
+        # here, surfacing only in the full-repo run.
+        errors = result.get("errors") or []
+        if not errors:
+            return None
+        listed = "".join(
+            f"\n  - {item['path']}:{item['line']} `{item['token']}` — {item['message']}" for item in errors
+        )
+        return hook_additional_context(
+            "PostToolUse",
+            f"{len(errors)} reference(s) in this file name something that does not exist:{listed}",
+        )
     if tool_name == "post-edit-hygiene":
         return hook_additional_context(
             "PostToolBatch",
@@ -1536,6 +1745,11 @@ def cli_main(tool_name: str | None = None) -> int:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--id", default="", help="Open-question id to resolve")
     parser.add_argument("--answer", default="", help="Answer text that resolves an open question")
+    parser.add_argument(
+        "--allow-answered",
+        action="store_true",
+        help="Permit overwriting a question that is already answered (refused by default)",
+    )
     parser.add_argument("--kind", default="general", choices=list(QUESTION_KINDS))
     parser.add_argument("--status", default="answered", choices=list(QUESTION_STATUSES))
     parser.add_argument(
@@ -1549,7 +1763,7 @@ def cli_main(tool_name: str | None = None) -> int:
     # conversation as context and re-invokes the model, producing an endless
     # "(Standing by.)" loop. Other events keep the raw-result fallback so the
     # PreToolUse guards still report their allow/block decisions.
-    silent_when_empty = {"stop-completion-check"}
+    silent_when_empty = {"stop-completion-check", "reference-check", "claim-check"}
     result = run_tool(name, args)
     if args.hook:
         hook = render_hook(name, result)
@@ -1559,6 +1773,11 @@ def cli_main(tool_name: str | None = None) -> int:
             emit_json(result)
     else:
         emit_json(result)
+    # A non-zero exit is what lets a tool gate a commit from `.pre-commit-config.yaml`.
+    # Opt-in per result rather than per tool: only a checker that has decided its
+    # findings are worth blocking on sets the key, so every existing tool is unaffected.
+    if isinstance(result, dict) and result.get("blocking"):
+        return 1
     return 0
 
 

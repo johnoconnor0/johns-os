@@ -40,6 +40,30 @@ def provenance() -> str:
     return f"engineering-lifecycle v{version} running from {display}{note}."
 
 
+def _surfacing_directive(root: Path) -> str:
+    """A short standing instruction, only when issue filing is switched on.
+
+    Gated on enablement so a project that has not configured a tracker stays quiet,
+    and kept to three lines because a long standing directive costs tokens in every
+    session and gets skimmed in all of them.
+    """
+    try:
+        from tracker import load_settings
+
+        settings = load_settings(root)
+    except Exception:
+        return ""
+    if not settings.get("enabled"):
+        return ""
+    return (
+        "\n\nIssue filing is on for this project "
+        f"(provider: {settings.get('provider')}). When you notice something in this "
+        "project that is wrong, contradictory, silently failing or degraded, record "
+        'it: `python "${CLAUDE_PLUGIN_ROOT}/scripts/surface-issue.py" record --title "..."`. '
+        "See references/issue-surfacing-policy.md for what counts."
+    )
+
+
 def main() -> int:
     root = repo_root()
     workspace = engineering_root(root)
@@ -51,6 +75,7 @@ def main() -> int:
             f"{provenance()}\n"
             f"Engineering Lifecycle workspace detected at {display_ws}. "
             "Lifecycle hooks and skills are active for this repo; proceed."
+            f"{_surfacing_directive(root)}"
         )
     else:
         message = (

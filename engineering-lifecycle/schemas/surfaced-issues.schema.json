@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/engineering-lifecycle/surfaced-issues.schema.json",
+  "title": "Surfaced Issues Queue",
+  "description": "Issues surfaced during a session, waiting to be filed. Modelled on the open-questions store: stable hash ids so re-detection updates rather than duplicates, and a filed item stays filed across rescans.",
+  "type": "object",
+  "required": ["generated_at", "issues"],
+  "properties": {
+    "generated_at": { "type": "string" },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "kind", "severity", "status", "origin"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^si-" },
+          "title": { "type": "string", "minLength": 1 },
+          "body": { "type": "string" },
+          "kind": { "type": "string", "enum": ["anomaly", "bug", "risk", "question", "task", "improvement"] },
+          "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+          "status": {
+            "type": "string",
+            "enum": ["queued", "filing", "filed", "resolved", "dismissed", "duplicate"]
+          },
+          "origin": { "type": "string", "enum": ["detector", "ledger", "model", "human", "skill"] },
+          "rule": { "type": "string" },
+          "paths": { "type": "array", "items": { "type": "string" } },
+          "initiative_id": { "type": ["string", "null"] },
+          "detected_at": { "type": "string" },
+          "last_seen_at": { "type": "string" },
+          "occurrences": { "type": "integer", "minimum": 1 },
+          "hash": { "type": "string" },
+          "note": { "type": "string" },
+          "source": { "type": "string" },
+          "external": {
+            "type": ["object", "null"],
+            "description": "Set by reconcile once the issue exists in the tracker.",
+            "properties": {
+              "provider": { "type": "string" },
+              "id": { "type": ["string", "number", "null"] },
+              "url": { "type": ["string", "null"] },
+              "identifier": { "type": ["string", "number", "null"] },
+              "synced_at": { "type": "string" }
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

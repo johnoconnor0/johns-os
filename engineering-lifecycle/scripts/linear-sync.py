@@ -20,7 +20,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from eng_common import engineering_root, now_iso, read_json, repo_root, write_json
+from eng_common import engineering_root, now_iso, read_json, relpath, repo_root, write_json
 
 PRIORITY_MAP = {"urgent": 1, "high": 2, "normal": 3, "low": 4}
 HASH_FIELDS = ("title", "status", "owner", "priority", "description")
@@ -49,13 +49,33 @@ def _items(data, list_key: str) -> list[dict]:
     return []
 
 
+def _task_files(root: Path, pattern: str, canonical: str) -> list[Path]:
+    """Every matching task file in the workspace, canonical location last.
+
+    This used to read only `ledger/action-items.json`, while `sync-ledger.py` built
+    the dashboard from `*action-items*.json` found anywhere under the workspace. A
+    skill writing its action items into an initiative folder therefore showed up on
+    the dashboard and was invisible to tracker sync forever. Canonical last so that
+    on an id collision the ledger copy - the one `reconcile` writes back to - wins.
+    """
+    workspace = engineering_root(root)
+    if not workspace.is_dir():
+        return []
+    found = sorted(path for path in workspace.rglob(pattern) if path.is_file())
+    target = _ledger(root) / canonical
+    ordered = [path for path in found if path != target]
+    if target.is_file():
+        ordered.append(target)
+    return ordered
+
+
 def load_tasks(root: Path) -> list[dict]:
-    ledger = _ledger(root)
-    tasks: list[dict] = []
-    for item in _items(read_json(ledger / "action-items.json", {}), "action_items"):
-        tasks.append(
-            {
-                "key": f"action:{item.get('id')}",
+    tasks: dict[str, dict] = {}
+    for path in _task_files(root, "*action-items*.json", "action-items.json"):
+        for item in _items(read_json(path, {}), "action_items"):
+            key = f"action:{item.get('id')}"
+            tasks[key] = {
+                "key": key,
                 "kind": "action",
                 "id": item.get("id"),
                 "title": item.get("title") or "Untitled",
@@ -64,12 +84,13 @@ def load_tasks(root: Path) -> list[dict]:
                 "priority": item.get("priority", "normal"),
                 "description": item.get("description") or item.get("source", ""),
                 "linear_id": item.get("linear_id"),
+                "source_file": relpath(path, root),
             }
-        )
-    for item in _items(read_json(ledger / "human-tasks.json", {}), "human_tasks"):
-        tasks.append(
-            {
-                "key": f"human:{item.get('id')}",
+    for path in _task_files(root, "*human-tasks*.json", "human-tasks.json"):
+        for item in _items(read_json(path, {}), "human_tasks"):
+            key = f"human:{item.get('id')}"
+            tasks[key] = {
+                "key": key,
                 "kind": "human",
                 "id": item.get("id"),
                 "title": item.get("task") or "Untitled",
@@ -78,9 +99,9 @@ def load_tasks(root: Path) -> list[dict]:
                 "priority": "normal",
                 "description": item.get("reason", ""),
                 "linear_id": item.get("linear_id"),
+                "source_file": relpath(path, root),
             }
-        )
-    return tasks
+    return [tasks[key] for key in sorted(tasks)]
 
 
 def task_hash(task: dict) -> str:
@@ -131,19 +152,28 @@ def build_plan(root: Path) -> dict:
 
 
 def _update_ledger_item(root: Path, kind: str, item_id: str, updates: dict) -> bool:
-    fname = "action-items.json" if kind == "action" else "human-tasks.json"
+    """Write back to whichever file holds the item, not only the canonical one.
+
+    `load_tasks` now reads task files from anywhere under the workspace, so writing
+    the returned issue id to a fixed path would leave every non-canonical item
+    permanently unreconciled - and therefore re-created on the next plan.
+    """
+    canonical = "action-items.json" if kind == "action" else "human-tasks.json"
+    pattern = "*action-items*.json" if kind == "action" else "*human-tasks*.json"
     list_key = "action_items" if kind == "action" else "human_tasks"
-    path = _ledger(root) / fname
-    data = read_json(path, None)
-    if not isinstance(data, dict) or list_key not in data:
-        return False
     changed = False
-    for item in data[list_key]:
-        if item.get("id") == item_id:
-            item.update(updates)
+    for path in _task_files(root, pattern, canonical):
+        data = read_json(path, None)
+        if not isinstance(data, dict) or list_key not in data:
+            continue
+        touched = False
+        for item in data[list_key]:
+            if item.get("id") == item_id:
+                item.update(updates)
+                touched = True
+        if touched:
+            write_json(path, data)
             changed = True
-    if changed:
-        write_json(path, data)
     return changed
 
 

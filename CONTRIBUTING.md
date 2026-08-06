@@ -60,8 +60,8 @@ The repository validation command covers marketplace records, plugin/schema vali
 
 1. Keep each active plugin self-contained under its own directory.
 2. Update both `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json` when metadata or behavior affects both platforms.
-3. Update `.claude-plugin/marketplace.json`, `marketplace.json`, `.agents/plugins/marketplace.json`, and `marketplace/plugins/` when adding or releasing an active plugin.
-4. Keep `_unreleased/` out of active marketplace manifests until the plugin has been reviewed and intentionally promoted.
+3. Update `.claude-plugin/marketplace.json`, `marketplace.json`, `.agents/plugins/marketplace.json`, and `marketplace/plugins/` when **adding or removing** a plugin. For a version bump, use `python scripts/johns-os-marketplace.py bump-version <id> <version>` and edit nothing by hand — the two Codex manifests carry no version field, so touching them is how drift gets introduced rather than avoided.
+4. Descriptions are **not** kept in step by any tooling. When one changes, change it in `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` and `.claude-plugin/marketplace.json` together; `claim-check` reports it when they disagree.
 5. Add or update tests and plugin documentation with the change.
 
 ## Documentation and safety

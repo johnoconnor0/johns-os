@@ -1,0 +1,29 @@
+{
+  "$comment": "Issue filing for this project. The one hand-authored, committed file under .project/.engineering/ - everything else in that tree is regenerable. mcp_server is left null on purpose: the server segment of an MCP tool name is specific to how THIS machine connected, so a committed value would be wrong on anyone else's. reconcile writes the working one into the gitignored tracker/dispatch-state.json, or set ISSUE_TRACKER_MCP_SERVER. Env vars override everything here per session: ISSUE_MANAGEMENT_SOFTWARE, ENABLE_ISSUE_FILING, LINEAR_PROJECT_ID, LINEAR_PROJECT_URL, LINEAR_TEAM_ID, ISSUE_TRACKER_MCP_SERVER.",
+  "issue_filing": {
+    "capture": {
+      "detector": true,
+      "ledger": true,
+      "model": true
+    },
+    "dispatch": {
+      "max_per_turn": 10,
+      "min_severity": "medium",
+      "on_stop": true,
+      "on_user_prompt": true
+    },
+    "enabled": true,
+    "enforcement": "remind",
+    "labels": [
+      "eng-lifecycle"
+    ],
+    "mcp_server": null,
+    "provider": "linear",
+    "scope": {
+      "project": null,
+      "team": "John OS"
+    },
+    "status_map": {}
+  },
+  "version": 1
+}

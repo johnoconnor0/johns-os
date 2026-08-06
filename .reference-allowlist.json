@@ -1,0 +1,6 @@
+{
+  "$comment": "Class-level exclusions for scripts/references.py. At the repository root on purpose: .project/ is gitignored, so an allow-list living there would silence the checker on one machine and nowhere else. Every entry needs a matching reasons key.",
+  "tokens": [],
+  "prefixes": [],
+  "reasons": {}
+}

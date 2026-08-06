@@ -81,6 +81,15 @@
     ],
     "PostToolUse": [
       {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/capture-question-answers.py\""
+          }
+        ]
+      },
+      {
         "matcher": "Edit|MultiEdit|Write",
         "hooks": [
           {
@@ -102,6 +111,14 @@
           {
             "type": "command",
             "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/scripts/schema-drift-check.py\" --hook"
+          },
+          {
+            "type": "command",
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/scripts/reference-check.py\" --hook"
+          },
+          {
+            "type": "command",
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/project-anomaly-check.py\""
           }
         ]
       }
@@ -136,6 +153,14 @@
           {
             "type": "command",
             "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/sync-ledger.py\" --stop"
+          },
+          {
+            "type": "command",
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/project-anomaly-check.py\" --stop"
+          },
+          {
+            "type": "command",
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/tracker-dispatch.py\""
           }
         ]
       }

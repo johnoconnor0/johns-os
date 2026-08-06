@@ -10,6 +10,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Documentation references are checked against reality, and a dead one fails the build.** `validate-repo.py` and a `pre-commit` hook now run `engineering-lifecycle/scripts/reference-check.py`, which resolves every plugin, skill, agent, command and marketplace name written in prose against the set that exists. It was built after an audit found this marketplace's own tooling routing work to four plugins it does not ship and telling the reader to install them from somewhere else. Only the closed-namespace classes block; path references are advisory, because the difference in precision between the two was measured rather than assumed.
+- Plugin descriptions are compared across `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` and `.claude-plugin/marketplace.json`. `bump-version` keeps versions in lockstep across five files and never touched descriptions, and nothing else compared them, so a plugin could be described three different ways with no complaint. All three plugins were.
+
+### Changed
+
+- `scripts/validate-repo.py` **discovers** test directories rather than naming two. `ai-utilities` could have added a suite and CI would never have run it — a hardcoded list of the things to check being the same defect the reference checker and the audit rebuild both exist to fix.
+- The ruff pin in `.pre-commit-config.yaml` matches `requirements-dev.txt`. They had drifted, so pre-commit and a local `ruff check` were two different binaries and a commit could pass one while failing the other.
+- `.gitignore` adopts `.project/.engineering/settings.json` while keeping the rest of that tree ignored. Git cannot re-include a file under an excluded directory, so this needs the full four-line stanza rather than one negation.
+
 - Added `cli/`, an `npx johns-os` installer for the marketplace with `install`, `list`, `update`, `init` and `doctor`. It is dependency-free because it runs via `npx` on machines that have nothing set up. `doctor` reports where an installed plugin is actually executing from and how far behind the local checkout it is — a gap that is otherwise invisible, since plugins run from a version-pinned copy under `~/.claude/plugins/cache/` and a git-sourced marketplace fetches from the remote rather than from disk.
 - Added `scripts/check-cli-version.py`, run by `validate-repo.py`, so the installer can never advertise a marketplace version that does not exist.
 - Added `.github/workflows/e2e.yml`, an opt-in Playwright job covering the generated project dashboard. It is separate from CI because it is the only thing in the repository needing Node and a browser download.

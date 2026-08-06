@@ -1,6 +1,14 @@
-# Supabase Backend Audit Guide
+# Postgres and Supabase Audit Guide
 
-This reference document provides the detailed checklist for Phase 10 (Supabase Backend Audit) and Phase 11 (Frontend ↔ Backend Alignment). Read this before starting those phases.
+The detailed checklist for the `data-layer` and `interface-alignment` families, **when
+the detected dialect is Postgres**. Load it then and not otherwise: on MySQL there is
+no row level security to warn about, and on SQLite the database is a file with no
+users, roles or grants at all.
+
+This document was the reference for two of the eleven fixed phases the audit used to
+run on every repository regardless of stack. The content is good; applying it
+unconditionally was the problem. [`check-families.md`](check-families.md) explains
+the gating.
 
 ## Table of Contents
 

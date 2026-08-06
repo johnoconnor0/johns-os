@@ -22,5 +22,5 @@ Paste the actual results or explain any unavailable check.
 ## Public-repo safety
 
 - [ ] No secrets, credentials, private URLs, or personal data added.
-- [ ] `_unreleased/` and `.project/` remain outside the public source boundary.
+- [ ] `.project/` remains outside the public source boundary.
 - [ ] Marketplace versions, names, paths, and manifests are consistent.

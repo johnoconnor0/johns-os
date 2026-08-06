@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/engineering-lifecycle/tracker-state.schema.json",
+  "title": "Tracker Dispatch State",
+  "description": "Per-machine record of what has been filed and which MCP server name worked. .project/ is gitignored, so this does not travel: cross-machine deduplication relies on the jos-issue identity marker embedded in each filed issue's description, not on this file.",
+  "type": "object",
+  "properties": {
+    "provider": { "type": "string" },
+    "mcp_server": {
+      "type": ["string", "null"],
+      "description": "The server segment that resolved to a real tool. Written by reconcile so the guess happens once per repository rather than once per run."
+    },
+    "last_block_token": {
+      "type": ["string", "null"],
+      "description": "Hash of the pending queue at the moment the Stop dispatcher last blocked. The primary brake: the same queue produces the same token, so a second block cannot fire for it."
+    },
+    "last_block_at": { "type": ["string", "null"] },
+    "blocks_this_session": { "type": "integer", "minimum": 0 },
+    "session_id": { "type": ["string", "null"] },
+    "last_dispatch_at": { "type": ["string", "null"] },
+    "filed_count": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/engineering-lifecycle/tracker-settings.schema.json",
+  "title": "Engineering Lifecycle Project Settings",
+  "description": "The one hand-authored, committed file under .project/.engineering/. Everything else in that tree is regenerable.",
+  "type": "object",
+  "required": ["version", "issue_filing"],
+  "properties": {
+    "$comment": { "type": "string" },
+    "version": { "type": "integer", "minimum": 1 },
+    "issue_filing": {
+      "type": "object",
+      "required": ["enabled", "provider"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "provider": {
+          "type": "string",
+          "description": "A tracker in scripts/trackers.py, or one declared as a JSON overlay under tracker/providers/."
+        },
+        "enforcement": {
+          "type": "string",
+          "enum": ["off", "remind", "ask"],
+          "description": "How loudly unfiled issues are surfaced. 'ask' is a louder reminder, not a block: the only hook event that can force a decision is PreToolUse, and gating unrelated edits on an unfiled issue would be user-hostile."
+        },
+        "dispatch": {
+          "type": "object",
+          "properties": {
+            "on_stop": { "type": "boolean" },
+            "on_user_prompt": { "type": "boolean" },
+            "min_severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+            "max_per_turn": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "capture": {
+          "type": "object",
+          "properties": {
+            "detector": { "type": "boolean" },
+            "ledger": { "type": "boolean" },
+            "model": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "mcp_server": {
+          "type": ["string", "null"],
+          "description": "The server segment of the MCP tool name. A workspace connector gets a UUID; a .mcp.json declaration gets its declared name. Written back by reconcile once one is known to work."
+        },
+        "scope": {
+          "type": "object",
+          "description": "Where issues are filed. Keys are provider-specific: team/project/cycle for Linear, owner/repo for GitHub. project_url is decoded into an id.",
+          "additionalProperties": { "type": ["string", "null"] }
+        },
+        "status_map": {
+          "type": "object",
+          "description": "Local status -> the tracker's workflow state name.",
+          "additionalProperties": { "type": "string" }
+        },
+        "assignee_map": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "labels": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

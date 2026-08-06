@@ -10,6 +10,39 @@ effort: high
 
 ultrathink
 
+## Trigger
+
+Use when the user asks to make, rebuild, improve, validate or package a Claude Code
+skill or plugin, or to turn a workflow they keep repeating into one.
+
+## When To Use
+
+- Building a new skill or plugin from a described purpose.
+- Rebuilding an existing one that has drifted from what it claims to do.
+- Scaffolding a plugin's agents, hooks, MCP or LSP integrations.
+- Packaging an uploadable extension with validation notes.
+
+Do **not** use it to vet somebody else's extension before installing — that is
+`[[skill-review]]`.
+
+## Outputs
+
+- The skill or plugin directory itself, with `SKILL.md`, `references/`,
+  `templates/`, `examples/` and `evals/` as the type requires.
+- A packaged archive when one was asked for.
+- Validation output from `scripts/check_claude_extension.py`.
+
+## Safety Constraints
+
+- **Never write outside the extension being built** without saying so first.
+- **Never invent a plugin, skill, agent or command name in generated content.**
+  Every cross-reference must resolve in the marketplace it will ship in — this is
+  the exact defect that put four fictional plugin routes into this repository's own
+  audit tooling.
+- **Never leave a generated placeholder in a shipped artefact.** An eval suite with
+  `<replace-with-...>` in it has never been run and cannot be.
+- **Never claim a validation passed that was not run.**
+
 ## User Context
 
 The user request is:

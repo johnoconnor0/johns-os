@@ -1,9 +1,14 @@
 # Plan Completion Audit — Reference Index
 
-Dense material for this skill lives under `references/`. Each file covers one cluster of phases and is loaded only when that cluster runs.
+Dense material lives under `references/`. Each file is loaded only when it applies,
+which is the same principle the check families themselves run on.
 
-| File | Covers | Phases |
+| File | Covers | Loaded when |
 |---|---|---|
-| [`references/supabase-audit-guide.md`](references/supabase-audit-guide.md) | Full Supabase backend audit checklist — schema, RPC, RLS, triggers, storage, edge functions — plus the frontend ↔ backend alignment matrix. | Phase 10, Phase 11 |
+| [`references/check-families.md`](references/check-families.md) | The family registry, the five outcomes, the two predicates, the stack ladder, and how to add a family. | Always worth reading before changing the audit. |
+| [`references/postgres-audit-guide.md`](references/postgres-audit-guide.md) | Schema, functions, row level security, triggers, storage and edge functions — the Postgres and Supabase specifics. | The `data-layer` family applies **and** the detected dialect is Postgres. |
 
-When new phases need dense reference content, extract it to a new file under `references/` and add a row above. Keeping `SKILL.md` under 350 lines is the load-bearing reason this index exists.
+There is deliberately no per-phase index any more. Phases were a fixed list; families
+are chosen per repository, so the reference that matters is the registry.
+
+When a new family needs dense reference content, add a file here and a row above.

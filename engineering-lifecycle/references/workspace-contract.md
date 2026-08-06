@@ -57,13 +57,34 @@ is dry-run by default and preserves git history where git is available.
   ledger/
   council/
   questions/                    # open-questions.json + a readable digest
+  context/                      # stack.json, written every SessionStart
+  tracker/                      # surfaced-issues.json + digest, dispatch state
   dashboards/
   reports/
+  settings.json                 # the one committed, hand-authored file here
 ```
 
 `design-system/` and `prototype/` were written by skills for some time before
-being recorded here. `maintenance/` and `handoffs/` are declared but currently
-have no producer.
+being recorded here.
+
+**Declared with no producer**, as of this writing: `maintenance/`, `handoffs/`,
+`council/` and `lifecycle/`. The first two were already recorded as such; the other
+two were not, and an empty directory that nothing writes reads as a feature that
+exists. `scripts/project-anomaly-check.py` compares this list against disk in both
+directions, so a declaration that stops matching reality now surfaces rather than
+waiting to be noticed.
+
+**`settings.json` is the exception to everything else in this tree.** It is
+hand-authored, belongs to the project rather than to a session, and is committed.
+Because git cannot re-include a file whose parent directory is excluded, adopting it
+needs the whole stanza rather than a single negation:
+
+```gitignore
+/.project/*
+!/.project/.engineering/
+/.project/.engineering/*
+!/.project/.engineering/settings.json
+```
 
 ## Rules
 

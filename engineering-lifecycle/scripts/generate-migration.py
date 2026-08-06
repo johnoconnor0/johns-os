@@ -9,7 +9,7 @@ than defaulted. On engines that do not have it, emitting those statements would
 produce a migration that does not run — so the adapter decides.
 
 Ported from the shelved `database-design` plugin
-(`_unreleased/engineering/database-design/skills/business-data-model-designer/`)
+(ported from a shelved database-design plugin)
 so `create-data-model` can emit real DDL instead of prose. That plugin assumed
 Supabase; the assumption came across with the port and is what the dialect
 adapters remove.

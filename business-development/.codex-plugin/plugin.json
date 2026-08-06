@@ -1,7 +1,7 @@
 {
   "name": "business-development",
   "version": "0.2.0",
-  "description": "Generate and update professional Service Outline documents from a modular template, adapted per service type, with an interview-first workflow.",
+  "description": "Generate and update professional Service Outline documents from a modular, service-type-aware template, with an interview-first workflow.",
   "author": {
     "name": "John O'Connor",
     "email": "john@weblifter.com.au"

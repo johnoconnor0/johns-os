@@ -30,10 +30,10 @@ Totals — {{n}} findings total. CRITICAL: {{n}} | WARNING: {{n}} | SUGGESTION: 
 
 ## Plan (triage from Phase 2)
 
-| Order | ID | Strategy | Sub-skill (if applicable) | Depends on |
-|-------|----|----------|---------------------------|------------|
+| Order | ID | Strategy | Delegated to (if applicable) | Depends on |
+|-------|----|----------|------------------------------|------------|
 | 1 | F00X | AUTO | — | — |
-| 2 | F00Y | SUB-SKILL | `database-design:rls-policy-designer` | F00X |
+| 2 | F00Y | DELEGATE | `engineering-lifecycle:database-engineer` | F00X |
 
 Severity filter applied: `{{severity_filter}}`. Phase filter: `{{phase_filter}}`.
 
@@ -44,7 +44,7 @@ Severity filter applied: `{{severity_filter}}`. Phase filter: `{{phase_filter}}`
 | Order | ID | Strategy | Files touched | Verifier | Duration | Outcome |
 |-------|----|----------|---------------|----------|----------|---------|
 | 1 | F00X | AUTO | `path/a.ts`, `path/b.ts` | `npx tsc --noEmit` clean | 0:42 | ✓ closed |
-| 2 | F00Y | SUB-SKILL | (deferred to sub-skill) | sub-skill reports OK | 1:18 | ✓ closed |
+| 2 | F00Y | DELEGATE | (deferred to delegate) | delegate reports OK | 1:18 | ✓ closed |
 | 3 | F00Z | PLAN-FIRST | `path/c.ts`, `path/d.ts` | `npm test` 12/12 pass | 4:55 | ✓ closed |
 | 4 | F00A | HUMAN-INPUT | — | — | — | user chose "defer" |
 
@@ -55,7 +55,7 @@ Severity filter applied: `{{severity_filter}}`. Phase filter: `{{phase_filter}}`
 | ID | Severity | Reason | Action required to resume |
 |----|----------|--------|---------------------------|
 | F00A | SUGGESTION | User chose defer | Re-invoke `/ai-utilities:audit-resolve --severity=suggestion` when ready |
-| F00B | WARNING | Sub-skill `<plugin:skill>` not installed | `/plugin install <plugin>@web-lifter-plugins` then re-run |
+| F00B | WARNING | Delegation target `<plugin:skill>` is not installed | Install that plugin from the marketplace this session is running, then re-run |
 
 ---
 

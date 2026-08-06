@@ -36,9 +36,15 @@ the reviewed artifacts.
 /ai-utilities:plan-completion-audit [path-to-project-root-or-plan-file]
 ```
 
-Audit a project plan against the actual implementation — verifying code, types, security, and
-Supabase backend alignment. Each run writes one timestamped report to
-`.project/audits/plan-completion-audit/<YYYY-MM-DD_HHMMSS>.md`.
+Audit a plan against what was actually built. Checks are derived from the plan and the detected
+stack rather than run from a fixed list: thirteen families each decide separately whether they
+are relevant here and whether they can run, and report one of five outcomes — `passed`,
+`failed`, `not-applicable`, `not-checked`, `errored` — where the last three must state a reason.
+On a repository with no database there is no data-layer section at all, rather than a phase of
+ceremony ending in N/A.
+
+Each run writes one directory, `.project/audits/plan-completion-audit/<YYYY-MM-DD_HHMMSS>/`,
+containing `findings.json` and `report.md`.
 
 ### `audit-resolver`
 
@@ -46,8 +52,10 @@ Supabase backend alignment. Each run writes one timestamped report to
 /ai-utilities:audit-resolver [audit-report-path-or-flags]
 ```
 
-Read a `plan-completion-audit` report, plan the fixes, and execute them with safety gates per
-finding. Verifies between batches and can optionally re-run the audit to confirm closure.
+Read a `plan-completion-audit` run's `findings.json`, plan the fixes, and execute them with
+safety gates per finding. Verifies between batches and can optionally re-run the audit to
+confirm closure. It reports which check families never ran before it reports anything else:
+closing every finding while three families were skipped does not mean the repository is clean.
 Outputs are written under `.project/audits/audit-resolver/<date>/`.
 
 ## Command
@@ -80,6 +88,21 @@ ai-utilities/
   hooks/
     hooks.json                    # SessionStart + Pre/PostToolUse wiring
     scripts/                      # welcome, pre-write-skill, post-edit-skill, post-edit-script
+  schemas/findings.schema.json
+  scripts/                        # the audit engine, shared by both audit skills
+    audit_common.py               #   paths, JSON IO, front matter
+    stack_probe.py                #   which stack this is, via a three-rung ladder
+    plan_parse.py                 #   the extractor cascade
+    families.py                   #   the check-family registry
+    checks.py                     #   what each family runs
+    findings.py                   #   the findings document and its two hashes
+    run-audit.py                  #   the deterministic half of an audit
+    render_report.py              #   findings.json -> report.md
+    resolver.py                   #   discovery, filtering, legacy conversion
+    verify.py                     #   whatever this repo uses to verify itself
+  tests/
+    test_audit.py
+    fixtures/tiny-python-repo/    # the functional eval's target
   skills/
     skill-creator/
     skill-review/
@@ -93,10 +116,19 @@ ai-utilities/
 python ../scripts/johns-os-marketplace.py validate
 ```
 
+```bash
+python -m unittest discover -s ai-utilities/tests
+```
+
 ## Runtime boundaries
 
-- No bundled MCP servers. `plan-completion-audit` uses the user's connected Supabase MCP (or
-  the `supabase` CLI) when auditing a Supabase backend; other skills use local tools.
+- No bundled MCP servers, and no assumed database. `plan-completion-audit` gates its data-layer
+  family on the detected dialect and uses whatever introspection that dialect has; on a
+  repository with no database the family reports `not-applicable` with a reason.
+- The audit scripts are standalone. `ai-utilities` installs independently of
+  `engineering-lifecycle`, so stack detection and the reference checker are reached through a
+  ladder — use the real one when it is installed, say so honestly when it is not — rather than
+  by importing across plugins, which fails from the plugin cache.
 - `skill-review` is read-only against the artifacts it reviews.
 - `skill-creator` and `audit-resolver` write files and run local tooling (package managers,
   type checkers, `git`, `zip`). `audit-resolver` applies code fixes only behind explicit

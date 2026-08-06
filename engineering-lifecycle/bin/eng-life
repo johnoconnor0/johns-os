@@ -44,6 +44,19 @@ def main() -> int:
     linear_parser.add_argument("action", choices=["plan", "pending", "reconcile", "apply-pull"])
     linear_parser.add_argument("--results")
     linear_parser.add_argument("--updates")
+    # The provider-agnostic successor to linear-sync. That one stays for anyone
+    # scripting against it; this is the one that works with a tracker other than
+    # Linear, and with no tracker at all.
+    tracker_parser = sub.add_parser("tracker")
+    tracker_parser.add_argument(
+        "action",
+        choices=["init", "status", "pending", "list", "plan", "record", "reconcile", "resolve", "on", "off"],
+    )
+    tracker_parser.add_argument("--results")
+    tracker_parser.add_argument("--title")
+    tracker_parser.add_argument("--severity")
+    tracker_parser.add_argument("--id")
+    tracker_parser.add_argument("--include-ledger", action="store_true")
     args = parser.parse_args()
     root = target_root(args.root)
     if args.command == "init":
@@ -70,6 +83,19 @@ def main() -> int:
         if args.updates:
             extra += ["--updates", args.updates]
         return run("scripts/linear-sync.py", root, args.action, *extra)
+    if args.command == "tracker":
+        extra = []
+        for flag, value in (
+            ("--results", args.results),
+            ("--title", args.title),
+            ("--severity", args.severity),
+            ("--id", args.id),
+        ):
+            if value:
+                extra += [flag, value]
+        if args.include_ledger:
+            extra.append("--include-ledger")
+        return run("scripts/surface-issue.py", root, args.action, *extra)
     return 1
 
 

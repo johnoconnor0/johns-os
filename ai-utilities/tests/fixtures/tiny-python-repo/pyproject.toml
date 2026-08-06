@@ -1,0 +1,4 @@
+# Fixture project file, so the audit's stack gating sees a real Python repository.
+[project]
+name = "tiny-python-repo"
+version = "0.0.0"

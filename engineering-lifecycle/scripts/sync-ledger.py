@@ -13,6 +13,7 @@ from pathlib import Path
 from eng_common import (
     docs_root,
     engineering_root,
+    item_from_text,
     now_iso,
     parse_front_matter,
     read_json,
@@ -102,6 +103,47 @@ def artifact_record(path: Path, root: Path) -> dict:
     return record
 
 
+def collect_action_items(root: Path, base: Path, docs: Path) -> list[dict]:
+    """Emitted action items, plus the checklist lines nothing ever emitted.
+
+    Regression (JOS-33). Open questions were *scraped* from artifacts, while action
+    items were only read back from `*action-items*.json` - and the only thing that
+    writes that file is `emit-action-items.py`, which a human has to invoke with a
+    plan path. Nothing ran it over council syntheses, reviews, or release plans.
+
+    The result on a real project: 768 artifacts indexed, 121 open questions found,
+    257 unchecked boxes across 37 files, and `open_action_item_count: 0`. The ledger
+    was not failing to reconcile so much as never being given the items in the first
+    place, and it reported that absence as "no outstanding work".
+
+    Emitted items win on id collision, because those are the ones carrying a tracker
+    id that `reconcile` wrote back.
+    """
+    scraped: dict[str, dict] = {}
+    for tree in (base, docs):
+        if not tree.is_dir():
+            continue
+        for path in sorted(tree.rglob("*.md")):
+            if "ledger" in path.relative_to(tree).parts:
+                continue
+            try:
+                lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            except OSError:
+                continue
+            for index, line in enumerate(lines, start=1):
+                item = item_from_text(line, rel(path, root), index)
+                if item and item["status"] != "done":
+                    scraped[item["id"]] = item
+
+    emitted: dict[str, dict] = {}
+    for path in sorted(base.rglob("*action-items*.json")):
+        data = read_json(path, {})
+        for item in data if isinstance(data, list) else data.get("action_items", []):
+            if isinstance(item, dict) and item.get("id"):
+                emitted[str(item["id"])] = item
+    return sorted({**scraped, **emitted}.values(), key=lambda item: str(item.get("id", "")))
+
+
 def collect_ledger(root: Path) -> dict:
     base = engineering_root(root)
     base.mkdir(parents=True, exist_ok=True)
@@ -117,10 +159,7 @@ def collect_ledger(root: Path) -> dict:
     docs = docs_root(root)
     if docs.is_dir():
         artifacts.extend(artifact_record(path, root) for path in sorted(docs.rglob("*")) if path.is_file())
-    action_items: list[dict] = []
-    for path in sorted(base.rglob("*action-items*.json")):
-        data = read_json(path, {})
-        action_items.extend(data if isinstance(data, list) else data.get("action_items", []))
+    action_items = collect_action_items(root, base, docs)
     # Human tasks are the "human" half of AI + human tracking. The schema/template
     # existed but nothing collected them until now.
     human_tasks: list[dict] = []
