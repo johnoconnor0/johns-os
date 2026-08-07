@@ -41,6 +41,26 @@ def main() -> int:
         if name in cli_source and name not in declared:
             errors.append(f"cli/index.js references {name}, which the marketplace does not declare")
 
+    # `files` cannot reference a parent directory, so a manifest read from `..`
+    # is simply absent in the published tarball. That is how the CLI came to ship
+    # with its hardcoded fallback as the only live code path, printing stale
+    # descriptions and no versions - invisible to a smoke test run from the
+    # checkout, where the parent file does exist.
+    files = cli.get("files") or []
+    scripts = cli.get("scripts") or {}
+    if "marketplace.json" in cli_source:
+        if "marketplace.json" not in files:
+            errors.append("cli/index.js reads marketplace.json, but cli/package.json `files` does not ship it")
+        if "marketplace.json" not in scripts.get("prepack", ""):
+            errors.append("cli/package.json needs a prepack script copying the marketplace manifest into cli/")
+
+    # `import.meta.dirname` landed in Node 20.11. Using it under a lower declared
+    # floor makes every command throw TypeError on a version the package claims
+    # to support - and CI pinning a newer Node is exactly why that went unnoticed.
+    engines = str((cli.get("engines") or {}).get("node", ""))
+    if "import.meta.dirname" in cli_source and ">=20.11" not in engines:
+        errors.append(f"cli/index.js uses import.meta.dirname (Node >=20.11) but engines.node is {engines!r}")
+
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1
