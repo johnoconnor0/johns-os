@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.10.2 - 2026-08-07
+
+### Fixed
+
+- **The PreToolUse guards failed open on a large tool call.** `load_hook_payload` read stdin with a single bounded read, so a payload past the buffer was truncated, failed to parse, and a bare `except` turned it into `{}`. An empty payload means the guards saw no command at all — so a call large enough to overflow the buffer was not inspected and was allowed. Reads now run to EOF; a parse that succeeds but yields a non-object is rejected rather than handed on to consumers that will call `.get` on it; and an unreadable payload is recorded on the result so `render_hook` can fail the guard **closed** — `deny` for the two that deny, `ask` for the three that escalate. A guard that never saw the call has not cleared it. This cannot fire on an ordinary turn: an absent payload stays readable-and-empty.
+- **One truncated generated file disabled hooks for the rest of the session.** Four sites used the raising `read_json` where the safe variant belongs. Seven PostToolUse hooks write that tree concurrently and a session can end mid-write, so a half-written file is a state these readers genuinely reach — and reaching it killed them on every subsequent turn, including the `UserPromptSubmit` hook. Same class: `tool_input` was unwrapped with `or {}`, which only replaces a *falsey* value, so a string `tool_input` reached `.get` and raised.
+- **Validation covered one plugin of three.** `eng-life validate` invoked `validate-plugin.py` without `--all`, which is the only gate on validating the other marketplace plugins — so `ai-utilities` and `business-development` had never been checked at all, including whether their hook targets resolve. `ai-utilities` is the only plugin whose hooks shell out. Both pass as-is; the flag is not decorative, since removing a hook target now fails the run where it previously did not.
+- **The artifact validator reported failures against the plugin's own output.** It requires six front-matter keys on every `.md` under the workspace, and three digests the plugin itself writes have none.
+- **`sync-ledger --stop` discarded the child's stdout and stderr** while returning its exit code, so a crash in the ledger sync left no traceback anywhere.
+- **Marketplace `source` and `path` had no containment anchor.** The traversal case is the obvious one; the sharper one is that `Path.__truediv__` discards the left operand when the right is absolute, so an absolute `source` never involved the repository root and `is_dir()` cheerfully confirmed it. Anchored at every site that resolves a declared path, including the one that staged *writes* during a version bump.
+- **`bin/*` is pinned to LF.** These four scripts carry `#!/usr/bin/env python3` and go on PATH when the plugin installs, so a CRLF checkout makes the kernel hunt for an interpreter named `python3\r`. Every other executable here was pinned by extension; these have none, and `bin/eng-life` had already drifted.
+
+### Added
+
+- **249 tests across five suites**, covering the four surfaces that had none: cross-surface marketplace contracts, the published CLI, the safety guards adversarially, and every hook event replayed at the process boundary. They found the defects above. CI grows a macOS leg, which caught two `ai-utilities` bugs on its first run. See `tests/README.md` for what is deliberately not covered and why.
+- **34 guard defects are recorded as failing-by-design tests**, each verified against the live implementation — denylist bypasses including `--no-preserve-root`, encoded payloads, PowerShell flag-order dependence, and false positives that fire on ordinary work. They are documented rather than fixed: rewriting those patterns is a security decision, not a consequence of adding tests.
+
 ## 0.10.1 - 2026-08-07
 
 ### Fixed
