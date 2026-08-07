@@ -10,3 +10,11 @@
 *.yaml text eol=lf
 *.yml  text eol=lf
 *.txt  text eol=lf
+
+# Anything a Linux container reads. A CRLF checkout on Windows reaches container
+# bash as `$'\r': command not found` followed by a syntax error, which reads like
+# a broken script rather than a broken checkout - and the seeds are bind-mounted
+# straight from the working tree, so git's normalisation is the only thing
+# standing between a Windows clone and a confusing failure.
+*.sql       text eol=lf
+Dockerfile* text eol=lf
