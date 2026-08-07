@@ -1,7 +1,8 @@
 # Live database introspection checks
 
-Runs `scripts/schema-introspect.sh` against real MySQL, SQL Server and PostgreSQL
-servers in containers.
+Runs `scripts/schema-introspect.sh` against all five advertised dialects: MySQL,
+SQL Server, PostgreSQL and MongoDB in containers, plus a real SQLite file built in
+the harness.
 
 ```bash
 cd engineering-lifecycle/tests/integration
@@ -47,12 +48,21 @@ script is wrong" from "the test rig is wrong". Start there when something fails.
    fallback was the original bug.
 2. The seeded tables appear. A script that connects and returns nothing would
    pass (1) alone.
-3. The seeded foreign key appears. The marker is per-dialect on purpose: MySQL's
-   query returns table/column/referenced-column and never the constraint name;
-   SQL Server's returns `fk.name` and never the column. One shared assertion
-   cannot hold for both.
+3. The digest's **second** section is populated. Only that proves the follow-up
+   query ran at all, and the marker is per-dialect because the shapes genuinely
+   differ: MySQL returns table/column/referenced-column and never the constraint
+   name, SQL Server returns `fk.name` and never the column, SQLite's `.schema`
+   prints the DDL verbatim, and MongoDB has no foreign keys at all — it reports
+   collections and indexes. Forcing one shape onto five would mean asserting
+   whatever the shared subset happened to be, which is close to asserting nothing.
 4. The `**Source:**` line names the client that actually ran.
 5. No fixture password reaches the digest.
+
+For MongoDB there is one extra check: the collections query prints each
+collection's first document's field names, and an *empty* collection reports a
+bare name — which would satisfy a name-only assertion while proving the document
+read never happened. The index marker is a non-default index for the same reason;
+every collection has `_id_`.
 
 Plus the inverse: an unreachable server must still say so rather than invent a
 schema, and the script must have LF line endings — a CRLF working copy reaches

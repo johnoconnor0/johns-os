@@ -247,7 +247,7 @@ case "$DIALECT" in
       echo
       echo "## Schema"
       echo '```sql'
-      sqlite3 "${DSN#file:}" ".schema" 2>/dev/null || echo "Could not open database — provide schema manually."
+      sqlite3 "${DSN#file:}" ".schema" 2>"$CLIENT_ERR" || explain_failure "Could not open database — provide schema manually."
       echo '```'
       echo
       echo "## Tables"
