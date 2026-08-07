@@ -19,6 +19,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -53,6 +55,76 @@ PRUNE_DIRS = frozenset(
 )
 
 AUDIT_DIR = Path(".project") / "audits" / "plan-completion-audit"
+
+# Kept from check-secrets.sh, which had the one genuinely reusable part of the six.
+# Lives here rather than in checks.py because it has two jobs now: finding
+# credentials committed to a repository, and keeping credentials that appear in a
+# build's own output from being written into an audit artifact.
+SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (
+    ("aws-access-key", re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS access key id"),
+    ("private-key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----"), "private key block"),
+    ("stripe-secret", re.compile(r"\bsk_live_[0-9a-zA-Z]{16,}"), "live Stripe secret key"),
+    ("slack-token", re.compile(r"\bxox[abprs]-[0-9A-Za-z-]{10,}"), "Slack token"),
+    ("github-token", re.compile(r"\bgh[pousr]_[0-9A-Za-z]{30,}"), "GitHub token"),
+    ("anthropic-key", re.compile(r"\bsk-ant-[0-9A-Za-z-]{20,}"), "Anthropic API key"),
+    ("openai-key", re.compile(r"\bsk-[0-9A-Za-z]{32,}\b"), "OpenAI-style API key"),
+    (
+        "generic-assignment",
+        re.compile(r"(?i)\b(?:api_?key|secret|password|token)\s*[:=]\s*[\"'][^\"'\s]{12,}[\"']"),
+        "hardcoded credential",
+    ),
+)
+
+# Connection strings carry the password in the middle of a URL, which none of the
+# patterns above match. An audit that runs a project's own commands sees these in
+# stderr constantly - a failing migration prints its DSN.
+_DSN = re.compile(r"\b([a-z][a-z0-9+.-]*://)([^\s:@/]+):([^\s@/]+)@")
+
+
+def scrub_secrets(text: str) -> str:
+    """Credentials in captured command output replaced with a marker.
+
+    Audit findings persist command output verbatim into `findings.json` and
+    `report.md`, which then get committed or pasted into an issue. A failing
+    `npm audit`, migration or test run routinely echoes a token or a DSN, so the
+    scrub happens on the way in rather than being left to whoever reads it.
+    """
+    if not text:
+        return text
+    scrubbed = _DSN.sub(r"\1\2:<redacted>@", text)
+    for _rule, pattern, label in SECRET_PATTERNS:
+        scrubbed = pattern.sub(f"<{label} redacted>", scrubbed)
+    return scrubbed
+
+
+# shlex keeps these as ordinary tokens, so they have to be rejected by name.
+_SHELL_OPERATORS = frozenset({"&&", "||", "|", "&", ";", ">", ">>", "<", "<<"})
+
+
+def command_argv(command: str) -> list[str] | None:
+    """A command string as an argv list with its executable resolved, or None.
+
+    None means the string needs a shell to mean what it says. Refusing those is
+    the point rather than a limitation: this plugin runs commands chosen by the
+    repository under audit, and pipes, redirection and `&&` are how such a string
+    stops being a test run. A project that genuinely needs a shell can put the
+    pipeline in a script and declare the script.
+
+    `shutil.which` is what makes `shell=False` work on Windows, where npm, npx and
+    yarn are `.CMD` shims that CreateProcess will not find by bare name.
+    """
+    if any(char in command for char in "|<>&;`$\n\r"):
+        return None
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return None
+    if not argv or any(token in _SHELL_OPERATORS for token in argv):
+        return None
+    resolved = shutil.which(argv[0])
+    if resolved is None:
+        return None
+    return [resolved, *argv[1:]]
 
 
 def now_iso() -> str:

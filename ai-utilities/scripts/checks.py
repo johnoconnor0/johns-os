@@ -30,7 +30,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from audit_common import relpath, scan_files
+from audit_common import SECRET_PATTERNS, command_argv, relpath, scan_files, scrub_secrets
 from families import Ctx
 from findings import Evidence, FamilyResult, Finding
 
@@ -78,21 +78,9 @@ _MARKER_DETECTOR = re.compile(
     r"(?:TODO|FIXME|HACK|XXX|PLACEHOLDER|STUB|INCOMPLETE|WIP)\b.*\b(?:FIXME|HACK|XXX|PLACEHOLDER|STUB|INCOMPLETE|WIP)\b.*\b(?:HACK|XXX|PLACEHOLDER|STUB|INCOMPLETE|WIP)\b"
 )
 
-# Kept from check-secrets.sh, which had the one genuinely reusable part of the six.
-_SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (
-    ("aws-access-key", re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS access key id"),
-    ("private-key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----"), "private key block"),
-    ("stripe-secret", re.compile(r"\bsk_live_[0-9a-zA-Z]{16,}"), "live Stripe secret key"),
-    ("slack-token", re.compile(r"\bxox[abprs]-[0-9A-Za-z-]{10,}"), "Slack token"),
-    ("github-token", re.compile(r"\bgh[pousr]_[0-9A-Za-z]{30,}"), "GitHub token"),
-    ("anthropic-key", re.compile(r"\bsk-ant-[0-9A-Za-z-]{20,}"), "Anthropic API key"),
-    ("openai-key", re.compile(r"\bsk-[0-9A-Za-z]{32,}\b"), "OpenAI-style API key"),
-    (
-        "generic-assignment",
-        re.compile(r"(?i)\b(?:api_?key|secret|password|token)\s*[:=]\s*[\"'][^\"'\s]{12,}[\"']"),
-        "hardcoded credential",
-    ),
-)
+# Shared with verify.py through audit_common: one list, two jobs - detecting
+# credentials in a repository, and keeping them out of the artifacts this writes.
+_SECRET_PATTERNS = SECRET_PATTERNS
 
 # A placeholder in an example file is the example. Only real source counts.
 _SECRET_SKIP_PARTS = frozenset({"examples", "templates", "fixtures", "tests", "test", "__tests__", "references"})
@@ -108,10 +96,11 @@ def _lines(command: str, root: Path, timeout: int = 60) -> list[str]:
     listing - it silently cut this repository's tracked files from several hundred
     to 117, and every scan downstream inherited the wrong file set.
     """
+    argv = command_argv(command)
+    if argv is None:
+        return []
     try:
-        proc = subprocess.run(
-            command, cwd=root, shell=True, text=True, capture_output=True, timeout=timeout, check=False
-        )
+        proc = subprocess.run(argv, cwd=root, text=True, capture_output=True, timeout=timeout, check=False)
     except (subprocess.TimeoutExpired, OSError):
         return []
     if proc.returncode != 0:
@@ -120,15 +109,31 @@ def _lines(command: str, root: Path, timeout: int = 60) -> list[str]:
 
 
 def _run(command: str, root: Path, timeout: int = 300) -> dict:
+    """Run one check command as an argv list, never through a shell.
+
+    `shell=True` here used to hand a string that can come from the audited
+    repository's own `stack.json` straight to the shell. Running a project's
+    declared checks is the point of this tool; letting a data file choose the
+    shell syntax around them is not.
+    """
+    argv = command_argv(command)
+    if argv is None:
+        return {
+            "cmd": command,
+            "exit": None,
+            "error": "needs a shell, or its executable is not on PATH",
+            "output": "",
+        }
     try:
-        proc = subprocess.run(
-            command, cwd=root, shell=True, text=True, capture_output=True, timeout=timeout, check=False
-        )
+        proc = subprocess.run(argv, cwd=root, text=True, capture_output=True, timeout=timeout, check=False)
     except subprocess.TimeoutExpired:
         return {"cmd": command, "exit": None, "timed_out": True, "output": ""}
     except OSError as exc:
         return {"cmd": command, "exit": None, "error": str(exc), "output": ""}
-    output = (proc.stdout or "") + (proc.stderr or "")
+    # Scrubbed here rather than at each use: this output is persisted verbatim
+    # into findings.json and report.md, and a failing build routinely prints a
+    # token or a DSN.
+    output = scrub_secrets((proc.stdout or "") + (proc.stderr or ""))
     return {"cmd": command, "exit": proc.returncode, "output": output[-8000:]}
 
 
@@ -181,6 +186,22 @@ def run_unfinished_markers(ctx: Ctx, family) -> FamilyResult:
 
 def run_command_family(ctx: Ctx, family, keys: tuple[str, ...], severity: str) -> FamilyResult:
     """Run whichever of `keys` the detected stack declares, and report each."""
+    declared = [ctx.commands[key] for key in keys if ctx.commands.get(key)]
+    if declared and ctx.commands_are_repo_supplied and not ctx.allow_untrusted_commands:
+        # Named rather than summarised: the point of stopping here is that somebody
+        # gets to look at the strings before they run.
+        return FamilyResult(
+            id=family.id,
+            title=family.title,
+            outcome="not-checked",
+            reason=(
+                "these commands came from the audited repository's own "
+                ".project/.engineering/context/stack.json, not from detection: "
+                + "; ".join(f"`{command}`" for command in declared)
+                + ". Re-run with --allow-untrusted-commands to execute them."
+            ),
+        )
+
     commands: list[dict] = []
     findings: list[Finding] = []
     for key in keys:
