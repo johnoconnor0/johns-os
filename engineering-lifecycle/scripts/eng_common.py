@@ -8,12 +8,13 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 from collections.abc import Iterable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 WORKSPACE = Path(".project") / ".engineering"
@@ -366,6 +367,13 @@ def read_json_lenient(path: Path, default: Any = None) -> Any:
         return default
 
 
+# Six tries over roughly a second in total. Long enough to outlast a sibling hook
+# reading a small JSON file, short enough that a genuinely stuck handle surfaces
+# as an error rather than a hang on the tool-use path.
+_REPLACE_ATTEMPTS = 6
+_REPLACE_BACKOFF = 0.05
+
+
 def _atomic_write(path: Path, payload: str) -> None:
     """Write through a sibling temp file and one `os.replace`.
 
@@ -378,6 +386,19 @@ def _atomic_write(path: Path, payload: str) -> None:
     The temp file is a sibling, not in the system temp directory: `os.replace` is
     only atomic within one filesystem. It is atomic on POSIX and on Windows, where
     it maps to MoveFileEx with MOVEFILE_REPLACE_EXISTING.
+
+    Atomic is not the same as tolerant, and the difference is the retry below.
+    MoveFileEx refuses outright while any other process holds the destination
+    open, raising `PermissionError`. No reader ever saw a torn file - the
+    atomicity claim holds - but the writer died with a traceback and exit 1, and
+    that is not hypothetical: `validate-generated-artifacts.py` and
+    `sync-ledger.py` are adjacent entries in the same PostToolUse group, so they
+    run together on every edit, and the validator opens every generated `.json`
+    in the tree the ledger is rewriting.
+
+    The retry is short and bounded because the contention is too: the other hook
+    is reading a small file, not holding a lock. If it genuinely will not clear,
+    raising is still the right end - a write that cannot land should be loud.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
@@ -387,7 +408,14 @@ def _atomic_write(path: Path, payload: str) -> None:
             f.write(payload)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path)
+        for attempt in range(_REPLACE_ATTEMPTS):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                if attempt == _REPLACE_ATTEMPTS - 1:
+                    raise
+                time.sleep(_REPLACE_BACKOFF * (attempt + 1))
         tmp = None  # type: ignore[assignment]
     finally:
         if tmp is not None:
@@ -796,10 +824,21 @@ def relpath(path: Path, root: Path | None = None) -> str:
 
 
 def classify_file_path(path: Path) -> str:
-    parts = {part.lower() for part in path.parts}
-    name = path.name.lower()
-    suffix = path.suffix.lower()
+    # Split on the normalised text, not on the platform's own parser.
+    # `path.name` for `..\..\.env` is `.env` on Windows and the whole undivided
+    # string on POSIX - where it fell through to `config` and printing it was
+    # allowed. The `generated` check below already normalised and the secret
+    # check above it did not, so the same string got two different readings out
+    # of one function. `wrong_initiative_write` normalises for this same reason.
+    #
+    # Reachable without anyone doing anything exotic: the harness passes whatever
+    # the tool call contained, and an agent working over a Windows checkout from
+    # WSL or a container supplies exactly this.
     text = str(path).replace("\\", "/").lower()
+    normalised = PurePosixPath(text)
+    parts = set(normalised.parts)
+    name = normalised.name
+    suffix = normalised.suffix
     # Two exemptions before the secret test, both for files that LOOK like the
     # thing they sit next to and are the opposite of it.
     #

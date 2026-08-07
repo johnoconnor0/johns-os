@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -582,7 +583,24 @@ def main() -> int:
     parser.add_argument("--root", default=None)
     args = parser.parse_args()
     root = resolve_cli_root(args.root).root
-    ledger = sync(root)
+    try:
+        ledger = sync(root)
+    except PermissionError as exc:
+        # A sibling hook still had the destination open when the rename came due.
+        # `_atomic_write` already retries; reaching here means the handle outlived
+        # the whole write, which on Windows is a refusal rather than a wait.
+        #
+        # Everything this script writes is derived - it is rebuilt in full from the
+        # artifacts on disk - so losing one pass costs a stale dashboard until the
+        # next edit. Raising instead costs the hook, and a PostToolUse hook that
+        # dies is one that silently stops running: the ledger simply never updates
+        # again and nothing says why. Recoverable beats loud when the loud version
+        # is also invisible.
+        #
+        # Loud on stderr, though, and never on stdout: the Stop wrapper relays
+        # stderr and must stay silent on stdout to avoid the standby loop.
+        print(f"ledger sync skipped: {exc.__class__.__name__} on a contended write ({exc})", file=sys.stderr)
+        return 0
     print(f"synced ledger with {ledger['summary']['artifact_count']} artifact(s)")
     return 0
 
