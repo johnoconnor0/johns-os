@@ -9,11 +9,22 @@ import os
 import shlex
 import subprocess
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
 
-from eng_common import engineering_root, now_iso, relpath, repo_root, slugify, write_json, write_text
+from eng_common import (
+    classify_file_path,
+    engineering_root,
+    now_iso,
+    redact_secrets,
+    relpath,
+    repo_root,
+    slugify,
+    write_json,
+    write_text,
+)
 from quality_tools import extract_open_questions, record_questions
 
 ROLES = [
@@ -55,8 +66,24 @@ def event(path: Path, name: str, payload: dict[str, Any]) -> None:
         f.write(json.dumps({"at": now_iso(), "event": name, "payload": payload}, sort_keys=True) + "\n")
 
 
-def context_files(contexts: list[str], root: Path) -> list[str]:
-    """Context paths, relative to the root where possible.
+# Trees that are never worth sending and frequently hold credentials.
+_EXCLUDED_PARTS = frozenset({".git", "node_modules", ".venv", "venv", "__pycache__", ".next", "dist", "build"})
+
+
+def is_sensitive_context(path: Path) -> bool:
+    """Whether this file must not be sent to a model provider.
+
+    Everything under `--context` ends up in a POST body. A directory argument used
+    to be expanded with rglob("*") and every file read, so `--context .` swept
+    `.env`, `.env.local`, key material and `.git/config` - which carries tokens -
+    off to Anthropic or OpenAI. `--max-context-chars` bounded how much of that
+    went, not whether.
+    """
+    return classify_file_path(path) == "secret-risk" or bool(_EXCLUDED_PARTS.intersection(path.parts))
+
+
+def context_files(contexts: list[str], root: Path) -> tuple[list[str], list[str]]:
+    """Context paths and the ones deliberately withheld, relative to the root.
 
     Uses relpath rather than Path.relative_to because the two can disagree about
     the same directory on Windows. A path handed in as an 8.3 short name
@@ -64,16 +91,22 @@ def context_files(contexts: list[str], root: Path) -> list[str]:
     (C:\\Users\\runneradmin\\...) are the same location, but relative_to compares
     the components literally and raises. relpath resolves both sides first and
     degrades to the absolute path instead of failing.
+
+    Exclusions are returned rather than dropped silently: a user who genuinely
+    meant to include a file needs to know it did not go.
     """
     files: list[str] = []
+    excluded: list[str] = []
     for ctx in contexts:
         path = Path(ctx)
         full = path if path.is_absolute() else root / path
-        if full.is_dir():
-            files.extend(relpath(p, root) for p in sorted(full.rglob("*")) if p.is_file())
-        elif full.exists():
-            files.append(relpath(full, root))
-    return sorted(set(files))
+        candidates = sorted(p for p in full.rglob("*") if p.is_file()) if full.is_dir() else []
+        if not full.is_dir() and full.exists():
+            candidates = [full]
+        for candidate in candidates:
+            target = excluded if is_sensitive_context(candidate) else files
+            target.append(relpath(candidate, root))
+    return sorted(set(files)), sorted(set(excluded))
 
 
 def context_snippets(root: Path, files: list[str], max_chars: int) -> list[dict[str, str]]:
@@ -85,7 +118,10 @@ def context_snippets(root: Path, files: list[str], max_chars: int) -> list[dict[
         path = root / item
         if not path.exists() or not path.is_file():
             continue
-        text = path.read_text(encoding="utf-8", errors="replace")
+        # Redacted before truncation, so a key split across the boundary cannot
+        # survive as a fragment. The file-level exclusion above is the first line;
+        # this catches a credential pasted into an ordinary source file.
+        text = redact_secrets(path.read_text(encoding="utf-8", errors="replace"))
         chunk = text[:remaining]
         snippets.append({"path": item, "content": chunk})
         remaining -= len(chunk)
@@ -376,11 +412,41 @@ def call_command_adapter(payload: dict[str, Any], timeout: int) -> str:
         timeout=timeout,
     )
     if proc.returncode != 0:
-        raise RuntimeError(proc.stderr.strip() or f"command adapter exited {proc.returncode}")
+        # Persisted verbatim into events.jsonl by the caller, and an adapter that
+        # logs its configuration on failure logs its credentials with it.
+        detail = redact_secrets(proc.stderr.strip())[:1000]
+        raise RuntimeError(detail or f"command adapter exited {proc.returncode}")
     return extract_text_response(proc.stdout)
 
 
+# The two providers this script knows how to speak to. The endpoint is
+# env-overridable, which is useful for a proxy and is also how repository context
+# and a live API key end up somewhere unintended.
+ALLOWED_ADAPTER_HOSTS = frozenset({"api.anthropic.com", "api.openai.com"})
+
+
+def check_endpoint(url: str) -> None:
+    """Refuse to send context and a credential somewhere unverified.
+
+    ENGINEERING_COUNCIL_ANTHROPIC_URL and _OPENAI_URL replace the endpoint
+    outright, and nothing checked the scheme or the host - so an http:// override
+    sent the whole prompt and the live x-api-key header in clear text to whatever
+    host was named. Overriding is still supported; it now has to be deliberate.
+    """
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https":
+        raise RuntimeError(f"refusing to send context and credentials over {parsed.scheme or 'no'} scheme: {url}")
+    host = (parsed.hostname or "").lower()
+    if host not in ALLOWED_ADAPTER_HOSTS and not os.environ.get("ENGINEERING_COUNCIL_ALLOW_ANY_HOST"):
+        raise RuntimeError(
+            f"adapter host {host!r} is not allowlisted. "
+            f"Expected one of {sorted(ALLOWED_ADAPTER_HOSTS)}; "
+            "set ENGINEERING_COUNCIL_ALLOW_ANY_HOST=1 to override deliberately."
+        )
+
+
 def post_json(url: str, headers: dict[str, str], payload: dict[str, Any], timeout: int) -> dict[str, Any]:
+    check_endpoint(url)
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -391,7 +457,9 @@ def post_json(url: str, headers: dict[str, str], payload: dict[str, Any], timeou
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
+        # Provider error bodies echo request fragments, and this message is
+        # persisted verbatim into council/<run>/events.jsonl by the caller.
+        body = redact_secrets(exc.read().decode("utf-8", errors="replace"))[:1000]
         raise RuntimeError(f"adapter HTTP {exc.code}: {body}") from exc
 
 
@@ -488,11 +556,12 @@ def ask(
     run_id = run_id or slugify(question)[:48]
     base = engineering_root(root) / "council" / run_id
     events = base / "events.jsonl"
-    files = context_files(contexts, root)
+    files, withheld = context_files(contexts, root)
     snippets = context_snippets(root, files, max_context_chars)
     input_payload = {
         "question": question,
         "context": files,
+        "context_withheld": withheld,
         "run_id": run_id,
         "created_at": now_iso(),
         "mode": mode,
@@ -503,6 +572,12 @@ def ask(
     event(
         events, "input_recorded", {"run_id": run_id, "mode": mode, "adapter": adapter if mode == "live-model" else None}
     )
+    if withheld:
+        # Named, not merely counted: a silently dropped file reads as an advisor
+        # ignoring evidence, and the user is the only one who can decide whether
+        # it genuinely needed to go.
+        event(events, "context_withheld", {"paths": withheld[:50], "count": len(withheld)})
+        print(f"council: withheld {len(withheld)} credential-bearing or vendored file(s) from the prompt")
 
     advisor_dir = base / "advisor-drafts"
     anonymized_dir = base / "anonymized-drafts"

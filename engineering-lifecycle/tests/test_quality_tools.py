@@ -2523,7 +2523,7 @@ const shown = formatDate('YYYY_MM_DD');
                 alias = Path(str(real) + os.sep + "." + os.sep)
 
             # Root spelled one way, the context file spelled the other.
-            files = council.context_files([str(real / "notes" / "context.md")], Path(alias))
+            files, _withheld = council.context_files([str(real / "notes" / "context.md")], Path(alias))
             self.assertEqual(len(files), 1, files)
             self.assertTrue(files[0].endswith("context.md"), files[0])
 
@@ -3016,6 +3016,92 @@ class BoundedScanTests(unittest.TestCase):
             root = Path(tmp)
             (root / "package.json").write_text(json.dumps({"workspaces": {"packages": ["libs/*"]}}), encoding="utf-8")
             self.assertEqual(quality_tools.workspace_globs(root), ["libs/*"])
+
+
+class CouncilEgressTests(unittest.TestCase):
+    """What leaves the machine when a council runs live.
+
+    This is the only outbound HTTP in the plugin, and it fires on ordinary correct
+    use - no attacker required for any of it.
+    """
+
+    def setUp(self) -> None:
+        import council  # noqa: PLC0415
+
+        self.council = council
+
+    def test_credential_bearing_files_are_withheld_from_the_prompt(self) -> None:
+        # A directory argument was expanded with rglob("*") and every file read,
+        # so `--context .` sent .env, key material and .git/config - which carries
+        # tokens - to a third-party API. max_context_chars bounded the volume, not
+        # the sensitivity.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "app.ts").write_text("export const x = 1\n", encoding="utf-8")
+            (root / ".env").write_text("DATABASE_URL=postgres://u:p@h/db\n", encoding="utf-8")
+            (root / ".env.local").write_text("STRIPE=sk_live_x\n", encoding="utf-8")
+            (root / "server.pem").write_text("-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n", "utf-8")
+            (root / ".git").mkdir()
+            (root / ".git" / "config").write_text("[remote]\n url = https://tok@github.com/x\n", encoding="utf-8")
+
+            files, withheld = self.council.context_files(["."], root)
+            self.assertEqual(files, ["src/app.ts"])
+            for name in (".env", ".env.local", "server.pem"):
+                self.assertIn(name, withheld)
+            self.assertFalse(any(item.startswith(".git/") for item in files), files)
+
+    def test_a_credential_pasted_into_ordinary_source_is_still_redacted(self) -> None:
+        # The file-level exclusion is the first line, not the only one.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "config.ts").write_text(
+                'const KEY = "sk-ant-abcdefghijklmnopqrstuvwxyz0123"\n'
+                'const DB = "postgres://admin:hunter2@db.internal/app"\n'
+                "API_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123\n",
+                encoding="utf-8",
+            )
+            snippets = self.council.context_snippets(root, ["config.ts"], 24000)
+            body = snippets[0]["content"]
+            for secret in ("sk-ant-abcdefghijklmnopqrstuvwxyz0123", "hunter2", "ghp_abcdefghijklmnopqrstuvwxyz0123"):
+                self.assertNotIn(secret, body)
+            # Structure survives, so the advisor can still read the file.
+            self.assertIn("const KEY", body)
+            self.assertIn("postgres://admin:", body)
+
+    def test_redaction_happens_before_truncation(self) -> None:
+        # Truncating first can cut a key in half and ship the half that is left.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            secret = "sk-ant-" + "a" * 40
+            (root / "a.ts").write_text("// " + "x" * 47 + '\nconst K = "' + secret + '"\n', encoding="utf-8")
+            # A budget that would have landed the cut inside the key, shipping the
+            # first thirteen characters of it, had truncation come first.
+            snippets = self.council.context_snippets(root, ["a.ts"], 75)
+            self.assertNotIn("sk-ant-", snippets[0]["content"])
+            self.assertIn("<redacted>", snippets[0]["content"])
+
+    def test_a_plaintext_or_unknown_endpoint_is_refused(self) -> None:
+        # Both endpoints are env-overridable and nothing checked either, so an
+        # http:// override sent the whole prompt AND the live x-api-key header in
+        # clear text to whatever host was named.
+        for url in ("http://api.anthropic.com/v1/messages", "https://attacker.example/v1/messages"):
+            with self.subTest(url=url), self.assertRaises(RuntimeError):
+                self.council.check_endpoint(url)
+        for url in ("https://api.anthropic.com/v1/messages", "https://api.openai.com/v1/chat/completions"):
+            with self.subTest(url=url):
+                self.council.check_endpoint(url)
+
+    def test_an_unknown_host_can_still_be_used_deliberately(self) -> None:
+        # A proxy is a legitimate reason to override. It just has to be a choice.
+        with unittest.mock.patch.dict(os.environ, {"ENGINEERING_COUNCIL_ALLOW_ANY_HOST": "1"}):
+            self.council.check_endpoint("https://proxy.internal/v1/messages")
+        # Plaintext stays refused even then.
+        with (
+            unittest.mock.patch.dict(os.environ, {"ENGINEERING_COUNCIL_ALLOW_ANY_HOST": "1"}),
+            self.assertRaises(RuntimeError),
+        ):
+            self.council.check_endpoint("http://proxy.internal/v1/messages")
 
 
 class DurableWriteTests(unittest.TestCase):

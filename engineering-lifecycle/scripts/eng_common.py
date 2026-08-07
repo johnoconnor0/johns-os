@@ -195,6 +195,45 @@ def write_text(path: Path, text: str) -> None:
     _atomic_write(path, text)
 
 
+# Credentials as they appear *in file contents*, for the case where a file is
+# about to leave the machine. Deliberately not quality_tools.SECRET_PATTERNS: that
+# list matches *mentions* of secret-bearing files in a shell command, which is what
+# a command guard wants and would mangle prose - "check your .env" is not a secret.
+_SECRET_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----[\s\S]*?-----END[^\n]*-----"),
+    re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}"),
+    re.compile(r"\bsk-[A-Za-z0-9]{32,}\b"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"),
+    # JWTs carry claims as well as authority, so they are worth removing whole.
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
+)
+# A password inside a connection string, which none of the token patterns match.
+_DSN_CREDENTIAL = re.compile(r"\b([a-z][a-z0-9+.-]*://)([^\s:@/]+):([^\s@/]+)@")
+# KEY=value lines, matched on the name. Over-redacting a URL costs an advisor a
+# little context; under-redacting one sends a credential to a third party.
+_SECRET_ASSIGNMENT = re.compile(
+    r"(?im)^(\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*"
+    r"(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?|DSN|_URI|_URL)S?)(\s*[=:]\s*)(\S.*)$"
+)
+
+
+def redact_secrets(text: str) -> str:
+    """Credential values replaced with a marker, for text about to leave the box.
+
+    Used on anything bound for a third-party API. Names and structure survive so
+    the text still reads; only the values go.
+    """
+    if not text:
+        return text
+    redacted = _DSN_CREDENTIAL.sub(r"\1\2:<redacted>@", text)
+    for pattern in _SECRET_VALUE_PATTERNS:
+        redacted = pattern.sub("<redacted>", redacted)
+    return _SECRET_ASSIGNMENT.sub(r"\1\2<redacted>", redacted)
+
+
 def hygiene_report_path(root: Path | None = None) -> Path:
     return engineering_root(root) / "hygiene" / "hygiene-report.json"
 
@@ -433,7 +472,14 @@ def classify_file_path(path: Path) -> str:
     name = path.name.lower()
     suffix = path.suffix.lower()
     text = str(path).replace("\\", "/").lower()
-    if name.startswith(".env") or suffix in {".pem", ".key", ".p12"} or "credential" in name or "secret" in name:
+    if (
+        name.startswith(".env")
+        or suffix in {".pem", ".key", ".p12", ".pfx", ".jks", ".keystore"}
+        or name in {".netrc", "_netrc", ".pgpass", ".htpasswd", ".npmrc", ".pypirc"}
+        or name.startswith(("id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"))
+        or "credential" in name
+        or "secret" in name
+    ):
         return "secret-risk"
     if any(part in parts for part in {"tests", "test", "__tests__", "spec", "specs"}) or name.endswith(
         (".test.ts", ".test.js", ".spec.ts", ".spec.js", "_test.py")
