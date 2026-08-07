@@ -11,11 +11,16 @@ if ! command -v jq &>/dev/null; then
   exit 0
 fi
 
-# Extract file path
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
+# Extract file path. `|| exit 0` because `set -e` otherwise kills this script
+# the moment jq cannot parse stdin, so a malformed payload became a silent
+# non-zero exit rather than the no-op it should be.
+FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null) || exit 0
 
-# Only check skill.md files
-if [[ ! "${FILE_PATH,,}" =~ skill\.md$ ]]; then
+# Only check skill.md files. Lowercased with `tr` rather than `${VAR,,}`: that
+# expansion is bash 4, and macOS ships bash 3.2, where it is a hard
+# "bad substitution" parse error - so this hook died on every macOS invocation.
+LOWER_PATH=$(printf '%s' "$FILE_PATH" | tr '[:upper:]' '[:lower:]')
+if [[ "$LOWER_PATH" != *skill.md ]]; then
   exit 0
 fi
 

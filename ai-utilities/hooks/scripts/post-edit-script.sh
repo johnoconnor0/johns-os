@@ -10,7 +10,9 @@ if ! command -v jq &>/dev/null; then
   exit 0
 fi
 
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
+# `|| exit 0`: `set -e` otherwise kills this script when jq cannot parse stdin,
+# so a malformed payload left the hook exiting non-zero with no message at all.
+FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null) || exit 0
 
 # Only check .py and .sh files in scripts/ directories
 if [[ ! "$FILE_PATH" =~ scripts/.*\.(py|sh)$ ]]; then
