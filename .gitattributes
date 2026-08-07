@@ -19,3 +19,15 @@
 *.sql       text eol=lf
 *.js        text eol=lf
 Dockerfile* text eol=lf
+
+# The CLI entry points. These carry `#!/usr/bin/env python3` and go on PATH when
+# the plugin is installed, so a CRLF checkout makes the kernel look for an
+# interpreter literally named `python3\r` and report `bad interpreter` - on the
+# one code path a user runs by hand. Every other executable here is pinned by
+# its extension; these four have none, so `text=auto` was the only thing holding
+# them, and it had already let `bin/eng-life` drift to CRLF in the working tree.
+#
+# `**/bin/*`, not `bin/*`: a gitattributes pattern containing a slash is anchored
+# to the directory holding the file, so `bin/*` would only ever match a top-level
+# `bin/` this repository does not have - it would look correct and match nothing.
+**/bin/*    text eol=lf
