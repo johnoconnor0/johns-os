@@ -203,7 +203,9 @@ class SchemaIntrospectionTests(unittest.TestCase):
     def test_sqlserver_actually_connects(self) -> None:
         # `sqlcmd -S "$DSN"` passed a URL where -S expects a bare server, with no
         # -U and no -d. Same silent failure.
-        self.assert_real_introspection(self.introspect(MSSQL_DSN, "sqlserver"), "sqlserver", "sqlcmd", "fk_books_author")
+        self.assert_real_introspection(
+            self.introspect(MSSQL_DSN, "sqlserver"), "sqlserver", "sqlcmd", "fk_books_author"
+        )
 
     # --- the shape of a failure --------------------------------------------
 
