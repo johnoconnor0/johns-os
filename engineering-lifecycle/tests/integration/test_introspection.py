@@ -50,6 +50,10 @@ COMPOSE = HERE / "compose.yaml"
 MYSQL_DSN = "mysql://fixture:fixture-pw@mysql:3306/introspect"
 POSTGRES_DSN = "postgres://fixture:fixture-pw@postgres:5432/introspect"
 MSSQL_DSN = "sqlserver://sa:Fixture-pw-1234@mssql:1433/introspect"
+# authSource=admin because the seeded root user lives in the admin database.
+MONGO_DSN = "mongodb://fixture:fixture-pw@mongo:27017/introspect?authSource=admin"
+# No container: SQLite is a file. The harness builds it in setUpClass.
+SQLITE_PATH = "/tmp/introspect.db"
 
 # Every password above, for the assertion that none of them reaches stdout.
 FIXTURE_PASSWORDS = ("fixture-pw", "Fixture-pw-1234")
@@ -109,6 +113,22 @@ class SchemaIntrospectionTests(unittest.TestCase):
             _compose("down", "-v")
             raise unittest.SkipTest(f"could not seed SQL Server:\n{seeded.stdout}\n{seeded.stderr}")
 
+        # SQLite is a file, not a server, so it is built inside the harness. It is
+        # in this suite anyway: "no server to get wrong" is a reason to expect it
+        # works, not evidence that it does.
+        built = _compose(
+            "exec",
+            "-T",
+            "harness",
+            "bash",
+            "-c",
+            f"rm -f {SQLITE_PATH} && sqlite3 {SQLITE_PATH} < /work/seed/sqlite.sql",
+            timeout=60,
+        )
+        if built.returncode != 0:
+            _compose("down", "-v")
+            raise unittest.SkipTest(f"could not build the SQLite fixture:\n{built.stdout}\n{built.stderr}")
+
     @classmethod
     def tearDownClass(cls) -> None:
         _compose("down", "-v", timeout=180)
@@ -137,12 +157,26 @@ class SchemaIntrospectionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, f"{dialect}: script exited {result.returncode}\n{result.stderr}")
         return result.stdout
 
-    def assert_real_introspection(self, digest: str, dialect: str, source: str, fk_marker: str) -> None:
+    def assert_real_introspection(
+        self,
+        digest: str,
+        dialect: str,
+        source: str,
+        objects: tuple[str, ...],
+        second_section: str,
+        second_marker: str,
+    ) -> None:
         """The five assertions, in the order they matter.
 
-        The first is the one that would have caught the original defect: both
-        broken dialects connected to nothing and fell into the manual branch,
-        which is indistinguishable from success unless something looks for it.
+        The first is the one that would have caught the original defect: two
+        dialects connected to nothing and fell into the manual branch, which is
+        indistinguishable from success unless something looks for it.
+
+        Everything after that is parameterised because the digests genuinely
+        differ. A relational engine reports tables and foreign keys; Mongo reports
+        collections and indexes and has neither of the other two. Forcing one
+        shape onto all five would mean asserting whatever the shared subset
+        happened to be, which is close to asserting nothing.
         """
         self.assertNotIn(
             "provide schema manually",
@@ -150,21 +184,17 @@ class SchemaIntrospectionTests(unittest.TestCase):
             f"{dialect}: fell into the manual-paste branch, i.e. it never connected.\n{digest}",
         )
         self.assertNotIn("Connection failed", digest, f"{dialect}: connection failed\n{digest}")
+        self.assertNotIn("Could not open database", digest, f"{dialect}: could not open\n{digest}")
 
-        # A script that connects but returns nothing would pass the check above.
-        self.assertIn("authors", digest, f"{dialect}: seeded table `authors` missing\n{digest}")
-        self.assertIn("books", digest, f"{dialect}: seeded table `books` missing\n{digest}")
+        # A script that connects but returns nothing would pass the checks above.
+        for name in objects:
+            self.assertIn(name, digest, f"{dialect}: seeded object `{name}` missing\n{digest}")
 
-        # The digest has a separate foreign-keys section; an empty one is a
-        # different failure from an empty tables section.
-        #
-        # The marker is per-dialect because the two queries genuinely return
-        # different shapes: MySQL selects table/column/referenced-column and never
-        # the constraint name, SQL Server selects `fk.name` and never the column.
-        # One shared assertion cannot hold for both, and forcing one would only
-        # mean testing whichever half happened to be asserted.
-        self.assertIn("Foreign keys", digest, f"{dialect}: no foreign-keys section\n{digest}")
-        self.assertIn(fk_marker, digest, f"{dialect}: the seeded foreign key is missing\n{digest}")
+        # The second section is a separate query. An empty one is a different
+        # failure from an empty first section, and only the second proves the
+        # follow-up query ran at all.
+        self.assertIn(second_section, digest, f"{dialect}: no `{second_section}` section\n{digest}")
+        self.assertIn(second_marker, digest, f"{dialect}: `{second_marker}` missing from the second section\n{digest}")
 
         self.assertIn(f"**Source:** {source}", digest, f"{dialect}: wrong source line\n{digest}")
 
@@ -198,14 +228,57 @@ class SchemaIntrospectionTests(unittest.TestCase):
     def test_mysql_actually_connects(self) -> None:
         # `mysql --table "$DSN"` passed a URL where the client expects a database
         # NAME, so this had never once connected.
-        self.assert_real_introspection(self.introspect(MYSQL_DSN, "mysql"), "mysql", "mysql", "author_id")
+        self.assert_real_introspection(
+            self.introspect(MYSQL_DSN, "mysql"), "mysql", "mysql", ("authors", "books"), "Foreign keys", "author_id"
+        )
 
     def test_sqlserver_actually_connects(self) -> None:
         # `sqlcmd -S "$DSN"` passed a URL where -S expects a bare server, with no
         # -U and no -d. Same silent failure.
         self.assert_real_introspection(
-            self.introspect(MSSQL_DSN, "sqlserver"), "sqlserver", "sqlcmd", "fk_books_author"
+            self.introspect(MSSQL_DSN, "sqlserver"),
+            "sqlserver",
+            "sqlcmd",
+            ("authors", "books"),
+            "Foreign keys",
+            "fk_books_author",
         )
+
+    # --- the two that were only ever believed to work ----------------------
+
+    def test_sqlite_actually_reads_the_file(self) -> None:
+        # Not among the broken pair, and never verified either. `.schema` prints
+        # the DDL verbatim, so unlike MySQL the constraint name IS assertable here.
+        self.assert_real_introspection(
+            self.introspect(f"file:{SQLITE_PATH}", "sqlite"),
+            "sqlite",
+            "sqlite3",
+            ("authors", "books"),
+            "Tables",
+            "fk_books_author",
+        )
+
+    def test_mongodb_actually_connects(self) -> None:
+        # A document store has no tables and no foreign keys, so the digest is
+        # collections and indexes instead. `idx_books_title` is a non-default
+        # index on purpose: every collection has `_id_`, so asserting on that
+        # would pass without the index query having run at all.
+        self.assert_real_introspection(
+            self.introspect(MONGO_DSN, "mongodb"),
+            "mongodb",
+            "mongosh",
+            ("authors", "books"),
+            "Indexes",
+            "idx_books_title",
+        )
+
+    def test_mongodb_reports_field_names_not_just_collection_names(self) -> None:
+        # The collections query prints each collection's first document's keys.
+        # An empty collection reports a bare name, which would satisfy a
+        # name-only assertion while proving the document read never happened.
+        digest = self.introspect(MONGO_DSN, "mongodb")
+        self.assertIn("name", digest, f"authors' field names are missing\n{digest}")
+        self.assertIn("title", digest, f"books' field names are missing\n{digest}")
 
     # --- the shape of a failure --------------------------------------------
 

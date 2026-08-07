@@ -59,6 +59,21 @@ services:
       retries: 30
       start_period: 30s
 
+  mongo:
+    image: mongo:7
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: fixture
+      MONGO_INITDB_ROOT_PASSWORD: fixture-pw
+      MONGO_INITDB_DATABASE: introspect
+    volumes:
+      - ./seed/mongo.js:/docker-entrypoint-initdb.d/seed.js:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand({ping:1})' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
   harness:
     build:
       context: .
@@ -67,6 +82,7 @@ services:
       mysql: { condition: service_healthy }
       postgres: { condition: service_healthy }
       mssql: { condition: service_healthy }
+      mongo: { condition: service_healthy }
     volumes:
       # The script under test, read-only: the harness must not be able to alter
       # what it is checking.

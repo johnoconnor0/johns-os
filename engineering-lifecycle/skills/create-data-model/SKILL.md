@@ -41,15 +41,15 @@ Supported: `postgresql` (and Supabase), `mysql` (and MariaDB), `sqlite`,
 `sqlserver`, `mongodb`. See `references/data-model-adapters.md` for what each one
 changes.
 
-**Live introspection is verified against real servers for postgresql, mysql and
-sqlserver** by `tests/integration/test_introspection.py`, which runs the script
-against those three in containers on every change to it. `mysql` and `sqlserver`
-had never worked before that suite existed — `mysql` was handed a URL where it
-expects a database *name*, `sqlcmd` a URL where `-S` expects a bare server with no
-`-U`/`-d` — and both failed into the silent "provide schema manually" branch.
+**All five dialects are verified against real engines** by
+`tests/integration/test_introspection.py`, which runs the script against MySQL,
+SQL Server, PostgreSQL and MongoDB in containers plus a real SQLite file, on every
+change to the introspection path.
 
-`sqlite` and `mongodb` are not yet in that suite. They are believed working and
-were not among the broken pair, but "believed" is the honest word.
+That suite exists because two of the five had never worked: `mysql` was handed a
+URL where the client expects a database *name*, `sqlcmd` a URL where `-S` expects
+a bare server with no `-U`/`-d`. Both failed into the silent "provide schema
+manually" branch, so the digest looked plausible and the exit code was 0.
 
 **SQL Server against a container or any self-signed certificate needs
 `MSSQL_TRUST_SERVER_CERT=1`.** sqlcmd 18+ defaults to `Encrypt=yes` and validates

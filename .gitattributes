@@ -17,4 +17,5 @@
 # straight from the working tree, so git's normalisation is the only thing
 # standing between a Windows clone and a confusing failure.
 *.sql       text eol=lf
+*.js        text eol=lf
 Dockerfile* text eol=lf
