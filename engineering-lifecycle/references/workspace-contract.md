@@ -53,7 +53,8 @@ is dry-run by default and preserves git history where git is available.
     maintenance/
   decisions/
   handoffs/
-  hygiene/
+  hygiene/                      # hygiene-report.json, rebuilt from parts/
+    parts/                      # one file per producing hook; see below
   ledger/
   council/
   questions/                    # open-questions.json + a readable digest
@@ -97,7 +98,13 @@ needs the whole stanza rather than a single negation:
 - Initiative work belongs under `initiatives/<initiative-id>/`.
 - Cross-initiative decisions belong under `decisions/`.
 - Agent handoffs belong under `handoffs/`.
-- Hygiene reports belong under `hygiene/`.
+- Hygiene reports belong under `hygiene/`. `hygiene-report.json` is a **derived
+  view**: each detecting hook writes its own section to `hygiene/parts/<producer>.json`
+  and the combined file is rebuilt from those. Several hooks fire concurrently on
+  one edit, and while they shared the combined file each did a read-modify-write,
+  so whichever finished second erased the other's section. Keys no producer owns
+  — `risks`, `docs_updates`, whatever `update-repo-hygiene` wrote — are preserved
+  across a rebuild. Write through `eng_common.write_hygiene_part`, never directly.
 - Action items and machine-readable state belong under `ledger/`.
 - Council runs belong under `council/<run-id>/`.
 - Questions the assistant needs a human to answer belong under `questions/`.

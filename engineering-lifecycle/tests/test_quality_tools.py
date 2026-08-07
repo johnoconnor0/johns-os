@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -3015,6 +3016,99 @@ class BoundedScanTests(unittest.TestCase):
             root = Path(tmp)
             (root / "package.json").write_text(json.dumps({"workspaces": {"packages": ["libs/*"]}}), encoding="utf-8")
             self.assertEqual(quality_tools.workspace_globs(root), ["libs/*"])
+
+
+class DurableWriteTests(unittest.TestCase):
+    """Every state write in this plugin used to truncate before writing.
+
+    Seven PostToolUse hooks fire on one edit, so "a reader arrives mid-write" and
+    "two writers overlap" are the normal case here, not the pathological one.
+    """
+
+    def test_a_write_never_leaves_a_truncated_file_behind(self) -> None:
+        # open(path, "w") truncates immediately, so anything that read the file
+        # between the truncate and the write saw an empty one. read_json_safe
+        # exists to swallow exactly that, which is evidence it happened.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "state.json"
+            eng_common.write_json(target, {"first": True})
+            original = target.read_text(encoding="utf-8")
+
+            real_replace = os.replace
+            observed: list[str] = []
+
+            def spy(src, dst):
+                # Whatever a concurrent reader would have seen at the last possible
+                # moment before the swap.
+                observed.append(Path(dst).read_text(encoding="utf-8"))
+                return real_replace(src, dst)
+
+            with unittest.mock.patch.object(os, "replace", spy):
+                eng_common.write_json(target, {"second": True})
+
+            self.assertEqual(observed, [original])
+            self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"second": True})
+
+    def test_a_failed_write_leaves_the_previous_content_intact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "state.json"
+            eng_common.write_json(target, {"good": 1})
+            with (
+                unittest.mock.patch.object(os, "replace", side_effect=OSError("boom")),
+                self.assertRaises(OSError),
+            ):
+                eng_common.write_json(target, {"bad": 2})
+            self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"good": 1})
+            # And no temp file is left lying around next to it.
+            self.assertEqual([p.name for p in Path(tmp).iterdir()], ["state.json"])
+
+    def test_two_hygiene_producers_no_longer_erase_each_other(self) -> None:
+        # detect-new-env-vars and suggest-gitignore-updates are adjacent entries in
+        # the same PostToolUse matcher group. Both read the whole report, replaced
+        # one key, and wrote it back - so the second to finish dropped the first's
+        # section. Atomic writes alone do not fix a read-modify-write.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".project" / ".engineering").mkdir(parents=True)
+            eng_common.write_hygiene_part(root, "env-vars", {"new_env_vars": [{"name": "API_KEY"}]})
+            eng_common.write_hygiene_part(root, "gitignore", {"gitignore_candidates": [{"pattern": "dist/"}]})
+
+            report = eng_common.read_json_safe(eng_common.hygiene_report_path(root))
+            self.assertEqual(report["new_env_vars"], [{"name": "API_KEY"}])
+            self.assertEqual(report["gitignore_candidates"], [{"pattern": "dist/"}])
+
+            # Re-running one producer must not disturb the other's section.
+            eng_common.write_hygiene_part(root, "env-vars", {"new_env_vars": []})
+            report = eng_common.read_json_safe(eng_common.hygiene_report_path(root))
+            self.assertEqual(report["new_env_vars"], [])
+            self.assertEqual(report["gitignore_candidates"], [{"pattern": "dist/"}])
+
+    def test_keys_no_producer_owns_survive_a_rebuild(self) -> None:
+        # `risks` and `docs_updates` are written by the update-repo-hygiene skill,
+        # not by any hook. A rebuild that dropped them would quietly delete the
+        # human half of the report.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".project" / ".engineering").mkdir(parents=True)
+            eng_common.write_json(
+                eng_common.hygiene_report_path(root),
+                {"risks": ["a secret is committed"], "docs_updates": [{"path": "README.md"}]},
+            )
+            eng_common.write_hygiene_part(root, "gitignore", {"gitignore_candidates": []})
+            report = eng_common.read_json_safe(eng_common.hygiene_report_path(root))
+            self.assertEqual(report["risks"], ["a secret is committed"])
+            self.assertEqual(report["docs_updates"], [{"path": "README.md"}])
+
+    def test_a_corrupt_fragment_degrades_one_section_not_the_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".project" / ".engineering").mkdir(parents=True)
+            eng_common.write_hygiene_part(root, "env-vars", {"new_env_vars": [{"name": "API_KEY"}]})
+            parts = eng_common.hygiene_report_path(root).parent / "parts"
+            (parts / "gitignore.json").write_text("{ not json", encoding="utf-8")
+            report = eng_common.rebuild_hygiene_report(root)
+            self.assertEqual(report["new_env_vars"], [{"name": "API_KEY"}])
+            self.assertNotIn("gitignore_candidates", report)
 
 
 if __name__ == "__main__":

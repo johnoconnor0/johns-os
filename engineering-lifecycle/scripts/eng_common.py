@@ -7,7 +7,9 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 from collections.abc import Iterable
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -156,16 +158,77 @@ def read_json_safe(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def write_json(path: Path, data: Any) -> None:
+def _atomic_write(path: Path, payload: str) -> None:
+    """Write through a sibling temp file and one `os.replace`.
+
+    Seven PostToolUse hooks fire on a single edit, several of them writing into
+    this tree at the same time, and `open(path, "w")` truncates before it writes
+    anything. A reader arriving mid-write - or a session ending mid-write - saw a
+    half-written or empty file. `read_json_safe` exists precisely to swallow that,
+    which is evidence it happened rather than a reason to keep causing it.
+
+    The temp file is a sibling, not in the system temp directory: `os.replace` is
+    only atomic within one filesystem. It is atomic on POSIX and on Windows, where
+    it maps to MoveFileEx with MOVEFILE_REPLACE_EXISTING.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="\n") as f:
-        json.dump(data, f, indent=2, sort_keys=True)
-        f.write("\n")
+    handle, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        tmp = None  # type: ignore[assignment]
+    finally:
+        if tmp is not None:
+            with suppress(OSError):
+                tmp.unlink()
+
+
+def write_json(path: Path, data: Any) -> None:
+    _atomic_write(path, json.dumps(data, indent=2, sort_keys=True) + "\n")
 
 
 def write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8", newline="\n")
+    _atomic_write(path, text)
+
+
+def hygiene_report_path(root: Path | None = None) -> Path:
+    return engineering_root(root) / "hygiene" / "hygiene-report.json"
+
+
+def write_hygiene_part(root: Path, producer: str, section: dict[str, Any]) -> dict[str, Any]:
+    """Record one producer's keys, then rebuild the combined hygiene report.
+
+    `detect-new-env-vars` and `suggest-gitignore-updates` are adjacent entries in
+    the same PostToolUse matcher group, so they run concurrently on every edit.
+    Both used to read the whole report, replace their own key, and write it back,
+    swallowing a parse failure with an empty dict - so whichever finished second
+    erased the other's section rather than failing.
+
+    Atomic writes alone do not fix that; the read-modify-write is the bug. Each
+    producer now owns a file under `hygiene/parts/`, and the report becomes a view
+    rebuilt from them. Two concurrent rebuilds both read every fragment from disk,
+    so they converge on the same content and a lost race costs nothing.
+
+    Keys no fragment claims - `risks`, `docs_updates`, whatever the
+    update-repo-hygiene skill wrote - are preserved, so the combined file stays
+    the single thing readers and the schema know about.
+    """
+    write_json(hygiene_report_path(root).parent / "parts" / f"{producer}.json", section)
+    return rebuild_hygiene_report(root)
+
+
+def rebuild_hygiene_report(root: Path | None = None) -> dict[str, Any]:
+    report = hygiene_report_path(root)
+    merged = read_json_safe(report)
+    for part in sorted((report.parent / "parts").glob("*.json")):
+        merged.update(read_json_safe(part))
+    merged.setdefault("risks", [])
+    write_json(report, merged)
+    return merged
 
 
 def emit_json(data: Any) -> None:

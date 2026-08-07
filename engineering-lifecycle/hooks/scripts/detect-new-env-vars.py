@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -12,12 +11,12 @@ from eng_common import (
     builds_env_names_dynamically,
     classify_file_path,
     configured_env_accessors,
-    engineering_root,
     env_example_keys,
     env_names_in,
     git,
     repo_root,
     workspace_exists,
+    write_hygiene_part,
 )
 
 # Scan the working directory (so a monorepo package's own .env.example is honored
@@ -26,7 +25,6 @@ from eng_common import (
 # happened to fire from.
 CWD = Path.cwd()
 ROOT = repo_root(CWD)
-REPORT = engineering_root(ROOT) / "hygiene" / "hygiene-report.json"
 # Detection lives in eng_common.env_names_in. This script used to keep its own
 # private regex, which is how it and env_example_sync came to disagree about the
 # same repository — a difference nobody could see without running both.
@@ -123,22 +121,20 @@ def main() -> int:
         {"name": name, "seen_in": rels(paths), "in_env_example": documented(name, paths)}
         for name, paths in sorted(found.items())
     ]
-    REPORT.parent.mkdir(parents=True, exist_ok=True)
-    data = {}
-    if REPORT.exists() and REPORT.stat().st_size:
-        try:
-            data = json.loads(REPORT.read_text(encoding="utf-8"))
-        except Exception:
-            data = {}
-    data["new_env_vars"] = missing
-    data["env_var_inventory"] = inventory
-    # Where the detector knows it cannot see: names assembled at runtime cannot be
-    # enumerated statically. Kept out of new_env_vars so it never inflates the
-    # actionable list, but recorded so "no missing keys" is not read as "no
-    # undocumented variables" for a file that builds its names dynamically.
-    data["dynamic_env_access"] = sorted(dynamic)
-    data.setdefault("risks", [])
-    REPORT.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_hygiene_part(
+        ROOT,
+        "env-vars",
+        {
+            "new_env_vars": missing,
+            "env_var_inventory": inventory,
+            # Where the detector knows it cannot see: names assembled at runtime
+            # cannot be enumerated statically. Kept out of new_env_vars so it never
+            # inflates the actionable list, but recorded so "no missing keys" is
+            # not read as "no undocumented variables" for a file that builds its
+            # names dynamically.
+            "dynamic_env_access": sorted(dynamic),
+        },
+    )
     print(f"env var hygiene: {len(missing)} missing .env.example key(s)")
     return 0
 
