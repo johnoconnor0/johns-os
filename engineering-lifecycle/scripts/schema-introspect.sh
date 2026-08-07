@@ -113,6 +113,44 @@ if [ -n "$DSN_PASS" ]; then
   DSN_SAFE=$(printf '%s' "$DSN" | sed "s|:$(printf '%s' "$DSN_PASS" | sed 's|[\\/&.*^$[]|\\\\&|g')@|@|")
 fi
 
+# SQL Server 18+ clients default to Encrypt=yes and validate the certificate, so
+# every containerised or self-hosted server presenting a self-signed one is
+# refused outright. Trusting it is opt-in rather than automatic: passing -C
+# unconditionally would silently disable certificate validation against a
+# production server too, which is a poor trade in a script whose other job is
+# keeping credentials out of argv.
+MSSQL_TRUST_FLAG=""
+if [ "${MSSQL_TRUST_SERVER_CERT:-}" = "1" ]; then
+  MSSQL_TRUST_FLAG="-C"
+fi
+
+# Say WHY a client failed, not merely that it did.
+#
+# Every branch used to end in `2>/dev/null || echo "Connection failed"`, throwing
+# away the one piece of information that would have made the failure actionable.
+# Two dialects were wired up incorrectly for months and the symptom was
+# indistinguishable from "no server configured", because the client's own
+# explanation was being discarded. stderr now lands in a temp file and is
+# reported. The password is stripped from it: client error text routinely echoes
+# the connection it just tried.
+CLIENT_ERR=$(mktemp)
+trap 'rm -f "$CLIENT_ERR"' EXIT
+
+explain_failure() {
+  echo "$1"
+  echo
+  echo "The client reported:"
+  if [ -s "$CLIENT_ERR" ]; then
+    if [ -n "${DSN_PASS:-}" ]; then
+      sed "s|$DSN_PASS|<redacted>|g" "$CLIENT_ERR" | head -4 | sed 's/^/  /'
+    else
+      head -4 "$CLIENT_ERR" | sed 's/^/  /'
+    fi
+  else
+    echo "  (the client exited non-zero without writing to stderr)"
+  fi
+}
+
 emit_manual() {
   echo "**Source:** Manual — please paste schema below"
   echo
@@ -155,7 +193,7 @@ case "$DIALECT" in
         FROM information_schema.tables t
         WHERE table_schema = 'public'
         ORDER BY table_name;
-      " 2>/dev/null || echo "Connection failed — provide schema manually."
+      " 2>"$CLIENT_ERR" || explain_failure "Connection failed — provide schema manually."
       echo '```'
       echo
       echo "## Extensions"
@@ -187,7 +225,7 @@ case "$DIALECT" in
         FROM information_schema.TABLES t
         WHERE t.TABLE_SCHEMA = DATABASE()
         ORDER BY TABLE_NAME;
-      " 2>/dev/null || echo "Connection failed — provide schema manually."
+      " 2>"$CLIENT_ERR" || explain_failure "Connection failed — provide schema manually."
       echo '```'
       echo
       echo "## Foreign keys"
@@ -226,16 +264,16 @@ case "$DIALECT" in
       echo
       echo "## Tables"
       echo '```'
-      SQLCMDPASSWORD="$DSN_PASS" sqlcmd -S "$DSN_HOST${DSN_PORT:+,$DSN_PORT}" -U "$DSN_USER" -d "$DSN_DB" -Q "
+      SQLCMDPASSWORD="$DSN_PASS" sqlcmd $MSSQL_TRUST_FLAG -S "$DSN_HOST${DSN_PORT:+,$DSN_PORT}" -U "$DSN_USER" -d "$DSN_DB" -Q "
         SELECT t.name AS table_name, COUNT(c.name) AS columns
         FROM sys.tables t LEFT JOIN sys.columns c ON c.object_id = t.object_id
         GROUP BY t.name ORDER BY t.name;
-      " 2>/dev/null || echo "Connection failed — provide schema manually."
+      " 2>"$CLIENT_ERR" || explain_failure "Connection failed — provide schema manually."
       echo '```'
       echo
       echo "## Foreign keys"
       echo '```'
-      SQLCMDPASSWORD="$DSN_PASS" sqlcmd -S "$DSN_HOST${DSN_PORT:+,$DSN_PORT}" -U "$DSN_USER" -d "$DSN_DB" -Q "
+      SQLCMDPASSWORD="$DSN_PASS" sqlcmd $MSSQL_TRUST_FLAG -S "$DSN_HOST${DSN_PORT:+,$DSN_PORT}" -U "$DSN_USER" -d "$DSN_DB" -Q "
         SELECT fk.name, OBJECT_NAME(fk.parent_object_id) AS from_table,
                OBJECT_NAME(fk.referenced_object_id) AS to_table
         FROM sys.foreign_keys fk ORDER BY fk.name;
@@ -258,7 +296,7 @@ case "$DIALECT" in
           var doc = db.getCollection(name).findOne() || {};
           print(name + ": " + Object.keys(doc).join(", "));
         });
-      ' 2>/dev/null || echo "Connection failed — provide collections manually."
+      ' 2>"$CLIENT_ERR" || explain_failure "Connection failed — provide collections manually."
       echo '```'
       echo
       echo "## Indexes"
