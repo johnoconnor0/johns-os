@@ -1,7 +1,7 @@
 {
   "name": "engineering-lifecycle",
   "displayName": "Engineering Lifecycle",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Move software products through a structured engineering lifecycle from discovery to maintenance, with deterministic local artifacts.",
   "homepage": "https://weblifter.com.au",
   "author": {

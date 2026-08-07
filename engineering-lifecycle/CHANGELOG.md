@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.1 - 2026-08-07
+
+### Fixed
+
+- **SQL Server introspection still did not connect at 0.10.0.** The rebuilt `sqlcmd` invocation was correct about flags and wrong about transport: ODBC Driver 18 defaults to `Encrypt=yes` and rejects the self-signed certificate every containerised or self-hosted server presents. `MSSQL_TRUST_SERVER_CERT=1` now adds `-C`. It is opt-in rather than automatic because silently disabling certificate validation against a *production* server is a poor trade in a script whose other job is keeping credentials out of `ps`.
+- **A failing client now says why.** Every branch ended in `2>/dev/null || echo "Connection failed"`, discarding the client's own explanation — which is exactly why two dialects stayed broken while looking identical to "no server configured". stderr is captured and reported, with the password stripped, since client error text routinely echoes the connection it tried. SQLite was missed by the first sweep because its message differs from the other four.
+- `.gitattributes` covers `.sql`, `.js` and `Dockerfile*`. Those files are bind-mounted into Linux containers, and a CRLF checkout on Windows reaches container bash as `$'\r': command not found` followed by a syntax error — which reads like a broken script rather than a broken checkout.
+
+### Added
+
+- **All five advertised dialects are now verified against real engines**, not asserted. `tests/integration/` runs `schema-introspect.sh` against MySQL, SQL Server, PostgreSQL and MongoDB in containers plus a real SQLite file, on every change to the introspection path. The script runs *inside* a container because every dialect is gated on `command -v <client>`: without the clients on PATH it falls to "provide schema manually" regardless of whether a server is up, so a suite that started servers and ran the script on a client-less machine would pass while proving nothing. PostgreSQL is a control rather than coverage — if it passes while another fails, the harness is sound and the dialect is broken.
+
 ## 0.10.0 - 2026-08-07
 
 ### Added
