@@ -10,6 +10,7 @@ import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +96,23 @@ INTENT_KEYWORDS = {
         "engineering maturity",
     ],
     "lifecycle": ["lifecycle", "what should happen next", "missing artifacts", "current stage", "next skill"],
+    # Deliberately excludes "review", "all" and "work": `implementation` owns the
+    # generic verbs and would win the max-score tie on any of them. "triage" and
+    # "backlog" are rare enough not to collide with anything.
+    "triage": [
+        "triage",
+        "backlog",
+        "all open",
+        "open tickets",
+        "open issues",
+        "outstanding",
+        "everything on my plate",
+        "workstream",
+        "work streams",
+        "in parallel",
+        "what needs doing",
+        "sweep the queue",
+    ],
     "system-map": ["system map", "map the system", "external systems", "data flow", "failure points", "component map"],
     "api-contract": [
         "api contract",
@@ -190,6 +208,7 @@ SKILL_BY_INTENT = {
     "repo-hygiene": "update-repo-hygiene",
     "council-decision": "run-engineering-council",
     "discovery": "create-discovery-brief",
+    "triage": "triage-workstreams",
 }
 
 AMBIGUOUS_PHRASES = {
@@ -1544,6 +1563,44 @@ TOOLS: dict[str, Callable[[ToolContext], Any]] = {
 }
 
 
+# Below this many ungrouped items, one stray ticket is not a triage.
+TRIAGE_MIN_ITEMS = 5
+# And below this many days since the last pull, the answer has not changed.
+TRIAGE_REMIND_AFTER_DAYS = 3
+
+
+def _triage_reminder(tracker: dict[str, Any]) -> str:
+    """The one-line triage prompt, or nothing.
+
+    Three gates, all of which have to pass. Without them this fires on every turn
+    for the rest of the repository's life, which is how a useful reminder trains
+    people to skim past the whole block.
+    """
+    stale = bool(tracker.get("workstreams_stale"))
+    unclustered = int(tracker.get("unclustered") or 0)
+    if stale and tracker.get("workstreams"):
+        return (
+            f"workstreams.json is older than the issue queue ({unclustered} issue(s) added since). "
+            "Run `/triage compile` to regroup."
+        )
+    if unclustered < TRIAGE_MIN_ITEMS:
+        return ""
+    last_fetch = str(tracker.get("last_fetch_at") or "")
+    age_note = ""
+    if last_fetch:
+        try:
+            age = (datetime.now(UTC) - datetime.fromisoformat(last_fetch)).days
+        except ValueError:
+            age = TRIAGE_REMIND_AFTER_DAYS
+        if age < TRIAGE_REMIND_AFTER_DAYS and tracker.get("workstreams"):
+            return ""
+        age_note = f" (last fetch {age} day(s) ago)"
+    return (
+        f"{unclustered} open item(s) are not grouped into workstreams{age_note}. "
+        "Run `/triage` to pull the backlog, cluster it, and fan out analysis in parallel."
+    )
+
+
 def workspace_doctor(resolution: RootResolution | None, link: bool = False) -> dict[str, Any]:
     """Which workspace this directory resolves to, and the evidence for it.
 
@@ -1749,6 +1806,13 @@ def render_hook(tool_name: str, result: dict[str, Any]) -> dict[str, Any] | None
                 f"{tracker.get('provider')}{note}. Run `eng-life tracker plan` and execute the "
                 f"operations it returns.{listed}"
             )
+        # The complaint this answers is that the plugin never *offers* to triage.
+        # Gated hard, because a reminder that fires every turn forever gets ignored
+        # - and takes the useful reminders with it. See the anti-slop register.
+        if tracker.get("enabled") and tracker.get("enforcement") != "off":
+            triage_note = _triage_reminder(tracker)
+            if triage_note:
+                messages.append(triage_note)
         # Surfaced every turn so a question the human never answered stops being
         # forgotten the moment the turn that raised it ends.
         questions = result.get("questions") or {}

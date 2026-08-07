@@ -59,7 +59,9 @@ is dry-run by default and preserves git history where git is available.
   council/
   questions/                    # open-questions.json + a readable digest
   context/                      # stack.json, written every SessionStart
-  tracker/                      # surfaced-issues.json + digest, dispatch state
+  tracker/                      # surfaced-issues.json + digest, dispatch state,
+                                # workstreams.json + digest (see /triage)
+  triage/analysis/              # one agent analysis per workstream
   dashboards/
   reports/
   settings.json                 # the one committed, hand-authored file here

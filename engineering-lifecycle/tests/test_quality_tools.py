@@ -167,6 +167,7 @@ class QualityToolTests(unittest.TestCase):
                 "references.py",
                 "trackers.py",
                 "tracker.py",
+                "workstreams.py",
             }:
                 continue
             proc = subprocess.run([sys.executable, str(path), "--help"], text=True, capture_output=True)
@@ -3016,6 +3017,425 @@ class BoundedScanTests(unittest.TestCase):
             root = Path(tmp)
             (root / "package.json").write_text(json.dumps({"workspaces": {"packages": ["libs/*"]}}), encoding="utf-8")
             self.assertEqual(quality_tools.workspace_globs(root), ["libs/*"])
+
+
+class TrackerPullTests(unittest.TestCase):
+    """The direction that did not exist: reading open work back out of a tracker.
+
+    `Tracker.search_tool` was declared from the start and read by nothing.
+    """
+
+    def setUp(self) -> None:
+        import tracker as tracker_mod  # noqa: PLC0415
+        import trackers as trackers_mod  # noqa: PLC0415
+
+        self.tracker = tracker_mod
+        self.trackers = trackers_mod
+
+    def _linear_repo(self, tmp: str) -> Path:
+        root = Path(tmp).resolve()
+        workspace = root / ".project" / ".engineering"
+        workspace.mkdir(parents=True)
+        eng_common.write_json(
+            workspace / "settings.json",
+            {"version": 1, "issue_filing": {"enabled": True, "provider": "linear", "scope": {"team": "WEB"}}},
+        )
+        return root
+
+    def _issue(self, key: str, **over: object) -> dict:
+        base = {
+            "id": key,
+            "title": f"Issue {key}",
+            "description": "body",
+            "url": f"https://linear.app/acme/issue/{key}/slug",
+            "priority": {"value": 2, "name": "High"},
+            "status": "Todo",
+            "statusType": "unstarted",
+            "labels": [],
+        }
+        return {**base, **over}
+
+    def test_fetch_plan_excludes_archived_and_asks_only_for_declared_fields(self) -> None:
+        # includeArchived defaults to TRUE in the tool's own schema, so not passing
+        # false silently fills the queue with closed work. And `fields` is a closed
+        # enum: an unknown member is an error, not an ignored hint.
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = self.tracker.build_fetch_plan(self._linear_repo(tmp))
+            self.assertTrue(plan["configured"])
+            self.assertEqual(len(plan["operations"]), len(self.trackers.LINEAR.open_states))
+            for op in plan["operations"]:
+                self.assertIs(op["arguments"]["includeArchived"], False)
+                self.assertEqual(op["arguments"]["team"], "WEB")
+                for name in op["arguments"]["fields"]:
+                    self.assertIn(name, self.trackers.LINEAR.search_fields)
+
+    def test_an_adapter_without_a_search_shape_reports_rather_than_guessing(self) -> None:
+        # A plan built on invented argument names fails at the MCP call with no
+        # useful message. Saying so, and naming the overlay file, is the honest
+        # answer - the same discipline resolve_tracker already uses.
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = self.tracker.build_fetch_plan(self._linear_repo(tmp), override="github")
+            self.assertFalse(plan["configured"])
+            self.assertIn("providers/github.json", plan["reason"])
+            self.assertEqual(plan["operations"], [])
+
+    def test_pulled_issues_are_filed_not_queued(self) -> None:
+        # The regression that matters most: build_plan emits operations for queued
+        # items, so a pulled issue recorded as queued is pushed straight back to the
+        # tracker as a duplicate on the next `/track file`.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._linear_repo(tmp)
+            self.tracker.ingest_issues(root, {"issues": [self._issue("WEB-1"), self._issue("WEB-2")]})
+            self.assertEqual(self.tracker.build_plan(root)["operations"], [])
+            for issue in self.tracker.load_queue(root)["issues"]:
+                self.assertEqual(issue["status"], "filed")
+                self.assertEqual(issue["origin"], "tracker")
+
+    def test_an_issue_this_repo_filed_comes_home_under_its_own_id(self) -> None:
+        # `_issue_body` embeds a marker in everything this plugin writes, so a
+        # round trip has to land on the original row rather than creating a twin.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._linear_repo(tmp)
+            self.tracker.record_issues(root, [{"title": "Local finding", "severity": "high", "rule": "detector/x"}])
+            original = self.tracker.load_queue(root)["issues"][0]["id"]
+            body = self.tracker._issue_body(self.tracker.load_queue(root)["issues"][0])
+
+            self.tracker.ingest_issues(root, {"issues": [self._issue("WEB-9", description=body)]})
+            queue = self.tracker.load_queue(root)["issues"]
+            self.assertEqual(len(queue), 1)
+            self.assertEqual(queue[0]["id"], original)
+
+    def test_a_marked_issue_this_machine_has_never_seen_is_still_adopted(self) -> None:
+        # `.project/` is gitignored, so dispatch-state.json does not travel. A
+        # second machine must land on the same row, which is what the marker is for.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._linear_repo(tmp)
+            body = "Something\n\n<!-- jos-issue: si-abc123def456 -->"
+            self.tracker.ingest_issues(root, {"issues": [self._issue("WEB-9", description=body)]})
+            self.assertEqual(self.tracker.load_queue(root)["issues"][0]["id"], "si-abc123def456")
+
+    def test_dedup_falls_back_to_the_external_id_when_the_marker_is_gone(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._linear_repo(tmp)
+            self.tracker.ingest_issues(root, {"issues": [self._issue("WEB-9", title="First")]})
+            self.tracker.ingest_issues(root, {"issues": [self._issue("WEB-9", title="Renamed upstream")]})
+            queue = self.tracker.load_queue(root)["issues"]
+            self.assertEqual(len(queue), 1)
+            self.assertEqual(queue[0]["title"], "Renamed upstream")
+
+    def test_a_closed_remote_issue_moves_to_resolved(self) -> None:
+        # record_issues protects filed|resolved|dismissed against re-detection, so
+        # this transition goes through an explicit second pass rather than a force
+        # flag that would weaken an invariant three other tests depend on.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._linear_repo(tmp)
+            self.tracker.ingest_issues(root, {"issues": [self._issue("WEB-9")]})
+            result = self.tracker.ingest_issues(
+                root, {"issues": [self._issue("WEB-9", status="Done", statusType="completed")]}
+            )
+            self.assertEqual(result["closed_upstream"], 1)
+            issue = self.tracker.load_queue(root)["issues"][0]
+            self.assertEqual(issue["status"], "resolved")
+            self.assertIn("completed in linear", issue.get("note", ""))
+
+    def test_severity_inverts_the_provider_priority_map(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._linear_repo(tmp)
+            self.tracker.ingest_issues(
+                root,
+                {
+                    "issues": [
+                        self._issue("WEB-1", priority={"value": 1}),
+                        self._issue("WEB-2", priority={"value": 4}),
+                        # No priority set is not "urgent".
+                        self._issue("WEB-3", priority={"value": 0}),
+                    ]
+                },
+            )
+            by_key = {
+                (issue["external"] or {})["identifier"]: issue["severity"]
+                for issue in self.tracker.load_queue(root)["issues"]
+            }
+            self.assertEqual(by_key, {"WEB-1": "critical", "WEB-2": "low", "WEB-3": "medium"})
+
+    def test_the_identifier_is_recovered_from_the_url(self) -> None:
+        # `fields` has no `identifier` member, so WEB-123 cannot be requested.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._linear_repo(tmp)
+            self.tracker.ingest_issues(root, {"issues": [self._issue("uuid-not-a-key")]})
+            issue = self.tracker.load_queue(root)["issues"][0]
+            self.assertEqual(issue["external"]["identifier"], "")
+
+            self.tracker.ingest_issues(
+                root, {"issues": [self._issue("x2", url="https://linear.app/acme/issue/WEB-42/slug")]}
+            )
+            found = [i for i in self.tracker.load_queue(root)["issues"] if i["external"]["id"] == "x2"]
+            self.assertEqual(found[0]["external"]["identifier"], "WEB-42")
+
+
+class WorkstreamClusteringTests(unittest.TestCase):
+    def setUp(self) -> None:
+        import tracker as tracker_mod  # noqa: PLC0415
+        import workstreams as workstreams_mod  # noqa: PLC0415
+
+        self.tracker = tracker_mod
+        self.ws = workstreams_mod
+
+    def _repo(self, tmp: str, issues: list[dict]) -> Path:
+        root = Path(tmp).resolve()
+        (root / ".project" / ".engineering").mkdir(parents=True)
+        self.tracker.record_issues(root, issues)
+        return root
+
+    def test_no_single_signal_can_merge_on_its_own(self) -> None:
+        # The core invariant. Two signals must agree, which is what stops one
+        # shared label collapsing a whole backlog into a single cluster. Raising
+        # any one weight past the threshold destroys this silently.
+        self.assertLess(max(self.ws.WEIGHTS.values()), self.ws.MERGE_THRESHOLD)
+        self.assertAlmostEqual(sum(self.ws.WEIGHTS.values()), 1.0)
+
+    def test_a_shared_label_alone_does_not_merge_but_label_plus_path_does(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".project" / ".engineering").mkdir(parents=True)
+            (root / "src").mkdir()
+            (root / "src" / "a.ts").write_text("x", encoding="utf-8")
+            self.tracker.record_issues(
+                root,
+                [
+                    {"title": "Alpha concern", "rule": "r1", "external": {"labels": ["backend"]}},
+                    {"title": "Totally separate matter", "rule": "r2", "external": {"labels": ["backend"]}},
+                ],
+            )
+            self.assertEqual(len(self.ws.build_workstreams(root)["workstreams"]), 2)
+
+            self.tracker.record_issues(
+                root,
+                [
+                    {"title": "Alpha concern", "rule": "r1", "paths": ["src/a.ts"], "external": {"labels": ["backend"]}},
+                    {
+                        "title": "Totally separate matter",
+                        "rule": "r2",
+                        "paths": ["src/a.ts"],
+                        "external": {"labels": ["backend"]},
+                    },
+                ],
+            )
+            self.assertEqual(len(self.ws.build_workstreams(root)["workstreams"]), 1)
+
+    def test_parent_and_child_always_land_together(self) -> None:
+        # A hard edge, whatever the token overlap says. Splitting a parent from its
+        # sub-issues would be an obviously wrong answer.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(
+                tmp,
+                [
+                    {"title": "Umbrella", "rule": "p", "external": {"id": "A-1", "identifier": "A-1"}},
+                    {"title": "Utterly unrelated words", "rule": "c", "external": {"id": "A-2", "parent": "A-1"}},
+                ],
+            )
+            streams = self.ws.build_workstreams(root)["workstreams"]
+            self.assertEqual(len(streams), 1)
+            self.assertEqual(streams[0]["size"], 2)
+            # And the parent's own title names the group.
+            self.assertEqual(streams[0]["title"], "Umbrella")
+            self.assertEqual(streams[0]["title_confidence"], "high")
+
+    def test_the_size_cap_stops_a_transitive_chain_becoming_one_blob(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".project" / ".engineering").mkdir(parents=True)
+            (root / "src").mkdir()
+            entries = []
+            for index in range(20):
+                (root / "src" / f"f{index}.ts").write_text("x", encoding="utf-8")
+                entries.append(
+                    {
+                        "title": f"Shared concern number {index}",
+                        "rule": f"r{index}",
+                        "paths": [f"src/f{index}.ts"],
+                        "external": {"labels": ["backend"]},
+                    }
+                )
+            self.tracker.record_issues(root, entries)
+            for stream in self.ws.build_workstreams(root)["workstreams"]:
+                self.assertLessEqual(stream["size"], self.ws.MAX_WORKSTREAM_SIZE)
+
+    def test_clustering_is_stable_across_input_order(self) -> None:
+        # A size cap makes union-find order-dependent; sorting merges strongest
+        # first is what recovers reproducibility.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(
+                tmp,
+                [
+                    {"title": "Auth token refresh fails", "rule": "a", "external": {"labels": ["auth"]}},
+                    {"title": "Auth token refresh races", "rule": "b", "external": {"labels": ["auth"]}},
+                    {"title": "Dashboard chart legend wrong", "rule": "c", "external": {"labels": ["ui"]}},
+                ],
+            )
+            first = [tuple(s["issue_ids"]) for s in self.ws.build_workstreams(root)["workstreams"]]
+            second = [tuple(s["issue_ids"]) for s in self.ws.build_workstreams(root)["workstreams"]]
+            self.assertEqual(first, second)
+
+    def test_derived_paths_keep_only_files_that_exist(self) -> None:
+        # Without the on-disk check this is a regex that invents file paths out of
+        # prose, and a parallel_safe computed from invented paths is worse than one
+        # computed from none.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "src").mkdir(parents=True)
+            (root / "src" / "real.ts").write_text("x", encoding="utf-8")
+            issue = {"body": "Broken in src/real.ts and also in src/imaginary.ts somewhere"}
+            self.assertEqual(self.ws.derived_paths(issue, root), ["src/real.ts"])
+
+    def test_a_workstream_with_no_path_evidence_is_never_parallel_safe(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp, [{"title": "Some prose with no files named", "rule": "a"}])
+            stream = self.ws.build_workstreams(root)["workstreams"][0]
+            self.assertEqual(stream["path_evidence"], "none")
+            self.assertFalse(stream["parallel_safe"])
+            self.assertTrue(stream["parallel_safe_reason"])
+
+    def test_every_workstream_states_why_it_is_or_is_not_parallel_safe(self) -> None:
+        # A bare boolean gate is one people override without reading it.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".project" / ".engineering").mkdir(parents=True)
+            (root / "a.ts").write_text("x", encoding="utf-8")
+            self.tracker.record_issues(
+                root,
+                [
+                    {"title": "One thing here", "rule": "a", "paths": ["a.ts"]},
+                    {"title": "Different thing entirely", "rule": "b", "paths": ["a.ts"]},
+                    {"title": "Third unrelated topic", "rule": "c"},
+                ],
+            )
+            for stream in self.ws.build_workstreams(root)["workstreams"]:
+                self.assertTrue(stream["parallel_safe_reason"], stream["id"])
+
+    def test_shared_paths_across_workstreams_produce_a_conflict_edge(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".project" / ".engineering").mkdir(parents=True)
+            (root / "shared.ts").write_text("x", encoding="utf-8")
+            self.tracker.record_issues(
+                root,
+                [
+                    {"title": "Alpha topic", "rule": "a", "paths": ["shared.ts"], "external": {"labels": ["x"]}},
+                    {"title": "Beta unrelated", "rule": "b", "paths": ["shared.ts"], "external": {"labels": ["y"]}},
+                ],
+            )
+            streams = self.ws.build_workstreams(root, threshold=2.0)["workstreams"]  # never merge
+            self.assertEqual(len(streams), 2)
+            for stream in streams:
+                self.assertTrue(stream["conflicts_with"])
+                self.assertFalse(stream["parallel_safe"])
+
+    def test_closed_issues_are_not_planned(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp, [{"title": "Already handled", "rule": "a"}])
+            identifier = self.tracker.load_queue(root)["issues"][0]["id"]
+            self.tracker.set_status(root, identifier, "resolved")
+            self.assertEqual(self.ws.build_workstreams(root)["workstreams"], [])
+
+
+class TriageDispatchTests(unittest.TestCase):
+    def setUp(self) -> None:
+        import tracker as tracker_mod  # noqa: PLC0415
+        import triage as triage_mod  # noqa: PLC0415
+        import workstreams as workstreams_mod  # noqa: PLC0415
+
+        self.tracker = tracker_mod
+        self.triage = triage_mod
+        self.ws = workstreams_mod
+
+    def _prepared(self, tmp: str) -> Path:
+        root = Path(tmp).resolve()
+        (root / ".project" / ".engineering").mkdir(parents=True)
+        (root / "src").mkdir()
+        (root / "src" / "one.ts").write_text("x", encoding="utf-8")
+        self.tracker.record_issues(
+            root,
+            [
+                {"title": "Login handler rejects valid tokens", "rule": "a", "paths": ["src/one.ts"]},
+                {"title": "Completely different reporting concern", "rule": "b"},
+            ],
+        )
+        self.ws.write_workstreams(root, self.ws.build_workstreams(root))
+        return root
+
+    def test_one_task_per_workstream_with_a_real_agent_and_a_full_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._prepared(tmp)
+            plan = self.triage.build_dispatch_plan(root)
+            self.assertEqual(len(plan["tasks"]), len(self.ws.load_workstreams(root)["workstreams"]))
+            for task in plan["tasks"]:
+                self.assertTrue((ROOT / "agents" / f"{task['agent']}.md").is_file(), task["agent"])
+                self.assertIn("## Root Cause", task["prompt"])
+                self.assertTrue(task["output_path"].endswith(".md"))
+                self.assertTrue(task["issue_refs"])
+
+    def test_the_dispatch_plan_never_offers_a_write_phase(self) -> None:
+        # The guard against someone quietly widening an agent's tools: if any
+        # routed agent gained Edit or Write, concurrent implementations would
+        # clobber each other's edit-scope allowlist.
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = self.triage.build_dispatch_plan(self._prepared(tmp))
+            self.assertFalse(plan["write_phase"]["allowed"])
+            for task in plan["tasks"]:
+                frontmatter = (ROOT / "agents" / f"{task['agent']}.md").read_text(encoding="utf-8")
+                self.assertIn("tools: Read, Glob, Grep", frontmatter)
+
+    def test_analysis_tasks_are_not_filtered_by_parallel_safe(self) -> None:
+        # Read-only agents cannot collide, so gating analysis on parallel_safe
+        # would halve the throughput this exists to provide. It looks like a bug
+        # unless it is asserted.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._prepared(tmp)
+            plan = self.triage.build_dispatch_plan(root)
+            self.assertTrue(any(not task["parallel_safe"] for task in plan["tasks"]))
+
+    def test_dispatch_without_a_compile_says_so(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".project" / ".engineering").mkdir(parents=True)
+            plan = self.triage.build_dispatch_plan(root)
+            self.assertEqual(plan["tasks"], [])
+            self.assertIn("compile", plan["reason"])
+
+
+class TriageIntakeTests(unittest.TestCase):
+    def test_the_triage_intent_routes_to_the_triage_skill(self) -> None:
+        for prompt in (
+            "what's outstanding across the backlog?",
+            "pull all open tickets and work them in parallel",
+            "triage everything on my plate",
+        ):
+            with self.subTest(prompt=prompt):
+                self.assertEqual(quality_tools.classify_user_intent(prompt)["intent"], "triage")
+        # And the generic verbs still belong to implementation.
+        self.assertEqual(quality_tools.classify_user_intent("fix the login bug")["intent"], "implementation")
+
+    def test_the_reminder_stays_quiet_below_the_threshold(self) -> None:
+        # A reminder that fires every turn forever trains people to skim past the
+        # whole block, taking the useful reminders with it.
+        quiet = {"unclustered": 2, "workstreams": 0, "workstreams_stale": False}
+        self.assertEqual(quality_tools._triage_reminder(quiet), "")
+
+        loud = {"unclustered": 9, "workstreams": 0, "workstreams_stale": False}
+        self.assertIn("/triage", quality_tools._triage_reminder(loud))
+
+    def test_a_stale_grouping_asks_for_a_recompile_not_a_refetch(self) -> None:
+        stale = {"unclustered": 1, "workstreams": 4, "workstreams_stale": True}
+        message = quality_tools._triage_reminder(stale)
+        self.assertIn("/triage compile", message)
+
+    def test_triage_is_not_a_drift_intent(self) -> None:
+        # Triage spans initiatives by definition, so including it would make the
+        # drift detector nag on every single triage prompt.
+        import initiatives  # noqa: PLC0415
+
+        self.assertNotIn("triage", initiatives._DRIFT_INTENTS)
 
 
 class RootResolutionTests(unittest.TestCase):

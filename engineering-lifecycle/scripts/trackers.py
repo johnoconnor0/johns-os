@@ -78,10 +78,48 @@ class Tracker:
     supports_assignee: bool = True
     supports_project: bool = True
 
+    # --- the pull direction ------------------------------------------------
+    #
+    # `search_tool` and `get_tool` above were declared from the start and read by
+    # nothing: the round trip only ever pushed. These are what a search call needs
+    # that a write call does not.
+
+    # Canonical search argument -> this provider's argument name. Separate from
+    # `field_map` because the search verb and the write verb disagree: Linear
+    # writes `labels` and searches `label`.
+    search_arg_map: Mapping[str, str] = field(default_factory=dict)
+    # This provider's own words for "still open". One search call per entry.
+    open_states: tuple[str, ...] = ()
+    # Response fields worth asking for, where the provider lets you choose. Must
+    # be exact members of its own enum: an unknown name is an error, not an
+    # ignored hint.
+    search_fields: tuple[str, ...] = ()
+    # Canonical issue field -> where it appears in one returned issue.
+    ingest_map: Mapping[str, str] = field(default_factory=dict)
+    # Where the array and the next-page cursor live in the response.
+    items_key: str = "issues"
+    next_cursor_key: str = "nextCursor"
+    # The human-facing key (WEB-123) when the search verb will not return it.
+    identifier_url_pattern: str = ""
+
     # Patterns that pull an id out of a pasted URL, so `LINEAR_PROJECT_ID` and
     # `LINEAR_PROJECT_URL` are one code path rather than two.
     url_patterns: tuple[tuple[str, str], ...] = ()
     notes: str = ""
+
+    @property
+    def supports_search(self) -> bool:
+        """Whether a fetch plan can be built for this provider.
+
+        Declaring a verb is not enough - the plan needs to know what "open" is
+        called and what the response looks like. A provider without that answers
+        "not configured" and names the overlay file, which is the same discipline
+        `resolve_tracker` uses of returning the reason rather than guessing.
+        """
+        return bool(self.remote and self.search_tool and self.open_states)
+
+    def search_argument(self, key: str) -> str:
+        return self.search_arg_map.get(key, key)
 
     def scope_argument(self, key: str) -> str:
         return self.scope_map.get(key, key)
@@ -133,6 +171,65 @@ LINEAR = Tracker(
         "deferred": "Backlog",
         "cancelled": "Canceled",
     },
+    search_arg_map={
+        "state": "state",
+        "limit": "limit",
+        "cursor": "cursor",
+        "label": "label",
+        "assignee": "assignee",
+        "query": "query",
+        "updated_since": "updatedAt",
+        "order_by": "orderBy",
+        "include_archived": "includeArchived",
+        "fields": "fields",
+        "team": "team",
+        "project": "project",
+        "cycle": "cycle",
+    },
+    # Linear's *state types*, which `state` accepts alongside state names.
+    open_states=("triage", "backlog", "unstarted", "started"),
+    search_fields=(
+        "id",
+        "title",
+        "description",
+        "url",
+        "priority",
+        "estimate",
+        "status",
+        "statusType",
+        "labels",
+        "assignee",
+        "project",
+        "projectId",
+        "team",
+        "teamId",
+        "parentId",
+        "cycleId",
+        "createdAt",
+        "updatedAt",
+        "dueDate",
+    ),
+    ingest_map={
+        "id": "id",
+        "url": "url",
+        "title": "title",
+        "body": "description",
+        "status": "status",
+        "status_type": "statusType",
+        "labels": "labels",
+        "assignee": "assignee",
+        "project": "project",
+        "team": "team",
+        "parent": "parentId",
+        "priority": "priority",
+        "estimate": "estimate",
+        "updated_at": "updatedAt",
+    },
+    items_key="issues",
+    next_cursor_key="nextCursor",
+    # `fields` is a closed enum on this tool and has no `identifier` member, so
+    # WEB-123 has to come out of the URL.
+    identifier_url_pattern=r"/issue/([A-Z][A-Z0-9]*-\d+)",
     url_patterns=(
         ("project", r"linear\.app/[^/]+/project/[^/]*?-?([0-9a-f]{8,})"),
         ("team", r"linear\.app/[^/]+/team/([A-Z0-9]+)"),
@@ -167,7 +264,12 @@ GITHUB = Tracker(
     },
     supports_project=False,
     url_patterns=(("repo", r"github\.com/[^/]+/([^/#?]+)"), ("owner", r"github\.com/([^/]+)/")),
-    notes="Only open and closed exist. Everything finer has to live in labels.",
+    notes=(
+        "Only open and closed exist. Everything finer has to live in labels. "
+        "No pull shape declared: the search argument names were not verified against a live tool "
+        "schema, and a fetch plan built on a guessed one fails at the MCP call with no useful "
+        "message. Supply one via tracker/providers/github.json to enable /triage fetch."
+    ),
 )
 
 JIRA = Tracker(
@@ -201,7 +303,11 @@ JIRA = Tracker(
         "deferred": "Backlog",
         "cancelled": "Cancelled",
     },
-    notes="Transitions are workflow-specific; status_map almost always needs overriding per project.",
+    notes=(
+        "Transitions are workflow-specific; status_map almost always needs overriding per project. "
+        "No pull shape declared, for the same reason as GitHub: supply one via "
+        "tracker/providers/jira.json to enable /triage fetch."
+    ),
 )
 
 FILE = Tracker(

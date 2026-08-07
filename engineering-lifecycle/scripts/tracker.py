@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
@@ -44,7 +45,9 @@ from trackers import Tracker, parse_scope_url, qualified_tool, resolve_tracker, 
 SEVERITIES = ("critical", "high", "medium", "low")
 ISSUE_STATUSES = ("queued", "filing", "filed", "resolved", "dismissed", "duplicate")
 KINDS = ("anomaly", "bug", "risk", "question", "task", "improvement")
-ORIGINS = ("detector", "ledger", "model", "human", "skill")
+# `tracker` is what separates an item pulled back from the tracker from one this
+# session surfaced locally, everywhere downstream.
+ORIGINS = ("detector", "ledger", "model", "human", "skill", "tracker")
 
 SETTINGS_FILE = "settings.json"
 _QUEUE = ("tracker", "surfaced-issues.json")
@@ -473,6 +476,302 @@ def _issue_body(issue: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# --- the pull round trip ---------------------------------------------------
+#
+# Same shape as `build_plan` / `reconcile`, and for the same reason: hooks and
+# scripts cannot call MCP tools, so the deterministic half emits a plan and the
+# model executes it. Inventing a second architecture for the opposite direction
+# would be the mistake.
+
+# Embedded in every body this plugin has ever written; see `_issue_body`.
+_MARKER = re.compile(r"<!--\s*jos-issue:\s*(si-[0-9a-z-]+)\s*-->")
+
+DEFAULT_FETCH_LIMIT = 100
+DEFAULT_MAX_PAGES = 10
+
+
+def external_issue_id(provider: str, external_id: str) -> str:
+    """Stable id for an issue pulled from a tracker.
+
+    Keyed on the tracker's own id rather than on the title, so renaming an issue
+    upstream updates the same row instead of creating a second one - the mirror
+    of what `issue_id` does for a locally-detected finding, which has no id of
+    its own and must derive one from content.
+    """
+    return "si-" + hashlib.sha1(f"{provider}|{external_id}".encode()).hexdigest()[:12]
+
+
+def build_fetch_plan(
+    root: Path,
+    override: str | None = None,
+    limit: int = DEFAULT_FETCH_LIMIT,
+    states: list[str] | None = None,
+    updated_since: str = "",
+) -> dict[str, Any]:
+    """Search operations the model should execute to pull open work back."""
+    settings = load_settings(root, override)
+    tracker = tracker_for(root, settings, override)
+    state = read_json_safe(state_path(root))
+    server = settings.get("mcp_server") or state.get("mcp_server")
+
+    if not tracker.supports_search:
+        return {
+            "generated_at": now_iso(),
+            "configured": False,
+            "provider": tracker.name,
+            "reason": (
+                f"the {tracker.name} adapter declares no search shape. "
+                f"Supply one at .project/.engineering/tracker/providers/{tracker.name}.json"
+            ),
+            "operations": [],
+        }
+
+    wanted = states or list(tracker.open_states)
+    operations: list[dict[str, Any]] = []
+    for index, open_state in enumerate(wanted, 1):
+        arguments: dict[str, Any] = {tracker.search_argument("state"): open_state}
+        for key, value in (settings.get("scope") or {}).items():
+            if value and key != "project_url":
+                arguments[tracker.search_argument(key)] = value
+        arguments[tracker.search_argument("limit")] = limit
+        # Linear's list_issues defaults includeArchived to TRUE. Not passing false
+        # fills the queue with closed work - the worst footgun in this direction.
+        if "include_archived" in tracker.search_arg_map:
+            arguments[tracker.search_argument("include_archived")] = False
+        if "order_by" in tracker.search_arg_map:
+            arguments[tracker.search_argument("order_by")] = "updatedAt"
+        if updated_since and "updated_since" in tracker.search_arg_map:
+            arguments[tracker.search_argument("updated_since")] = updated_since
+        if tracker.search_fields:
+            arguments[tracker.search_argument("fields")] = list(tracker.search_fields)
+        operations.append(
+            {
+                "key": f"fetch:{tracker.name}:{open_state}:{index}",
+                "action": "search",
+                "state": open_state,
+                "tool": qualified_tool(tracker, tracker.search_tool, server),
+                "tool_candidates": tool_candidates(tracker, tracker.search_tool, server),
+                "arguments": arguments,
+                "result_map": {"items": tracker.items_key, "next_cursor": tracker.next_cursor_key,
+                               **dict(tracker.ingest_map)},
+            }
+        )
+
+    return {
+        "generated_at": now_iso(),
+        "configured": bool(settings.get("enabled")),
+        "provider": tracker.name,
+        "provider_reason": settings.get("provider_reason", ""),
+        "mcp_server": server,
+        "scope": settings.get("scope", {}),
+        "operations": operations,
+        "pagination": {
+            "argument": tracker.search_argument("cursor"),
+            "next_cursor_key": tracker.next_cursor_key,
+            "max_pages": DEFAULT_MAX_PAGES,
+            "note": (
+                "If a response carries a next cursor, re-run the same operation with the cursor argument "
+                "set to it and append the results. Stop at max_pages and report truncated: true."
+            ),
+        },
+    }
+
+
+def _severity_from_priority(tracker: Tracker, priority: Any) -> str:
+    """The provider's priority mapped back onto local severity.
+
+    `priority_map` runs local -> provider, so this inverts it. Ambiguity is
+    resolved by SEVERITIES order, and an absent or zero priority means medium
+    rather than critical - "no priority set" is not "urgent".
+    """
+    if not isinstance(priority, int | float) or not priority:
+        return "medium"
+    for name in SEVERITIES:
+        if tracker.priority_map.get(name) == int(priority):
+            return name
+    return "medium"
+
+
+_KIND_BY_LABEL = (
+    (("bug", "defect", "regression"), "bug"),
+    (("security", "risk", "vulnerability"), "risk"),
+    (("question",), "question"),
+    (("feature", "enhancement", "improvement"), "improvement"),
+)
+
+
+def _kind_from_labels(labels: Iterable[str]) -> str:
+    lowered = {str(label).lower() for label in labels}
+    for needles, kind in _KIND_BY_LABEL:
+        if any(any(needle in label for label in lowered) for needle in needles):
+            return kind
+    return "task"
+
+
+def _mapped_issue(tracker: Tracker, raw: Mapping[str, Any]) -> dict[str, Any] | None:
+    """One returned issue, in this plugin's vocabulary."""
+    read = lambda key, default=None: raw.get(tracker.ingest_map.get(key, key), default)  # noqa: E731
+    external_id = read("id")
+    title = str(read("title") or "").strip()
+    if not external_id or not title:
+        return None
+    body = str(read("body") or "")
+    url = str(read("url") or "")
+    labels = read("labels") or []
+    labels = [str(item) for item in labels] if isinstance(labels, list) else []
+
+    identifier = ""
+    if tracker.identifier_url_pattern and url:
+        match = re.search(tracker.identifier_url_pattern, url)
+        identifier = match.group(1) if match else ""
+
+    status_type = str(read("status_type") or "")
+    priority = read("priority")
+    if isinstance(priority, Mapping):  # Linear returns {"value": 2, "name": "High"}
+        priority = priority.get("value")
+
+    return {
+        "external_id": str(external_id),
+        "title": title,
+        "body": body,
+        "url": url,
+        "identifier": identifier,
+        "labels": labels,
+        "severity": _severity_from_priority(tracker, priority),
+        "kind": _kind_from_labels(labels),
+        "status_type": status_type,
+        "parent": read("parent") or None,
+        "project": _name_of(read("project")),
+        "team": _name_of(read("team")),
+        "assignee": _name_of(read("assignee")),
+        "estimate": read("estimate"),
+        "updated_at": str(read("updated_at") or ""),
+    }
+
+
+def _name_of(value: Any) -> str:
+    """A display name out of whatever shape the provider returned."""
+    if isinstance(value, Mapping):
+        return str(value.get("name") or value.get("displayName") or value.get("key") or "")
+    return str(value or "")
+
+
+# Provider status types that mean the work is over. `statusType` is a small closed
+# vocabulary; a status *name* is per-team and cannot be relied on.
+_DONE_TYPES = {"completed"}
+_CANCELLED_TYPES = {"canceled", "cancelled"}
+
+
+def ingest_issues(root: Path, payload: Mapping[str, Any] | list, server: str | None = None) -> dict[str, Any]:
+    """Fold tracker search results into the local queue.
+
+    Deduplication ladder, in order:
+
+    1. The `<!-- jos-issue: ... -->` marker this plugin embeds in every body it
+       writes. A marker id we have never seen is still adopted under that id -
+       that is exactly the cross-machine case the marker exists for, since
+       `.project/` is gitignored and `dispatch-state.json` does not travel.
+    2. An existing record whose `external.id` matches. Covers issues filed before
+       the marker existed, and issues whose description a human rewrote.
+    3. Otherwise a new record under `external_issue_id`.
+    """
+    data = payload if isinstance(payload, Mapping) else {"issues": payload}
+    raw_issues = data.get("issues") or []
+    settings = load_settings(root)
+    tracker = tracker_for(root, settings)
+    provider = tracker.name
+
+    store = load_queue(root)
+    by_external = {
+        (issue.get("external") or {}).get("id"): issue["id"]
+        for issue in store["issues"]
+        if (issue.get("external") or {}).get("id")
+    }
+    known_ids = {issue["id"] for issue in store["issues"]}
+
+    entries: list[dict[str, Any]] = []
+    transitions: list[tuple[str, str, str]] = []
+    for raw in raw_issues:
+        if not isinstance(raw, Mapping):
+            continue
+        mapped = _mapped_issue(tracker, raw)
+        if mapped is None:
+            continue
+
+        marker = _MARKER.search(mapped["body"])
+        if marker:
+            identifier = marker.group(1)
+        elif mapped["external_id"] in by_external:
+            identifier = by_external[mapped["external_id"]]
+        else:
+            identifier = external_issue_id(provider, mapped["external_id"])
+
+        entries.append(
+            {
+                "id": identifier,
+                "title": mapped["title"],
+                "body": mapped["body"],
+                "kind": mapped["kind"],
+                "severity": mapped["severity"],
+                # Recorded as filed, never queued: `build_plan` emits operations
+                # for queued items, so a pulled issue recorded as queued would be
+                # pushed straight back to the tracker as a duplicate.
+                "status": "filed",
+                "origin": "tracker",
+                "rule": f"tracker/{provider}",
+                "paths": [],
+                "external": {
+                    "provider": provider,
+                    "id": mapped["external_id"],
+                    "url": mapped["url"],
+                    "identifier": mapped["identifier"],
+                    "labels": mapped["labels"],
+                    "parent": mapped["parent"],
+                    "project": mapped["project"],
+                    "team": mapped["team"],
+                    "assignee": mapped["assignee"],
+                    "estimate": mapped["estimate"],
+                    "synced_at": now_iso(),
+                },
+            }
+        )
+        status_type = mapped["status_type"].lower()
+        if status_type in _DONE_TYPES:
+            transitions.append((identifier, "resolved", f"completed in {provider}"))
+        elif status_type in _CANCELLED_TYPES:
+            transitions.append((identifier, "dismissed", f"cancelled in {provider}"))
+
+    result = record_issues(root, entries)
+    # Closing the loop as a second explicit pass, rather than teaching
+    # `record_issues` a force flag. That would weaken the invariant at its heart -
+    # a filed or dismissed item stays that way however often its detector reruns -
+    # and three tests depend on it. This way the transition is visible in `note`.
+    for identifier, status, note in transitions:
+        set_status(root, identifier, status, note=note)
+
+    if server or transitions:
+        state = read_json_safe(state_path(root))
+        if server:
+            state["mcp_server"] = server
+        state["last_fetch_at"] = now_iso()
+        if workspace_exists(root):
+            write_json(state_path(root), state)
+    elif workspace_exists(root):
+        state = read_json_safe(state_path(root))
+        state["last_fetch_at"] = now_iso()
+        write_json(state_path(root), state)
+
+    ingested = [entry["id"] for entry in entries]
+    return {
+        "ingested": len(ingested),
+        "new": len([item for item in ingested if item not in known_ids]),
+        "updated": len([item for item in ingested if item in known_ids]),
+        "closed_upstream": len(transitions),
+        "truncated": bool(data.get("truncated")),
+        "queue_size": len(result["issues"]),
+    }
+
+
 def reconcile(root: Path, results: Iterable[Mapping[str, Any]], server: str | None = None) -> dict[str, Any]:
     """Write returned ids back into the queue, and remember the server that worked."""
     store = load_queue(root)
@@ -510,6 +809,8 @@ def tracker_status(root: Path) -> dict[str, Any]:
     """The one-line answer the intake hook needs, with no network and no MCP."""
     if not workspace_exists(root):
         return {"checked": False, "reason": "no lifecycle workspace", "enabled": False, "queued": 0}
+    from workstreams import workstream_status  # noqa: PLC0415  (circular at module scope)
+
     settings = load_settings(root)
     issues = load_queue(root)["issues"]
     minimum = settings.get("dispatch", {}).get("min_severity", "medium")
@@ -532,4 +833,11 @@ def tracker_status(root: Path) -> dict[str, Any]:
         "min_severity": minimum,
         "filed": sum(1 for issue in issues if issue.get("status") == "filed"),
         "titles": [issue["title"] for issue in queued[:3]],
+        # Triage state, for the intake hook. One extra file read; no clustering
+        # ever happens in a hook.
+        "last_fetch_at": read_json_safe(state_path(root)).get("last_fetch_at"),
+        "open_from_tracker": sum(
+            1 for issue in issues if issue.get("origin") == "tracker" and issue.get("status") == "filed"
+        ),
+        **workstream_status(root),
     }

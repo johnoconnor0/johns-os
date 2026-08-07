@@ -22,7 +22,7 @@
             "type": "string",
             "enum": ["queued", "filing", "filed", "resolved", "dismissed", "duplicate"]
           },
-          "origin": { "type": "string", "enum": ["detector", "ledger", "model", "human", "skill"] },
+          "origin": { "type": "string", "enum": ["detector", "ledger", "model", "human", "skill", "tracker"] },
           "rule": { "type": "string" },
           "paths": { "type": "array", "items": { "type": "string" } },
           "initiative_id": { "type": ["string", "null"] },

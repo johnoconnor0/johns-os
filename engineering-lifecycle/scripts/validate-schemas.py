@@ -110,6 +110,8 @@ def schema_key_for(path: Path) -> str | None:
         return "surfaced-issues"
     if name == "dispatch-state.json":
         return "tracker-state"
+    if name == "workstreams.json":
+        return "workstreams"
     if name == "handoff.json":
         return "handoff"
     if name == "human-tasks.json":

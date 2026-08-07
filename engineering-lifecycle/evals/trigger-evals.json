@@ -154,6 +154,16 @@
       "query": "Run the engineering council for this high-stakes build vs buy tradeoff and preserve dissent; this is not a routine code review.",
       "should_trigger": "run-engineering-council",
       "should_not_trigger": "review-change"
+    },
+    {
+      "id": "triage-workstreams-positive",
+      "query": "Fetch all the open tickets from the backlog, group them into workstreams and work them in parallel.",
+      "should_trigger": "triage-workstreams"
+    },
+    {
+      "id": "triage-workstreams-negative",
+      "query": "Fix the login bug in the auth handler.",
+      "should_not_trigger": "triage-workstreams"
     }
   ]
 }

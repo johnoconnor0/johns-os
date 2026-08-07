@@ -22,11 +22,14 @@ from pathlib import Path
 
 from eng_common import emit_json, read_json, relpath, repo_root, resolve_cli_root, workspace_exists, write_json
 from tracker import (
+    DEFAULT_FETCH_LIMIT,
     ISSUE_STATUSES,
     KINDS,
     SEVERITIES,
+    build_fetch_plan,
     build_plan,
     disabled_path,
+    ingest_issues,
     items_from_ledger,
     load_queue,
     load_settings,
@@ -86,6 +89,15 @@ def main() -> int:
     reconcile_parser.add_argument("--results", required=True, help="JSON file: [{key, id, url, identifier}]")
     reconcile_parser.add_argument("--mcp-server", default="", help="The server segment that actually worked")
 
+    fetch_parser = sub.add_parser("fetch-plan", help="Emit the search operations that pull open work back.")
+    fetch_parser.add_argument("--limit", type=int, default=DEFAULT_FETCH_LIMIT)
+    fetch_parser.add_argument("--state", action="append", default=[], help="Repeatable; defaults to every open state")
+    fetch_parser.add_argument("--updated-since", default="", help="ISO date or duration, e.g. -P30D")
+
+    ingest_parser = sub.add_parser("ingest", help="Fold tracker search results into the queue.")
+    ingest_parser.add_argument("--results", required=True, help="JSON file: {issues: [...]} or a bare list")
+    ingest_parser.add_argument("--mcp-server", default="", help="The server segment that actually worked")
+
     resolve = sub.add_parser("resolve", help="Mark an issue resolved or dismissed.")
     resolve.add_argument("--id", required=True)
     resolve.add_argument("--status", default="resolved", choices=list(ISSUE_STATUSES))
@@ -140,6 +152,17 @@ def main() -> int:
     if args.command == "reconcile":
         results = read_json(Path(args.results), [])
         emit_json(reconcile(root, results if isinstance(results, list) else [], args.mcp_server or None))
+        return 0
+
+    if args.command == "fetch-plan":
+        emit_json(build_fetch_plan(root, override, args.limit, args.state or None, args.updated_since))
+        return 0
+
+    if args.command == "ingest":
+        if not workspace_exists(root):
+            emit_json({"ingested": 0, "reason": "no lifecycle workspace; run /project-init first"})
+            return 0
+        emit_json(ingest_issues(root, read_json(Path(args.results), {}), args.mcp_server or None))
         return 0
 
     if args.command == "resolve":

@@ -187,6 +187,46 @@ Agents are specialists, not duplicates of skills. Delegate when isolated expert 
   [Workspace initialization](#workspace-initialization-opt-in).
 - `/initiative` — create, switch, close, or list initiatives (`new`, `switch`,
   `close`, `list`). See [Initiative identity](#initiative-identity).
+- `/track` — file surfaced issues **into** the configured tracker, or configure
+  tracking for the project.
+- `/triage` — the other direction: pull what is already open **out of** the
+  tracker, group it into workstreams, and fan out one read-only analysis agent per
+  workstream. See [Triage](#triage).
+
+## Triage
+
+`/track` pushes; `/triage` pulls. They are separate commands because only one of
+them needs `Agent`, and a filing command should not acquire the ability to spawn
+subagents as a side effect.
+
+The pipeline is three deterministic steps and one model-executed one:
+
+1. `surface-issue.py fetch-plan` emits the search operations. Hooks and scripts
+   cannot call MCP tools, so the model executes them — the same split that
+   `build_plan`/`reconcile` already use for the push direction.
+2. `surface-issue.py ingest` folds the results into the local queue, deduplicating
+   against the `<!-- jos-issue: … -->` marker this plugin embeds in everything it
+   files, then against the tracker's own id. Pulled items are recorded as `filed`,
+   never `queued` — otherwise the next `/track file` would push them straight back
+   as duplicates.
+3. `triage.py compile` groups the queue with union-find over a weighted signal
+   graph. Parent/child and blocking relations merge unconditionally; everything
+   else needs **two signals to agree**, because no single weight reaches the merge
+   threshold. `references/workstream-clustering.md` has the weights and the honest
+   list of what it cannot see.
+4. `triage.py dispatch-plan` renders one fully-formed agent prompt per workstream.
+
+Every lifecycle agent is read-only (`Read, Glob, Grep`), so the fan-out is an
+**analysis** pass — root cause, affected files, sequencing, risk, test gaps. That
+parallelises freely and `parallel_safe` deliberately does not gate it: read-only
+agents cannot collide. Implementation stays serial on the main thread through
+`implement-feature-safely`, because `current-plan.json` is a single file and two
+concurrent implementations would disable each other's edit-scope guard.
+
+Only Linear ships a search shape. GitHub and Jira declare none on purpose — their
+argument names were never verified against a live tool schema, and a plan built on
+a guessed one fails at the MCP call with no useful message. `fetch-plan` says so
+and names the overlay file that would supply one.
 
 ## Initiative identity
 
@@ -276,6 +316,7 @@ set of shared modules:
 | `stack_detection.py` | Detecting frameworks, backends, databases and test tooling across a repo and its workspace members |
 | `questions.py` | The open-questions store: recording, answering, scraping artifacts, rendering the digest |
 | `initiatives.py` | The initiative registry, resolution, drift detection, and create/switch/close |
+| `workstreams.py` | Clustering the issue queue into workstreams, and the parallel-safety verdict |
 | `data_model.py` | Parsing `schema.sql` into a machine-readable model, the ERD, and drift against shipped migrations |
 
 The last four were extracted from `quality_tools.py` once it passed 2,400 lines.
