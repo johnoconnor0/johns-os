@@ -1,0 +1,44 @@
+name: DB Introspection
+
+# Deliberately NOT in the main CI matrix. The SQL Server image is ~1.5GB and takes
+# tens of seconds to become healthy, so putting it on every pull request would tax
+# every unrelated change. It runs when the introspection path itself moves, and on
+# demand.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'engineering-lifecycle/scripts/schema-introspect.sh'
+      - 'engineering-lifecycle/scripts/dialects.py'
+      - 'engineering-lifecycle/tests/integration/**'
+      - '.github/workflows/db-introspection.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  introspection:
+    # ubuntu only: mcr.microsoft.com/mssql/server publishes no arm64 image, and
+    # the Windows runners have no Docker Linux containers.
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Run the introspection suite against live servers
+        env:
+          RUN_DB_INTEGRATION: '1'
+        working-directory: engineering-lifecycle/tests/integration
+        run: python -m unittest test_introspection -v
+
+      - name: Container logs on failure
+        if: failure()
+        working-directory: engineering-lifecycle/tests/integration
+        run: docker compose -f compose.yaml logs --tail 80 || true

@@ -1,0 +1,29 @@
+# The database clients, so `schema-introspect.sh` can actually be exercised.
+#
+# The script gates every dialect on `command -v <client>`, so without the clients
+# on PATH it falls straight to "provide schema manually" and a test would prove
+# nothing about the code path. Putting the clients in a container rather than on
+# the developer's machine keeps the check hermetic and identical everywhere —
+# and is the only way this runs on a Windows box without installing four
+# database clients by hand.
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install --no-install-recommends -y \
+      ca-certificates curl gnupg \
+      default-mysql-client \
+      postgresql-client \
+      sqlite3 \
+ && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+      | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
+ && echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" \
+      > /etc/apt/sources.list.d/mssql-release.list \
+ && apt-get update \
+ && ACCEPT_EULA=Y apt-get install --no-install-recommends -y mssql-tools18 \
+ && rm -rf /var/lib/apt/lists/*
+
+# mssql-tools18 installs outside the default PATH.
+ENV PATH="/opt/mssql-tools18/bin:${PATH}"
+
+WORKDIR /work

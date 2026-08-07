@@ -41,18 +41,28 @@ Supported: `postgresql` (and Supabase), `mysql` (and MariaDB), `sqlite`,
 `sqlserver`, `mongodb`. See `references/data-model-adapters.md` for what each one
 changes.
 
-**Live introspection is verified for postgresql, sqlite and mongodb only.** The
-mysql and sqlserver paths in `schema-introspect.sh` were provably broken until
-recently — `mysql` was handed a URL where it expects a database *name*, and
-`sqlcmd` got a URL where `-S` expects a bare server with no `-U`/`-d` at all — so
-both always failed into the silent "provide schema manually" branch. They are now
-built from the connection string's parts as each client documents, but have not
-been run against a live MySQL or SQL Server. Treat a successful run on those two
-as the first confirmation, and fall back to pasting the schema if it fails.
+**Live introspection is verified against real servers for postgresql, mysql and
+sqlserver** by `tests/integration/test_introspection.py`, which runs the script
+against those three in containers on every change to it. `mysql` and `sqlserver`
+had never worked before that suite existed — `mysql` was handed a URL where it
+expects a database *name*, `sqlcmd` a URL where `-S` expects a bare server with no
+`-U`/`-d` — and both failed into the silent "provide schema manually" branch.
+
+`sqlite` and `mongodb` are not yet in that suite. They are believed working and
+were not among the broken pair, but "believed" is the honest word.
+
+**SQL Server against a container or any self-signed certificate needs
+`MSSQL_TRUST_SERVER_CERT=1`.** sqlcmd 18+ defaults to `Encrypt=yes` and validates
+the certificate. The script will not pass `-C` for you: trusting a production
+server's certificate silently is a worse failure than an explicit one.
 
 Credentials never travel in argv. The password is split out of the connection
 string and passed through `PGPASSWORD` / `MYSQL_PWD` / `SQLCMDPASSWORD`, because
 a command-line operand is readable from `ps` by any other local user.
+
+When a client fails, the digest now carries the client's own error rather than a
+bare "Connection failed". That line is what made two broken dialects look
+identical to "no server configured" for as long as they did.
 
 ## Inputs Inspected
 
