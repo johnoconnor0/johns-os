@@ -4,7 +4,7 @@
   "summary": "Move software products through a structured engineering lifecycle from discovery to maintenance.",
   "status": "local",
   "category": "Developer Tools",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "homepage": "https://weblifter.com.au",
   "path": "engineering-lifecycle",
   "manifest": "engineering-lifecycle/.codex-plugin/plugin.json",
