@@ -1692,23 +1692,32 @@ const shown = formatDate('YYYY_MM_DD');
             if hook.get("type") == "command"
         ]
         self.assertTrue(commands)
-        for command in commands:
-            if command.startswith("python"):
-                self.assertIn("-B", command.split('"', 1)[0], command)
+        for entries in config["hooks"].values():
+            for entry in entries:
+                for hook in entry["hooks"]:
+                    if hook.get("command") == "python":
+                        self.assertIn("-B", hook.get("args", []), hook)
 
-    def test_no_hook_depends_on_a_posix_shell(self) -> None:
-        # The two security guards used to be the only entries invoked through `sh`,
-        # and the only two that were guards. Where sh is absent they failed OPEN
-        # while their 25 Python siblings kept running - so a Windows user without
-        # Git Bash lost exactly the protections and kept all the noise. A hook that
-        # fails open is worse than no hook, because the config implies coverage.
+    def test_every_hook_uses_the_shell_free_exec_form(self) -> None:
+        # Two problems, one fix. The two security guards were the only entries
+        # invoked through `sh`, and the only two that were guards - so where sh is
+        # absent they failed OPEN while their 25 Python siblings kept running. And
+        # shell form re-parses the substituted ${CLAUDE_PLUGIN_ROOT}, so a plugin
+        # installed under a path containing a space broke every hook.
+        #
+        # Exec form (`command` + `args`) spawns the executable directly with no
+        # shell at all, which the hooks documentation recommends specifically for
+        # path placeholders. Neither failure mode survives it.
         config = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
         for entries in config["hooks"].values():
             for entry in entries:
                 for hook in entry["hooks"]:
                     command = hook.get("command", "")
-                    self.assertFalse(command.startswith(("sh ", "bash ")), command)
-                    self.assertNotIn(".sh", command)
+                    self.assertNotIn(" ", command, f"{command}: shell form; use command + args")
+                    self.assertIsInstance(hook.get("args"), list, command)
+                    self.assertFalse(command.startswith(("sh", "bash")), command)
+                    for arg in hook["args"]:
+                        self.assertFalse(str(arg).endswith(".sh"), arg)
 
     def test_the_denylist_catches_trivial_spellings_of_the_same_command(self) -> None:
         # A denylist leaks by construction and this does not claim to be complete.

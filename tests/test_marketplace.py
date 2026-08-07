@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import unittest
 from pathlib import Path
 
@@ -73,6 +74,63 @@ class MarketplaceMetadataTests(unittest.TestCase):
             for plugin in load(path)["plugins"]:
                 self.assertNotIn(".project", plugin["source"]["path"])
         self.assertIn("https://weblifter.com.au", (ROOT / "README.md").read_text(encoding="utf-8"))
+
+
+class SchemaEnforcementTests(unittest.TestCase):
+    """The schemas beside the catalog are loaded, not decorative.
+
+    `marketplace/schemas/*.schema.json` sat on disk unread while
+    `johns-os-marketplace.py` hand-rolled a weaker `require_keys` that tested
+    presence and never type, enum or format. The two drifted, exactly as you would
+    expect: `homepage` was required by the schema and absent from the hand list.
+    """
+
+    def setUp(self) -> None:
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import importlib.util  # noqa: PLC0415
+
+        spec = importlib.util.spec_from_file_location("jos_marketplace", ROOT / "scripts" / "johns-os-marketplace.py")
+        self.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.module)
+
+    def _plugin_schema(self) -> dict:
+        return load(ROOT / "marketplace/schemas/plugin.schema.json")
+
+    def test_the_schemas_are_actually_loaded(self) -> None:
+        for name in ("catalog", "plugin"):
+            self.assertTrue((ROOT / f"marketplace/schemas/{name}.schema.json").is_file())
+        # A missing schema must be an error, not a silent pass — returning "no
+        # errors" for an absent schema is how one comes to be ignored for months.
+        self.assertTrue(self.module.schema_errors("does-not-exist", {}, "x"))
+
+    def test_it_catches_what_presence_checking_could_not(self) -> None:
+        record = load(ROOT / "marketplace/plugins/ai-utilities.json")
+        schema = self._plugin_schema()
+        self.assertEqual(self.module.validate_against_schema(record, schema, "ok"), [])
+
+        for label, mutate in (
+            ("enum", lambda d: d.update(risk="banana")),
+            ("required", lambda d: d.pop("homepage", None)),
+            ("type", lambda d: d.update(tags="not-a-list")),
+            ("additionalProperties", lambda d: d.update(bogus_field=1)),
+            ("minLength", lambda d: d.update(summary="")),
+            ("format", lambda d: d.update(homepage="weblifter.com.au")),
+        ):
+            with self.subTest(rule=label):
+                broken = json.loads(json.dumps(record))
+                mutate(broken)
+                self.assertTrue(self.module.validate_against_schema(broken, schema, "x"), label)
+
+    def test_a_bool_is_not_an_integer(self) -> None:
+        # `isinstance(True, int)` is True in Python and False in JSON Schema.
+        self.assertTrue(self.module.validate_against_schema(True, {"type": "integer"}, "x"))
+        self.assertEqual(self.module.validate_against_schema(3, {"type": "integer"}, "x"), [])
+
+    def test_plugin_categories_agree_across_every_surface(self) -> None:
+        # The same plugin was "Developer Tools" in three files and "engineering"
+        # in its own catalog record. Version and homepage were cross-checked;
+        # category simply was not, which is why it drifted.
+        self.assertEqual(self.module.validate_categories(load(ROOT / "marketplace/catalog.json")), [])
 
 
 class CliPackagingTests(unittest.TestCase):

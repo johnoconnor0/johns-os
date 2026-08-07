@@ -138,10 +138,23 @@ def validate_hooks(root: Path) -> list[str]:
                 command = hook.get("command")
                 if not command:
                     continue
-                plugin_root_match = re.search(r"\$\{CLAUDE_PLUGIN_ROOT\}/([^\"'\s]+)", command)
-                target = root / plugin_root_match.group(1) if plugin_root_match else root / command
-                if not target.exists():
-                    errors.append(f"{path}: hook command missing: {command}")
+                # Exec form puts the script in `args` and leaves `command` as the
+                # bare interpreter, so the target has to be looked for in both.
+                # Checking only `command` here silently passed every entry.
+                candidates = [command, *[str(arg) for arg in hook.get("args", [])]]
+                referenced = [
+                    match.group(1)
+                    for candidate in candidates
+                    if (match := re.search(r"\$\{CLAUDE_PLUGIN_ROOT\}/([^\"'\s]+)", candidate))
+                ]
+                if not referenced:
+                    # A bare interpreter name with no plugin-owned target is fine.
+                    if "${CLAUDE_PLUGIN_ROOT}" not in command and not (root / command).exists():
+                        continue
+                    referenced = [command]
+                for relative in referenced:
+                    if not (root / relative).exists():
+                        errors.append(f"{path}: hook target missing: {relative}")
     return errors
 
 

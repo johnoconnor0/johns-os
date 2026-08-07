@@ -178,6 +178,55 @@ function marketplaceSource() {
   return entry?.source ?? null;
 }
 
+/** Whether the interpreter the hooks name actually resolves, and to what.
+ *
+ * The lifecycle plugin's hooks invoke `python`. On modern macOS and on most
+ * Linux distributions without `python-is-python3` that name does not exist, and
+ * a failing hook is non-blocking - so all 27 fail silently and the plugin
+ * appears installed while doing nothing at all.
+ *
+ * Nothing inside the plugin can report that, because anything that would do the
+ * reporting is itself a Python hook. This CLI is the only piece that runs on
+ * Node, which makes `doctor` the one place the check can live. There is no
+ * config-level fix: the hooks documentation confirms there is no
+ * platform-conditional execution, and no single interpreter name resolves on a
+ * stock macOS, a stock Linux and a stock Windows install.
+ */
+function reportPythonRuntime() {
+  // `--version` deliberately, not `-c "import sys; ..."`: shell form on Windows
+  // re-parses the argument list, and spaces and semicolons in a -c snippet come
+  // back mangled - which made this probe report "not found" on a machine where
+  // python plainly works.
+  const probe = (name) => {
+    const result = spawnSync(name, ['--version'], { encoding: 'utf8', shell: WINDOWS, timeout: 10_000 });
+    if (result.status !== 0) return null;
+    const text = `${result.stdout ?? ''}${result.stderr ?? ''}`.trim();
+    return text.replace(/^Python\s+/i, '') || null;
+  };
+
+  const primary = probe('python');
+  if (primary) {
+    console.log(`  python     ${primary}  (the interpreter every lifecycle hook uses)`);
+    const alternate = probe('python3');
+    if (alternate && alternate !== primary) {
+      console.log(`  python3    ${alternate}  — a DIFFERENT interpreter; hooks use \`python\`, not this one`);
+    }
+    return;
+  }
+
+  console.log('  python     NOT FOUND on PATH');
+  console.log('             Every engineering-lifecycle hook invokes `python`. Hook failures are');
+  console.log('             non-blocking, so all of them fail silently: the plugin looks installed');
+  console.log('             and does nothing.');
+  const alternate = probe('python3');
+  if (alternate) {
+    console.log(`             \`python3\` resolves (${alternate}). On macOS/Linux, install the`);
+    console.log('             `python-is-python3` package or add a `python` shim to PATH.');
+  } else {
+    console.log('             No `python3` either. Install Python 3.12 or newer.');
+  }
+}
+
 const commands = {
   list() {
     const plugins = marketplacePlugins();
@@ -257,6 +306,7 @@ const commands = {
     const records = installedRecords();
 
     console.log(`marketplace  ${MARKETPLACE}`);
+    reportPythonRuntime();
     if (source) {
       const origin = source.url ?? source.path ?? '?';
       console.log(`  source     ${source.source ?? '?'}: ${origin}`);

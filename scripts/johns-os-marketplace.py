@@ -93,8 +93,86 @@ def command_show(args: argparse.Namespace) -> int:
     return 0
 
 
+SCHEMAS = ROOT / "marketplace" / "schemas"
+
+_JSON_TYPES: dict[str, tuple[type, ...] | type] = {
+    "object": dict,
+    "array": list,
+    "string": str,
+    "number": (int, float),
+    "integer": int,
+    "boolean": bool,
+}
+
+
+def _type_ok(value: Any, expected: str) -> bool:
+    if expected == "null":
+        return value is None
+    wanted = _JSON_TYPES.get(expected)
+    if wanted is None:
+        return True
+    if expected in {"number", "integer"} and isinstance(value, bool):
+        return False  # bool is an int in Python; JSON Schema disagrees
+    return isinstance(value, wanted)
+
+
+def validate_against_schema(value: Any, schema: dict[str, Any], label: str) -> list[str]:
+    """The subset of JSON Schema these two schema files actually use.
+
+    `type`, `required`, `properties`, `items`, `enum`, `minLength`, `format` and
+    `additionalProperties: false`. Written out rather than taking a `jsonschema`
+    dependency, because the CLI is dependency-free by design and the repository
+    has avoided runtime dependencies everywhere else - and hand-rolling a
+    *weaker* check was the actual defect: `require_keys` tested presence but
+    never type, enum or format, so `risk: "banana"` passed.
+    """
+    errors: list[str] = []
+    declared = schema.get("type")
+    if isinstance(declared, str) and not _type_ok(value, declared):
+        return [f"{label}: expected {declared}, got {type(value).__name__}"]
+    if isinstance(declared, list) and not any(_type_ok(value, item) for item in declared):
+        return [f"{label}: expected one of {declared}, got {type(value).__name__}"]
+
+    if "enum" in schema and value not in schema["enum"]:
+        errors.append(f"{label}: {value!r} is not one of {schema['enum']!r}")
+    if isinstance(value, str):
+        if len(value) < int(schema.get("minLength", 0)):
+            errors.append(f"{label}: shorter than minLength {schema['minLength']}")
+        if schema.get("format") == "uri" and value and not re.match(r"^[a-z][a-z0-9+.-]*:", value):
+            errors.append(f"{label}: {value!r} is not a URI")
+
+    if isinstance(value, dict):
+        properties = schema.get("properties", {})
+        for key in schema.get("required", []):
+            if key not in value:
+                errors.append(f"{label}: missing required key {key}")
+        if schema.get("additionalProperties") is False:
+            for key in value:
+                if key not in properties:
+                    errors.append(f"{label}: unexpected key {key}")
+        for key, subschema in properties.items():
+            if key in value and isinstance(subschema, dict):
+                errors.extend(validate_against_schema(value[key], subschema, f"{label}.{key}"))
+    if isinstance(value, list) and isinstance(schema.get("items"), dict):
+        for index, item in enumerate(value):
+            errors.extend(validate_against_schema(item, schema["items"], f"{label}[{index}]"))
+    return errors
+
+
+def schema_errors(name: str, value: Any, label: str) -> list[str]:
+    """Validate against a schema file, and complain loudly if it is missing.
+
+    Returning "no errors" for an absent schema is how a schema pair comes to sit
+    on disk unread for months while a weaker hand-rolled check stands in for it.
+    """
+    path = SCHEMAS / f"{name}.schema.json"
+    if not path.is_file():
+        return [f"{path}: schema is missing"]
+    return validate_against_schema(value, load_json(path), label)
+
+
 def validate_catalog_shape(data: dict[str, Any]) -> list[str]:
-    errors = require_keys(CATALOG, data, ["id", "name", "description", "version", "updated_at", "plugins"])
+    errors = schema_errors("catalog", data, str(CATALOG.relative_to(ROOT)))
     plugins = data.get("plugins")
     if not isinstance(plugins, list):
         errors.append(f"{CATALOG}: plugins must be an array")
@@ -117,23 +195,11 @@ def validate_catalog_shape(data: dict[str, Any]) -> list[str]:
 
 
 def validate_plugin(plugin: dict[str, Any], record_path: Path) -> list[str]:
-    required = [
-        "id",
-        "name",
-        "summary",
-        "status",
-        "category",
-        "version",
-        "path",
-        "manifest",
-        "source",
-        "capabilities",
-        "tags",
-        "risk",
-        "install",
-        "validation",
-    ]
-    errors = require_keys(record_path, plugin, required)
+    # The required-key list used to be re-declared here by hand, which is how it
+    # drifted from the schema sitting beside it: `homepage` is required by the
+    # schema and was absent from the hand-rolled list, and no value was ever
+    # checked against an enum.
+    errors = schema_errors("plugin", plugin, str(record_path.relative_to(ROOT)))
     plugin_path = ROOT / str(plugin.get("path", ""))
     manifest_path = ROOT / str(plugin.get("manifest", ""))
     if not plugin_path.is_dir():
