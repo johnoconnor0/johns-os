@@ -404,6 +404,15 @@ class HookRunnerMixin:
         assert proc.stdin is not None
         proc.stdin.write(payload if isinstance(payload, str) else json.dumps(payload))
         proc.stdin.close()
+        # Detach the closed pipe so a later `communicate()` does not try to flush
+        # it. `Popen._communicate` guards that flush with `except BrokenPipeError`,
+        # which a closed - as opposed to broken - pipe does not raise: it raises
+        # `ValueError: I/O operation on closed file`, and the caller gets an error
+        # from the plumbing rather than a result from the hook. CPython 3.13 and
+        # the Windows implementation happen to survive it, so this reproduces on
+        # some CI legs and not others, which is exactly the shape of flake that
+        # gets re-run rather than read.
+        proc.stdin = None
         return proc
 
     def resolution(self, cwd: Path) -> dict:
