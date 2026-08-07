@@ -228,7 +228,10 @@ def issue_hash(issue: Mapping[str, Any]) -> str:
 
 
 def load_queue(root: Path) -> dict[str, Any]:
-    data = read_json(queue_path(root)) or {}
+    # `read_json_safe` like every other read of this tree: a queue truncated by a
+    # session that ended mid-write must degrade to "no queued issues", not raise
+    # out of the Stop hook that was reading it.
+    data = read_json_safe(queue_path(root))
     issues = data.get("issues")
     return {"generated_at": data.get("generated_at", now_iso()), "issues": issues if issues else []}
 

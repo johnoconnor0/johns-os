@@ -194,17 +194,38 @@ def validate_catalog_shape(data: dict[str, Any]) -> list[str]:
     return errors
 
 
+def contained(declared: str) -> Path | None:
+    """Resolve a declared source path under ROOT, or None if it does not stay there.
+
+    `ROOT / value` was never a containment test. The obvious hole is `..`, but
+    the worse one is absolute: `Path.__truediv__` DISCARDS the left operand when
+    the right side is absolute, so `source: "/etc"` - or `"C:\\Windows"` - was
+    resolved to that directory and `is_dir()` cheerfully confirmed it existed.
+    Either spelling publishes a marketplace that tells a client to install from
+    outside the repository it cloned.
+    """
+    if not declared:
+        return None
+    anchor = ROOT.resolve()
+    candidate = (anchor / declared).resolve()
+    return candidate if candidate.is_relative_to(anchor) else None
+
+
 def validate_plugin(plugin: dict[str, Any], record_path: Path) -> list[str]:
     # The required-key list used to be re-declared here by hand, which is how it
     # drifted from the schema sitting beside it: `homepage` is required by the
     # schema and was absent from the hand-rolled list, and no value was ever
     # checked against an enum.
     errors = schema_errors("plugin", plugin, str(record_path.relative_to(ROOT)))
-    plugin_path = ROOT / str(plugin.get("path", ""))
-    manifest_path = ROOT / str(plugin.get("manifest", ""))
-    if not plugin_path.is_dir():
+    plugin_path = contained(str(plugin.get("path", "")))
+    manifest_path = contained(str(plugin.get("manifest", "")))
+    if plugin_path is None:
+        errors.append(f"{record_path}: plugin path is not inside the repository: {plugin.get('path')}")
+    elif not plugin_path.is_dir():
         errors.append(f"{record_path}: plugin path does not exist: {plugin.get('path')}")
-    if not manifest_path.is_file():
+    if manifest_path is None:
+        errors.append(f"{record_path}: plugin manifest is not inside the repository: {plugin.get('manifest')}")
+    elif not manifest_path.is_file():
         errors.append(f"{record_path}: plugin manifest does not exist: {plugin.get('manifest')}")
     else:
         manifest = load_json(manifest_path)
@@ -277,7 +298,8 @@ def validate_platform_surfaces(catalog_data: dict[str, Any]) -> list[str]:
                 continue
             source = entry.get("source")
             relative_path = source.get("path") if isinstance(source, dict) else None
-            if not isinstance(relative_path, str) or not (ROOT / relative_path).is_dir():
+            resolved = contained(relative_path) if isinstance(relative_path, str) else None
+            if resolved is None or not resolved.is_dir():
                 errors.append(f"{path}: plugin source path is missing for {entry.get('name')}")
 
     claude_path = ROOT / ".claude-plugin" / "marketplace.json"
@@ -291,7 +313,7 @@ def validate_platform_surfaces(catalog_data: dict[str, Any]) -> list[str]:
             continue
         plugin_id = entry.get("name")
         source = entry.get("source")
-        source_path = ROOT / source if isinstance(source, str) else None
+        source_path = contained(source) if isinstance(source, str) else None
         if source_path is None or not source_path.is_dir():
             errors.append(f"{claude_path}: plugin source path is missing for {plugin_id}")
             continue
@@ -321,8 +343,13 @@ def validate_codex_interfaces(catalog_data: dict[str, Any]) -> list[str]:
         record_path = ROOT / entry["record"]
         if not record_path.exists():
             continue
-        plugin_path = str(load_json(record_path).get("path", ""))
-        manifest = ROOT / plugin_path / ".codex-plugin" / "plugin.json"
+        # Anchored like every other consumer of `path`. `validate_plugin` is
+        # what reports the escape; this only has to refuse to open a file
+        # outside the checkout on the way there.
+        plugin_dir = contained(str(load_json(record_path).get("path", "")))
+        if plugin_dir is None:
+            continue
+        manifest = plugin_dir / ".codex-plugin" / "plugin.json"
         if not manifest.is_file():
             continue
         interface = load_json(manifest).get("interface") or {}
@@ -394,13 +421,18 @@ def command_bump_version(args: argparse.Namespace) -> int:
     if not isinstance(record_rel, str):
         raise SystemExit(f"plugin not found in catalog: {plugin_id}")
     record = load_json(ROOT / record_rel)
-    plugin_path = str(record.get("path", ""))
+    # Anchored before anything is staged, because this is the one place the
+    # record's `path` is used to *write*: an unanchored `ROOT / path` would set
+    # a version inside a plugin.json outside the checkout entirely.
+    plugin_dir = contained(str(record.get("path", "")))
+    if plugin_dir is None:
+        raise SystemExit(f"{record_rel}: plugin path is not inside the repository: {record.get('path')!r}")
 
     staged: list[tuple[Path, dict[str, Any]]] = []
     for path in (
         ROOT / record_rel,
-        ROOT / plugin_path / ".claude-plugin" / "plugin.json",
-        ROOT / plugin_path / ".codex-plugin" / "plugin.json",
+        plugin_dir / ".claude-plugin" / "plugin.json",
+        plugin_dir / ".codex-plugin" / "plugin.json",
     ):
         if not path.is_file():
             errors.append(f"missing version target: {path}")

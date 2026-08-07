@@ -10,11 +10,13 @@
     "node": ">=20.11.0"
   },
   "scripts": {
-    "prepack": "node -e \"require('node:fs').copyFileSync('../.claude-plugin/marketplace.json','marketplace.json')\""
+    "prepack": "node -e \"const {copyFileSync}=require('node:fs');copyFileSync('../.claude-plugin/marketplace.json','marketplace.json');copyFileSync('../LICENSE','LICENSE')\"",
+    "test": "node --test"
   },
   "files": [
     "index.js",
     "marketplace.json",
+    "LICENSE",
     "README.md"
   ],
   "keywords": [

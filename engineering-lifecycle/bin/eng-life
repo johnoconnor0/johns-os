@@ -77,8 +77,15 @@ def main() -> int:
     if args.command == "init":
         return run("scripts/init-workspace.py", root, explicit_root=args.root)
     if args.command == "validate":
+        # `--all` reaches the sibling plugins in the marketplace this one is
+        # installed from. Without it, `validate_plugin` - skill sections, hook
+        # targets, manifest agreement - only ever ran against this plugin, and
+        # `ai-utilities` is the only one whose hooks shell out, so nothing had
+        # ever resolved those four `bash "${CLAUDE_PLUGIN_ROOT}/..."` targets.
+        # A validator that covers one of three plugins reads as coverage.
         code = subprocess.call(
-            [sys.executable, "-B", str(ROOT / "scripts" / "validate-plugin.py"), "--root", str(ROOT)], cwd=ROOT
+            [sys.executable, "-B", str(ROOT / "scripts" / "validate-plugin.py"), "--root", str(ROOT), "--all"],
+            cwd=ROOT,
         )
         code = (
             subprocess.call(

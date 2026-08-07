@@ -24,7 +24,7 @@ from eng_common import (
     engineering_root,
     git,
     now_iso,
-    read_json,
+    read_json_safe,
     slugify,
     workspace_exists,
     write_json,
@@ -83,8 +83,12 @@ def load_initiative_registry(root: Path) -> dict[str, Any]:
 
     Directories created before the registry existed (or by hand) are adopted
     rather than ignored, so the registry can never disagree with the filesystem.
+
+    Read with `read_json_safe` for the same reason: a registry truncated by a
+    session that ended mid-write must degrade to "the directories on disk", not
+    raise out of every hook that asks which initiative is active.
     """
-    data = read_json(registry_path(root)) or {}
+    data = read_json_safe(registry_path(root))
     known = {entry["id"]: entry for entry in data.get("initiatives", []) if isinstance(entry, dict) and entry.get("id")}
     for name in initiative_dirs(root):
         known.setdefault(name, {"id": name, "title": name.replace("-", " "), "status": "active", "created_at": None})
