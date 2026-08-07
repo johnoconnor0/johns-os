@@ -60,6 +60,17 @@ def main() -> int:
 
     proc = subprocess.run([sys.executable, "-B", str(SCRIPT)], text=True, capture_output=True, check=False)
     if stop_mode:
+        # Silent on *stdout* - that is the rule, and the reason is the standby loop
+        # in the docstring above. It was never a reason to discard stderr as well,
+        # which is what left a crash in the ledger sync with no traceback anywhere:
+        # the wrapper returned the child's exit code and threw away the only thing
+        # that said why. stderr is not re-injected as context, so it is safe to
+        # relay, and the child's stdout follows it only when the run failed, where
+        # it is diagnostic rather than conversational.
+        if proc.stderr.strip():
+            print(proc.stderr.strip(), file=sys.stderr)
+        if proc.returncode != 0 and proc.stdout.strip():
+            print(proc.stdout.strip(), file=sys.stderr)
         return proc.returncode
     if proc.stdout.strip():
         print(proc.stdout.strip())

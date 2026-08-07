@@ -74,7 +74,11 @@ def main() -> int:
     if not payload or not workspace_exists(root):
         return 0
 
-    tool_input = payload.get("tool_input") or {}
+    # The type, not the truthiness: `or {}` leaves a string `tool_input` in place
+    # and the next `.get` raises AttributeError out of the hook.
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return 0
     target = str(tool_input.get("file_path") or tool_input.get("path") or "")
     if not target or not is_backend_target(target):
         return 0

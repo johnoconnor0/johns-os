@@ -23,7 +23,7 @@ from eng_common import (
     engineering_root,
     now_iso,
     parse_front_matter,
-    read_json,
+    read_json_safe,
     relpath,
     workspace_exists,
     write_json,
@@ -87,7 +87,12 @@ def question_id(question: str, source: str = "") -> str:
 
 
 def load_open_questions(root: Path) -> dict[str, Any]:
-    data = read_json(questions_path(root)) or {}
+    # `read_json_safe`, not `read_json`: seven PostToolUse hooks write into this
+    # tree concurrently and a session can end mid-write, so a truncated store is a
+    # state this reaches rather than a state it can refuse. Raising here took down
+    # the UserPromptSubmit hook on every subsequent turn - which is to say the
+    # whole plugin - and nothing left in the plugin could report or repair it.
+    data = read_json_safe(questions_path(root))
     entries = data.get("open_questions")
     return {"generated_at": data.get("generated_at", now_iso()), "open_questions": entries if entries else []}
 
@@ -299,8 +304,11 @@ def capture_asked_questions(root: Path, payload: dict[str, Any] | None) -> dict[
     """
     if not payload or not workspace_exists(root):
         return {"recorded": 0}
-    tool_input = payload.get("tool_input") or {}
-    asked = tool_input.get("questions")
+    # `or {}` only replaces a *falsey* value, so a string `tool_input` sailed
+    # through to `.get` and took the hook down. The type is what has to be
+    # checked, which is what `command_from_payload` and its siblings already do.
+    tool_input = payload.get("tool_input")
+    asked = tool_input.get("questions") if isinstance(tool_input, dict) else None
     if not isinstance(asked, list):
         return {"recorded": 0}
 
@@ -337,7 +345,8 @@ def capture_given_answers(root: Path, payload: dict[str, Any] | None) -> dict[st
     """
     if not payload or not workspace_exists(root):
         return {"answered": 0}
-    asked = (payload.get("tool_input") or {}).get("questions")
+    tool_input = payload.get("tool_input")
+    asked = tool_input.get("questions") if isinstance(tool_input, dict) else None
     response = payload.get("tool_response")
     if isinstance(response, str):
         try:

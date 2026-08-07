@@ -16,7 +16,7 @@ from eng_common import (
     item_from_text,
     now_iso,
     parse_front_matter,
-    read_json,
+    read_json_lenient,
     resolve_cli_root,
     write_json,
     write_text,
@@ -35,7 +35,9 @@ _UNREADABLE = object()
 
 def _validation_status(path: Path) -> str:
     """Derive valid/invalid/error from a generated validation report's contents."""
-    data = read_json(path, _UNREADABLE)
+    # `read_json_lenient`: a report truncated mid-write is exactly the "error"
+    # this function already has a word for, not a JSONDecodeError out of the hook.
+    data = read_json_lenient(path, _UNREADABLE)
     if data is _UNREADABLE:
         return "error"
     if isinstance(data, dict):
@@ -137,7 +139,7 @@ def collect_action_items(root: Path, base: Path, docs: Path) -> list[dict]:
 
     emitted: dict[str, dict] = {}
     for path in sorted(base.rglob("*action-items*.json")):
-        data = read_json(path, {})
+        data = read_json_lenient(path, {})
         for item in data if isinstance(data, list) else data.get("action_items", []):
             if isinstance(item, dict) and item.get("id"):
                 emitted[str(item["id"])] = item
@@ -164,13 +166,18 @@ def collect_ledger(root: Path) -> dict:
     # existed but nothing collected them until now.
     human_tasks: list[dict] = []
     for path in sorted(base.rglob("*human-tasks*.json")):
-        data = read_json(path, {})
+        data = read_json_lenient(path, {})
         human_tasks.extend(data if isinstance(data, list) else data.get("human_tasks", []))
     # Questions the assistant needs a human to answer. Collected here so they
     # appear on the dashboard instead of only in the file that raised them.
-    questions = read_json(base / "questions" / "open-questions.json", {})
+    # `read_json_lenient` at all four of this file's generated-JSON reads. Seven
+    # PostToolUse hooks write into this tree concurrently and a session can end
+    # mid-write, so a truncated store is a state the dashboard sync reaches - and
+    # raising here took the Stop and PostToolUse hooks down on every later turn,
+    # with nothing left in the plugin able to report or repair it.
+    questions = read_json_lenient(base / "questions" / "open-questions.json", {})
     open_questions = questions.get("open_questions", []) if isinstance(questions, dict) else []
-    hygiene = read_json(base / "hygiene" / "hygiene-report.json", {})
+    hygiene = read_json_lenient(base / "hygiene" / "hygiene-report.json", {})
     council_runs = []
     council_root = base / "council"
     if council_root.exists():

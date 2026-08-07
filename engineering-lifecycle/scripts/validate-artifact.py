@@ -8,7 +8,13 @@ import json
 import re
 from pathlib import Path
 
-from eng_common import REQUIRED_FRONT_MATTER, artifact_roots, parse_front_matter, resolve_cli_root
+from eng_common import (
+    REQUIRED_FRONT_MATTER,
+    artifact_roots,
+    is_generated_digest,
+    parse_front_matter,
+    resolve_cli_root,
+)
 
 REQUIRED_SECTIONS = {
     "discovery-brief": [
@@ -170,6 +176,11 @@ def validate_json(path: Path) -> list[str]:
 def validate_path(path: Path, root: Path | None = None) -> list[str]:
     if not path.exists():
         return [f"{path}: does not exist"]
+    if is_generated_digest(path, root):
+        # A rendered view of a JSON store, not an authored artifact. See
+        # `GENERATED_DIGESTS`: holding it to the artifact contract made this
+        # validator report its own output as broken on every edit.
+        return []
     if path.suffix.lower() == ".md":
         return validate_markdown(path, root)
     if path.suffix.lower() == ".json":

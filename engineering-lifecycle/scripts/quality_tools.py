@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from eng_common import (
+    HookPayload,
     RootResolution,
     append_jsonl,
     builds_env_names_dynamically,
@@ -28,7 +29,7 @@ from eng_common import (
     git_files,
     hook_additional_context,
     hook_output,
-    load_hook_payload,
+    is_generated_digest,
     nearest_env_example,
     nested_workspaces,
     now_iso,
@@ -36,6 +37,7 @@ from eng_common import (
     parse_front_matter,
     permission_output,
     placeholder_for_env,
+    read_hook_payload,
     read_json,
     read_json_safe,
     relpath,
@@ -680,6 +682,11 @@ def markdown_artifact_validator(root: Path, files: list[str]) -> dict[str, Any]:
     for path in targets:
         if not path.exists():
             errors.append(f"{relpath(path, root)}: missing")
+            continue
+        if is_generated_digest(path, root):
+            # Same exemption `validate-artifact.py` applies, for the same reason.
+            # Two validators disagreeing about the same file is how one of them
+            # ends up being ignored.
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")
         fm, body = parse_front_matter(text)
@@ -1671,9 +1678,10 @@ def run_tool(name: str, args: argparse.Namespace) -> dict[str, Any]:
     handler = TOOLS.get(name)
     if handler is None:
         raise SystemExit(f"unknown tool: {name}")
-    payload = load_hook_payload() if args.hook else {}
+    incoming = read_hook_payload() if args.hook else HookPayload({})
+    payload = incoming.data
     resolution = resolve_cli_root(args.root)
-    return handler(
+    result = handler(
         ToolContext(
             args=args,
             root=resolution.root,
@@ -1687,6 +1695,12 @@ def run_tool(name: str, args: argparse.Namespace) -> dict[str, Any]:
             hook_tool_name=str(payload.get("tool_name") or payload.get("toolName") or ""),
         )
     )
+    # Recorded on the result rather than checked inside each tool, so a tool stays
+    # a pure function of what it was given and only `render_hook` has to know what
+    # "I never saw the call" means for the event it is answering.
+    if incoming.unreadable and isinstance(result, dict):
+        result["payload_unreadable"] = incoming.detail or True
+    return result
 
 
 def wrong_initiative_write(root: Path, path: str) -> dict[str, Any]:
@@ -1725,7 +1739,31 @@ def load_current_plan_scope(root: Path) -> list[str]:
     return [str(item).replace("\\", "/") for item in values if isinstance(item, str)]
 
 
+# What each PreToolUse gate returns when `read_hook_payload` could not read the
+# call it was meant to inspect. A guard that saw nothing has not cleared the call,
+# it has failed to look at it, and `allow` is a verdict it never earned - which is
+# exactly how a 2 MiB payload used to walk `rm -rf /` past both Bash guards.
+#
+# `deny` for the two that deny, `ask` for the three that escalate, so a closed
+# failure is the same shape as that guard's normal refusal. This cannot fire on an
+# ordinary turn: an absent payload stays readable-and-empty (see `read_hook_payload`),
+# so nothing legitimate is gated by it.
+GUARD_CLOSED_DECISION = {
+    "dangerous-command-guard": "deny",
+    "secret-exfiltration-guard": "deny",
+    "production-environment-guard": "ask",
+    "sensitive-file-policy": "ask",
+    "edit-scope-guard": "ask",
+}
+UNREADABLE_PAYLOAD_REASON = (
+    "Engineering Lifecycle could not read this hook payload, so the call was never "
+    "inspected. Approve it only if you know what it does."
+)
+
+
 def render_hook(tool_name: str, result: dict[str, Any]) -> dict[str, Any] | None:
+    if result.get("payload_unreadable") and tool_name in GUARD_CLOSED_DECISION:
+        return permission_output("PreToolUse", GUARD_CLOSED_DECISION[tool_name], UNREADABLE_PAYLOAD_REASON)
     if tool_name in {"dangerous-command-guard", "secret-exfiltration-guard"} and result.get("blocked"):
         return permission_output("PreToolUse", "deny", result.get("reason", "Blocked by Engineering Lifecycle guard."))
     if tool_name == "production-environment-guard" and result.get("requires_approval"):

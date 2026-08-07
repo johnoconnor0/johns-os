@@ -91,6 +91,30 @@ REQUIRED_FRONT_MATTER = [
     "source_artifacts",
 ]
 
+# Markdown inside the workspace that this plugin *renders* rather than a human
+# authors: a readable view of a JSON store beside it, rewritten from scratch on
+# every turn. Listed by exact path, not by directory, so a future authored
+# artifact cannot fall through the gap by landing in the same folder.
+#
+# `validate-artifact.py` skips them, and it has to. They are not artifacts:
+# `REQUIRED_FRONT_MATTER` asks a digest for one initiative_id, one skill and one
+# confidence when a digest spans every initiative and was written by no skill, so
+# the only way to satisfy it is to invent all six values - a validator passing on
+# metadata that means nothing. Worse, the bodies quote text the plugin does not
+# author (a human's question, a detector's issue title), so a question containing
+# the word TBD would trip the placeholder check forever with nothing the user
+# could edit to fix it. This hook is wired PostToolUse: it fired on every edit for
+# the life of the project, reporting its own output as broken.
+GENERATED_DIGESTS = frozenset(
+    {
+        "questions/open-questions.md",
+        "tracker/surfaced-issues.md",
+        "tracker/workstreams.md",
+        "context/repo-context.md",
+        "reports/mermaid-index.md",
+    }
+)
+
 
 def plugin_root() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -271,6 +295,15 @@ def docs_root(root: Path | None = None) -> Path:
     return (root or repo_root()) / DOCS_ROOT
 
 
+def is_generated_digest(path: Path, root: Path | None = None) -> bool:
+    """True when `path` is one of the digests this plugin renders for itself."""
+    try:
+        relative = Path(path).resolve().relative_to(engineering_root(root).resolve())
+    except (OSError, ValueError):
+        return False
+    return relative.as_posix() in GENERATED_DIGESTS
+
+
 def artifact_roots(root: Path | None = None) -> list[Path]:
     """Both artifact trees, for anything that scans or validates the lot."""
     base = root or repo_root()
@@ -317,6 +350,20 @@ def read_json_safe(path: Path) -> dict[str, Any]:
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def read_json_lenient(path: Path, default: Any = None) -> Any:
+    """`read_json`, with a malformed file treated the same as an absent one.
+
+    For the readers that legitimately accept a list *or* an object, where
+    `read_json_safe`'s dict-only contract would quietly discard the list form.
+    Same reasoning as `read_json_safe` otherwise: half-written generated files are
+    a state this tree reaches, not one a scan may refuse to continue past.
+    """
+    try:
+        return read_json(path, default)
+    except (OSError, ValueError):
+        return default
 
 
 def _atomic_write(path: Path, payload: str) -> None:
@@ -636,14 +683,91 @@ def item_from_text(line: str, source: str, index: int) -> dict[str, Any] | None:
     }
 
 
-def load_hook_payload() -> dict[str, Any]:
+@dataclass(frozen=True)
+class HookPayload:
+    """What arrived on stdin, and whether it could be understood at all.
+
+    The distinction a bare dict could not carry. "The harness sent nothing" and
+    "the harness sent something this could not parse" both used to come back as
+    `{}`, and the two PreToolUse guards read an empty payload as "no command to
+    object to" - so an input they could not read was indistinguishable from an
+    input they had cleared. `unreadable` is what lets them fail closed instead.
+    """
+
+    data: dict[str, Any]
+    unreadable: bool = False
+    detail: str = ""
+
+
+# Far above any payload the harness will ever send, and present only so a runaway
+# producer cannot make a hook the process that runs out of memory. Exceeding it is
+# reported as unreadable - never quietly truncated, which is the defect below.
+HOOK_PAYLOAD_MAX_BYTES = 64 * 1024 * 1024
+
+
+def _stdin_bytes(limit: int) -> bytes:
+    """Stdin read to EOF, or far enough past `limit` for the caller to notice."""
+    chunks: list[bytes] = []
+    size = 0
+    while size <= limit:
+        chunk = os.read(0, 1 << 16)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        size += len(chunk)
+    return b"".join(chunks)
+
+
+def read_hook_payload() -> HookPayload:
+    """The hook payload on stdin, with a usable answer for every kind of stdin.
+
+    Read to EOF. The previous single `os.read(0, 1024 * 1024)` returned at most one
+    buffer, so a payload over 1 MiB - one Write of a large file, one long Bash
+    command - arrived truncated mid-document, failed to parse, and a bare
+    `except Exception: return {}` turned that into "the harness sent nothing". For
+    the PreToolUse guards that meant they FAIL OPEN: `rm -rf /` was denied at 112
+    bytes and allowed at 2 MiB. A guard that stops seeing its input above a size
+    threshold is not a guard.
+
+    Three outcomes, kept distinguishable:
+
+    * a JSON object -> that object, `unreadable` False
+    * nothing on stdin -> `{}`, `unreadable` False (a tty, a CLI run, a closed pipe)
+    * anything else -> `{}`, `unreadable` True
+
+    The third case covers both a document that will not parse and one that parses
+    to something that is not an object - a top-level array or scalar, which is a
+    payload every consumer would then call `.get` on. Consumers still see an empty
+    dict, which is what "treated as no payload" has to mean for them; only the
+    guards, which must not treat "unseen" as "clean", look at the flag.
+    """
     try:
         if os.isatty(0):
-            return {}
-        raw = os.read(0, 1024 * 1024).decode("utf-8", errors="replace").strip()
-        return json.loads(raw) if raw else {}
-    except Exception:
-        return {}
+            return HookPayload({})
+        raw = _stdin_bytes(HOOK_PAYLOAD_MAX_BYTES)
+    except (OSError, ValueError) as exc:
+        # No readable stdin at all, which is the CLI shape rather than a hostile
+        # one: nothing was sent, so nothing was missed.
+        return HookPayload({}, False, f"stdin could not be read: {exc}")
+    if len(raw) > HOOK_PAYLOAD_MAX_BYTES:
+        return HookPayload({}, True, f"payload exceeded {HOOK_PAYLOAD_MAX_BYTES} bytes")
+    # BOM first: Windows producers emit one, it is not whitespace, and `strip()`
+    # leaves it in front of the `{` where it fails the parse for no good reason.
+    text = raw.decode("utf-8", errors="replace").lstrip("﻿").strip()
+    if not text:
+        return HookPayload({})
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        return HookPayload({}, True, f"stdin is not JSON: {exc}")
+    if not isinstance(data, dict):
+        return HookPayload({}, True, f"hook payload is a {type(data).__name__}, not an object")
+    return HookPayload(data)
+
+
+def load_hook_payload() -> dict[str, Any]:
+    """The payload alone, for callers with nothing to decide about unreadability."""
+    return read_hook_payload().data
 
 
 def hook_output(event_name: str, **values: Any) -> dict[str, Any]:

@@ -13,7 +13,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -166,7 +166,12 @@ function installedRecords() {
     if (!split || split.marketplace !== MARKETPLACE) continue;
     if (!Array.isArray(entries)) continue;
     for (const entry of entries) {
-      if (entry && typeof entry === 'object') found.push({ key, name: split.name, ...entry });
+      // Spread first, derive second. Claude owns this file, and a record
+      // carrying its own `name` or `key` would otherwise overwrite the values
+      // parsed out of the install key - so `update` would run
+      // `claude plugin update <whatever the file said>@johns-os` against a
+      // plugin nobody asked for.
+      if (entry && typeof entry === 'object') found.push({ ...entry, key, name: split.name });
     }
   }
   return found;
@@ -247,8 +252,12 @@ const commands = {
   },
 
   install(args) {
-    requireClaude();
+    // Parse before probing for `claude`. With the probe first, every argument
+    // mistake on a machine that has not installed Claude Code was reported as
+    // exit 127 "claude not found" - the one diagnostic guaranteed not to name
+    // the actual problem. Argument errors do not need the binary to be right.
     const { scope, plugins } = parseArgs(args);
+    requireClaude();
     const targets = plugins.length ? plugins : marketplacePlugins().map((p) => p.name);
 
     if (!marketplaceSource()) {
@@ -268,10 +277,11 @@ const commands = {
   },
 
   update(args) {
-    requireClaude();
     // `claude plugin update` takes no scope, but accepting and ignoring --scope
-    // here is what stops its value being read as a plugin name.
+    // here is what stops its value being read as a plugin name. Parsed before
+    // `requireClaude`, for the reason given in `install`.
     const { plugins } = parseArgs(args);
+    requireClaude();
     console.log(`Refreshing the ${MARKETPLACE} marketplace...`);
     const refreshed = run('claude', ['plugin', 'marketplace', 'update', MARKETPLACE]);
     if (refreshed.code !== 0) return refreshed.code;
@@ -291,9 +301,10 @@ const commands = {
   },
 
   init(args) {
-    requireClaude();
+    // Argument check before `requireClaude`, for the reason given in `install`.
     const unknown = args.filter((arg) => arg !== 'here' && arg !== '--here');
     if (unknown.length) fail(`Unknown argument for init: ${unknown[0]}\nUsage: johns-os init [here]`);
+    requireClaude();
     console.log('Initializing the Engineering Lifecycle workspace in this directory...');
     const here = args.includes('here') || args.includes('--here');
     // `run` quotes this for the Windows shell; without that the space made
@@ -375,18 +386,68 @@ Commands:
 ${REPO}`);
 }
 
-const [command, ...args] = process.argv.slice(2);
-if (!command || command === '--help' || command === '-h') {
-  usage();
-  process.exit(0);
+/** Whether this file is the process entrypoint rather than an imported module.
+ *
+ * Guarding the dispatch is what makes the functions above unit-testable: without
+ * it, importing this file reads `process.argv` and calls `process.exit`, so a
+ * test runner that imported it would exit before running a single test.
+ *
+ * Both sides go through realpath, not just `path.resolve`. npm's POSIX bin shim
+ * is a *symlink* to this file, so `process.argv[1]` is the symlink path while
+ * `import.meta.url` is already resolved - a plain resolve would compare unequal
+ * and the published binary would exit 0 having done nothing.
+ */
+function isEntrypoint() {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  const canonical = (target) => {
+    let resolved;
+    try {
+      resolved = realpathSync(target);
+    } catch {
+      resolved = path.resolve(target);
+    }
+    // Windows paths are case-insensitive and the two sides can disagree on the
+    // casing of the drive letter alone.
+    return WINDOWS ? resolved.toLowerCase() : resolved;
+  };
+  return canonical(entry) === canonical(fileURLToPath(import.meta.url));
 }
-if (command === '--version' || command === '-v') {
-  console.log(readJson(path.join(HERE, 'package.json'))?.version ?? 'unknown');
-  process.exit(0);
+
+function main(argv) {
+  const [command, ...args] = argv;
+  if (!command || command === '--help' || command === '-h') {
+    usage();
+    return 0;
+  }
+  if (command === '--version' || command === '-v') {
+    console.log(readJson(path.join(HERE, 'package.json'))?.version ?? 'unknown');
+    return 0;
+  }
+  if (!Object.hasOwn(commands, command)) {
+    console.error(`Unknown command: ${command}\n`);
+    usage();
+    return 1;
+  }
+  return commands[command](args) ?? 0;
 }
-if (!Object.hasOwn(commands, command)) {
-  console.error(`Unknown command: ${command}\n`);
-  usage();
-  process.exit(1);
+
+if (isEntrypoint()) {
+  process.exit(main(process.argv.slice(2)));
 }
-process.exit(commands[command](args) ?? 0);
+
+export {
+  commands,
+  main,
+  marketplacePlugins,
+  marketplaceSource,
+  installedRecords,
+  parseArgs,
+  readJson,
+  run,
+  splitInstallKey,
+  usage,
+  PLUGIN_NAME,
+  SCOPES,
+  SHELL_METACHARACTERS,
+};
