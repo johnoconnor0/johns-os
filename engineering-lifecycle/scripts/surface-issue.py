@@ -20,7 +20,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from eng_common import emit_json, read_json, relpath, repo_root, resolve_cli_root, workspace_exists, write_json
+from eng_common import emit_json, read_json, relpath, resolve_cli_root, workspace_exists, write_json
 from tracker import (
     DEFAULT_FETCH_LIMIT,
     ISSUE_STATUSES,

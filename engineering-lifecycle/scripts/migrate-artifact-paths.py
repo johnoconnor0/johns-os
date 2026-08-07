@@ -18,7 +18,7 @@ import argparse
 import shutil
 from pathlib import Path
 
-from eng_common import docs_root, emit_json, engineering_root, git, relpath, repo_root, resolve_cli_root
+from eng_common import docs_root, emit_json, engineering_root, git, relpath, resolve_cli_root
 
 # Stage directory -> destination inside docs/engineering/<initiative-id>/.
 # Stages absent from this map stay in the workspace: review notes, testing plans

@@ -36,7 +36,6 @@ from eng_common import (
     parse_front_matter,
     read_json_safe,
     relpath,
-    repo_root,
     resolve_cli_root,
     workspace_exists,
     write_json,

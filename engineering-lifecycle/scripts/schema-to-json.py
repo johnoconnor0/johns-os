@@ -16,7 +16,7 @@ from pathlib import Path
 
 from data_model import parse_document_model, parse_schema_sql, render_erd
 from dialects import DIALECTS, model_filename, resolve_dialect
-from eng_common import docs_root, emit_json, relpath, repo_root, resolve_cli_root, write_json, write_text
+from eng_common import docs_root, emit_json, relpath, resolve_cli_root, write_json, write_text
 
 
 def initiative_data_dir(root: Path, initiative: str) -> Path:

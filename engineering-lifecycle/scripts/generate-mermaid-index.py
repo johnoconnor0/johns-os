@@ -4,9 +4,8 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
-from eng_common import WORKSPACE, engineering_root, repo_root, resolve_cli_root, write_text
+from eng_common import WORKSPACE, engineering_root, resolve_cli_root, write_text
 
 
 def main() -> int:

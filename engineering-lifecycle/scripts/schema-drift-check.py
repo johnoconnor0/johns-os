@@ -18,7 +18,6 @@ from eng_common import (
     engineering_root,
     read_json,
     relpath,
-    repo_root,
     resolve_cli_root,
     workspace_exists,
     write_json,

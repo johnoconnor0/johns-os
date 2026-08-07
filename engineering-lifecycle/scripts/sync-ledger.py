@@ -17,7 +17,6 @@ from eng_common import (
     now_iso,
     parse_front_matter,
     read_json,
-    repo_root,
     resolve_cli_root,
     write_json,
     write_text,

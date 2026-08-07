@@ -41,7 +41,9 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from audit_common import command_argv as _argv, repo_root, scrub_secrets as _scrub
+from audit_common import command_argv as _argv
+from audit_common import repo_root
+from audit_common import scrub_secrets as _scrub
 from stack_probe import resolve_stack
 
 # Default wall-clock budget per command. There used to be none at all, so a repo
@@ -110,8 +112,6 @@ def plan(root: Path, prefer: str = "") -> dict[str, Any]:
         "reason": "this project declares no verification command and none could be detected",
         "commands": [],
     }
-
-
 
 
 def verify(

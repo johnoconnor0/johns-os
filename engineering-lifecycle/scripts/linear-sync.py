@@ -20,7 +20,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from eng_common import engineering_root, now_iso, read_json, relpath, repo_root, resolve_cli_root, write_json
+from eng_common import engineering_root, now_iso, read_json, relpath, resolve_cli_root, write_json
 
 PRIORITY_MAP = {"urgent": 1, "high": 2, "normal": 3, "low": 4}
 HASH_FIELDS = ("title", "status", "owner", "priority", "description")

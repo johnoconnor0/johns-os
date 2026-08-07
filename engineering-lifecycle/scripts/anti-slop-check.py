@@ -16,7 +16,15 @@ import re
 from pathlib import Path
 from typing import Any
 
-from eng_common import SCAN_PRUNE_DIRS, emit_json, engineering_root, relpath, repo_root, resolve_cli_root, workspace_exists, write_json
+from eng_common import (
+    SCAN_PRUNE_DIRS,
+    emit_json,
+    engineering_root,
+    relpath,
+    resolve_cli_root,
+    workspace_exists,
+    write_json,
+)
 
 UI_SUFFIXES = {".html", ".htm", ".jsx", ".tsx", ".vue", ".svelte", ".astro", ".css", ".scss", ".php"}
 

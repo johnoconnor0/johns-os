@@ -8,7 +8,7 @@ import json
 import re
 from pathlib import Path
 
-from eng_common import REQUIRED_FRONT_MATTER, artifact_roots, parse_front_matter, repo_root, resolve_cli_root
+from eng_common import REQUIRED_FRONT_MATTER, artifact_roots, parse_front_matter, resolve_cli_root
 
 REQUIRED_SECTIONS = {
     "discovery-brief": [

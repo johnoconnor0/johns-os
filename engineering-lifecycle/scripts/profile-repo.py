@@ -7,7 +7,7 @@ import argparse
 import json
 from pathlib import Path
 
-from eng_common import WORKSPACE, git, git_files, repo_root, resolve_cli_root, write_json
+from eng_common import WORKSPACE, git, git_files, resolve_cli_root, write_json
 
 MANIFEST_NAMES = {
     "package.json",

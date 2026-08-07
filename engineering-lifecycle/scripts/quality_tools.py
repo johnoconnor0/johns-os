@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from eng_common import (
+    RootResolution,
     append_jsonl,
     builds_env_names_dynamically,
     changed_files,
@@ -29,19 +30,17 @@ from eng_common import (
     hook_output,
     load_hook_payload,
     nearest_env_example,
+    nested_workspaces,
     now_iso,
     parse_env_example_keys,
     parse_front_matter,
     permission_output,
     placeholder_for_env,
-    nested_workspaces,
     read_json,
     read_json_safe,
     relpath,
-    repo_root,
     resolve_cli_root,
     resolve_root,
-    RootResolution,
     slugify,
     unreachable_workspaces,
     workspace_exists,
@@ -1662,10 +1661,7 @@ def workspace_doctor(resolution: RootResolution | None, link: bool = False) -> d
         "linked": False,
     }
     if link and resolution.has_workspace:
-        index = [
-            {"path": item, "linked_at": now_iso()}
-            for item in nested
-        ]
+        index = [{"path": item, "linked_at": now_iso()} for item in nested]
         write_json(engineering_root(root) / "workspaces.json", {"generated_at": now_iso(), "workspaces": index})
         result["linked"] = True
     return result

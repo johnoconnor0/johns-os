@@ -271,8 +271,11 @@ def _route(members: list[dict[str, Any]]) -> tuple[str, float]:
             or any(hint in label for hint in label_hints for label in member["labels"])
             or any(hint in member["title"].lower() for hint in label_hints)
         )
-        if matched and (any(hint in paths for hint in path_hints) or any(hint in text for hint in label_hints) or
-                        any(hint in label for hint in label_hints for label in labels)):
+        if matched and (
+            any(hint in paths for hint in path_hints)
+            or any(hint in text for hint in label_hints)
+            or any(hint in label for hint in label_hints for label in labels)
+        ):
             return agent, round(matched / len(members), 2)
     return DEFAULT_AGENT, 0.0
 
@@ -351,7 +354,9 @@ def build_workstreams(
         agent, agent_confidence = _route(members)
         paths = sorted({path for member in members for path in member["paths"]})
         evidence_kinds = {member["path_evidence"] for member in members}
-        path_evidence = "declared" if "declared" in evidence_kinds else ("derived" if "derived" in evidence_kinds else "none")
+        path_evidence = (
+            "declared" if "declared" in evidence_kinds else ("derived" if "derived" in evidence_kinds else "none")
+        )
         worst = min(members, key=lambda m: severity_rank.get(m["severity"], 99))["severity"]
         slug = _slug(title or f"workstream-{position}")
         streams.append(

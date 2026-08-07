@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from eng_common import engineering_root, repo_root, workspace_exists
 
+
 def main() -> int:
     # Resolved here rather than at import: resolution reads an environment
     # variable and stats the filesystem, so doing it at module scope binds the

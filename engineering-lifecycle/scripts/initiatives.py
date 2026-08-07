@@ -155,9 +155,7 @@ def _overlap(prompt_tokens: set[str], initiative_tokens: set[str]) -> float:
     return len(prompt_tokens & initiative_tokens) / len(prompt_tokens)
 
 
-def active_initiative_resolver(
-    root: Path, prompt: str, index: dict[str, set[str]] | None = None
-) -> dict[str, Any]:
+def active_initiative_resolver(root: Path, prompt: str, index: dict[str, set[str]] | None = None) -> dict[str, Any]:
     """Which initiative this prompt is about.
 
     Matching used to be a literal lowercase substring test against the slug, so

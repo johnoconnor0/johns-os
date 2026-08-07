@@ -20,7 +20,6 @@ from eng_common import (
     now_iso,
     redact_secrets,
     relpath,
-    repo_root,
     resolve_cli_root,
     slugify,
     write_json,

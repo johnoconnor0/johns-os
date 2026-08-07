@@ -109,19 +109,15 @@ def _refused_roots() -> frozenset[Path]:
     rather than defensive.
     """
     refused: set[Path] = set()
-    try:
+    with suppress(OSError, RuntimeError):  # home is undefined in some sandboxes
         home = Path.home().resolve()
         refused.add(home)
         refused.update(home.parents)
-    except (OSError, RuntimeError):  # home undefined in some sandboxes
-        pass
-    try:
+    with suppress(OSError, RuntimeError):
         # The temp directory itself, not its parents: CI sometimes points TMPDIR
         # inside a checkout, and refusing that checkout's own root would disable
         # the plugin for the build it is meant to be running in.
         refused.add(Path(tempfile.gettempdir()).resolve())
-    except (OSError, RuntimeError):
-        pass
     return frozenset(refused)
 
 
@@ -492,9 +488,7 @@ def nested_workspaces(
     if not is_addressable_root(root):
         return []
     found: list[Path] = []
-    seen = 0
-    for dirpath, dirnames, _ in os.walk(root):
-        seen += 1
+    for seen, (dirpath, dirnames, _) in enumerate(os.walk(root), 1):
         if seen > max_dirs:
             break
         here = Path(dirpath)
