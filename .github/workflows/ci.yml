@@ -15,14 +15,27 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.12", "3.13"]
         # This codebase is developed on Windows and its guards match Windows
         # commands (Remove-Item, PowerShell paths), so Linux-only CI could not
         # see a whole class of breakage. Lint and format run once, on Linux;
         # every OS runs the suites.
+        #
+        # macOS is the third leg because it is a case-insensitive filesystem
+        # with BSD userland, and the marketplace is four hand-synced surfaces of
+        # path strings - a casing drift that Linux catches and Windows hides is
+        # the shape of bug the contract suite exists to find.
+        #
+        # Be clear about what this leg does NOT prove: `actions/setup-python`
+        # provides a `python` shim on macOS, so it cannot reproduce the real
+        # macOS defect, bare `python` being absent without python-is-python3.
+        # Nothing in CI can, because CI provisions the interpreter.
+        # `npx johns-os doctor` is what reports that, on the user's own machine.
         exclude:
           - os: windows-latest
+            python-version: "3.13"
+          - os: macos-latest
             python-version: "3.13"
 
     steps:
@@ -35,6 +48,15 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: requirements-dev.txt
+
+      # The declared engine floor, not the latest. The published CLI once
+      # declared >=18 while calling an API added in 20.11, and testing only on
+      # the newest Node is how that shipped. `validate-repo.py` runs the CLI
+      # suite when this is present and says so loudly when it is not.
+      - name: Set up Node at the declared engine floor
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20.11.0'
 
       - name: Install development tools
         run: python -m pip install -r requirements-dev.txt
