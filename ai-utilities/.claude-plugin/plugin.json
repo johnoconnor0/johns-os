@@ -1,7 +1,7 @@
 {
   "name": "ai-utilities",
   "displayName": "AI Utilities",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Utility skills for building and vetting Claude Code extensions (skill-creator, skill-review) and for closing the plan-to-implementation loop: plan-completion-audit derives its checks from the plan and the detected stack, and audit-resolver executes the findings behind per-batch gates.",
   "homepage": "https://weblifter.com.au",
   "author": {

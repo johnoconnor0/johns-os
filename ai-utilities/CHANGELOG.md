@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 - 2026-08-07
+
+### Fixed
+
+- **The shell hooks died on any input they could not read.** All three `jq`-using hooks open with `set -euo pipefail` and then assign from a pipeline. When `jq` cannot parse stdin it exits non-zero, `set -e` treats that as fatal, and the script dies before reaching any of its graceful `exit 0` paths — so a payload the hook could neither read nor act on produced an uncontrolled non-zero exit with no message anywhere. `pre-write-skill.sh` is a PreToolUse gate whose own comment promises "if not, allow the write (graceful degradation)"; the parse path defeated the degradation the file documents. Each extraction now falls to `exit 0`.
+- **Two hooks had never worked on macOS.** They lowercased with `${FILE_PATH,,}`, a bash 4 expansion. macOS ships bash 3.2, where that is not a silent mismatch but a hard `bad substitution` parse error, so both failed on every invocation. Lowercasing goes through `tr` instead; the case-insensitive match is unchanged.
+
+Both were invisible until now because these hooks short-circuit at `command -v jq` — on a machine without `jq` they exit 0 having done nothing, so the real path had never executed locally. A new hook suite plus a macOS CI leg found them on the first run.
+
 ## 0.2.0 - 2026-08-06
 
 ### Changed
