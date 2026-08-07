@@ -3,7 +3,7 @@
   "name": "Business Development",
   "summary": "Generate and update professional Service Outline documents from a modular, service-type-aware template.",
   "status": "local",
-  "category": "business",
+  "category": "Business",
   "version": "0.2.0",
   "homepage": "https://weblifter.com.au",
   "path": "business-development",

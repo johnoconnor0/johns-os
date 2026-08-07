@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from eng_common import WORKSPACE, engineering_root, now_iso, repo_root, write_json
+from eng_common import WORKSPACE, engineering_root, now_iso, resolve_root, write_json
 
 DIRS = [
     "profile",
@@ -40,16 +40,25 @@ def init_workspace(root: Path) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", default=".", help="Directory to initialize from (default: current directory)")
+    parser.add_argument("--root", default=None, help="Directory to initialize in, exactly. No walking up.")
     parser.add_argument(
         "--here",
         action="store_true",
-        help="Initialize the workspace in --root exactly, without walking up to the git/plugin root. "
+        help="Initialize the workspace in the current directory exactly, without resolving. "
         "Use to place .project in a subfolder deliberately (e.g. a nested package).",
     )
     args = parser.parse_args()
-    base = Path(args.root).resolve()
-    root = base if args.here else repo_root(base)
+    # Creation and resolution go through the same function, which is the whole
+    # point. They used to disagree: `--here` was the only code path in the plugin
+    # that skipped the walk, so it could create a workspace that nothing which
+    # later read the tree could address. `resolve_root` now knows about the
+    # workspace marker, so a deliberately nested workspace is findable afterwards.
+    if args.root:
+        root = resolve_root(explicit=Path(args.root)).root
+    elif args.here:
+        root = Path.cwd().resolve()
+    else:
+        root = resolve_root().root
     manifest = init_workspace(root)
     location = str(root).replace("\\", "/")
     print(f"initialized {manifest['workspace']} at {location}")

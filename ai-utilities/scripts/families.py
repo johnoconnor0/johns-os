@@ -43,10 +43,26 @@ class Ctx:
     stack: dict[str, Any]
     plan: dict[str, Any]
     files: list[Path]
+    # Explicit opt-in to running command strings the audited repository chose.
+    # See `commands_are_repo_supplied`.
+    allow_untrusted_commands: bool = False
 
     @property
     def commands(self) -> dict[str, str]:
         return self.stack.get("test_commands", {}) or {}
+
+    @property
+    def commands_are_repo_supplied(self) -> bool:
+        """True when `test_commands` came verbatim out of the audited repository.
+
+        The `workspace` rung of the stack ladder reads
+        `.project/.engineering/context/stack.json` from the repo under audit and
+        treats it as authoritative. Every other rung derives its commands here,
+        from file presence. Running a project's declared checks is what this tool
+        is for; the distinction worth drawing is that a JSON file which looks
+        inert gets to name the executable and its arguments.
+        """
+        return self.stack.get("detector") == "workspace"
 
     def has(self, key: str, *names: str) -> bool:
         values = {str(item).lower() for item in self.stack.get(key, []) or []}

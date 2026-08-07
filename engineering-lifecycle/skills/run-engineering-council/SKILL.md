@@ -51,6 +51,28 @@ Use proactively before starting an enormous, irreversible, or cross-cutting chan
 - `--adapter openai` requires `OPENAI_API_KEY` and `ENGINEERING_COUNCIL_MODEL`.
 - Optional controls: `ENGINEERING_COUNCIL_TIMEOUT_SECONDS`, `ENGINEERING_COUNCIL_MAX_CONTEXT_CHARS`, `ENGINEERING_COUNCIL_MAX_TOKENS`, provider-specific URL overrides, and `--fallback-on-error`.
 
+## Data Boundary
+
+`--mode live-model` is the only thing in this plugin that sends anything off the
+machine. Everything under `--context` goes into the POST body.
+
+- **Credential-bearing files are withheld** — `.env*`, `.pem`/`.key`/`.p12`,
+  `id_rsa*`, `.netrc`, `.pgpass`, anything named `secret`/`credential` — along
+  with `.git/`, `node_modules/` and build output. The run reports what it
+  withheld, in `input.json` under `context_withheld` and on stdout. If an advisor
+  seems to be missing evidence, look there first.
+- **Credential values are redacted from what does go** — API keys, tokens, JWTs,
+  private key blocks and passwords inside connection strings. Names and structure
+  survive so the file still reads.
+- **`ENGINEERING_COUNCIL_MAX_CONTEXT_CHARS` is a cost control, not a privacy
+  one.** It bounds how much is sent, and never decided what.
+- **Endpoints are allowlisted to `api.anthropic.com` and `api.openai.com`, over
+  HTTPS only.** The URL overrides still work for a proxy, but an unlisted host
+  now needs `ENGINEERING_COUNCIL_ALLOW_ANY_HOST=1`, and plaintext HTTP is refused
+  outright — the override carries the live API key as well as the context.
+- Still your call: **the redaction is a backstop, not a review.** Point
+  `--context` at the files the question actually needs rather than at a directory.
+
 ## Required Front Matter
 
 - `initiative_id`

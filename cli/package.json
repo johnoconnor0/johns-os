@@ -7,10 +7,14 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=18"
+    "node": ">=20.11.0"
+  },
+  "scripts": {
+    "prepack": "node -e \"require('node:fs').copyFileSync('../.claude-plugin/marketplace.json','marketplace.json')\""
   },
   "files": [
     "index.js",
+    "marketplace.json",
     "README.md"
   ],
   "keywords": [

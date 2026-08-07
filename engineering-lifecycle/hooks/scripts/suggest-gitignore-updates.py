@@ -3,19 +3,17 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from eng_common import engineering_root, repo_root, workspace_exists
+from eng_common import repo_root, workspace_exists, write_hygiene_part
 
 # Inspect the working directory's .gitignore / untracked files, but write the
 # report into the repo-root workspace so .project stays at the repo root.
 CWD = Path.cwd()
 ROOT = repo_root(CWD)
-REPORT = engineering_root(ROOT) / "hygiene" / "hygiene-report.json"
 SAFE_PATTERNS = [
     (".turbo/", "Generated Turborepo cache"),
     (".next/", "Generated Next.js build output"),
@@ -61,15 +59,7 @@ def main() -> int:
         )
         if matched:
             candidates.append({"pattern": pattern, "reason": reason, "safe_to_add": True})
-    REPORT.parent.mkdir(parents=True, exist_ok=True)
-    data = {}
-    if REPORT.exists() and REPORT.stat().st_size:
-        try:
-            data = json.loads(REPORT.read_text(encoding="utf-8"))
-        except Exception:
-            data = {}
-    data["gitignore_candidates"] = candidates
-    REPORT.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_hygiene_part(ROOT, "gitignore", {"gitignore_candidates": candidates})
     print(f"gitignore hygiene: {len(candidates)} safe candidate(s)")
     return 0
 

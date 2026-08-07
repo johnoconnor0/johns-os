@@ -16,9 +16,17 @@ def target_root(value: str | None) -> Path:
     return Path(value).resolve() if value else Path.cwd().resolve()
 
 
-def run(script: str, root: Path, *args: str) -> int:
+def run(script: str, root: Path, *args: str, explicit_root: str | None = None) -> int:
+    """Invoke a plugin script, forwarding --root only when the user gave one.
+
+    `--root` is taken verbatim by the scripts now, so injecting the caller's cwd
+    would pin every run to the directory it was launched from and defeat the
+    resolution that finds a nested workspace from inside it. Omitting the flag
+    lets the script resolve, with `cwd` as the start of the walk.
+    """
+    root_args = ["--root", explicit_root] if explicit_root else []
     # -B keeps __pycache__ out of the installed plugin directory.
-    return subprocess.call([sys.executable, "-B", str(ROOT / script), "--root", str(root), *args], cwd=root)
+    return subprocess.call([sys.executable, "-B", str(ROOT / script), *root_args, *args], cwd=root)
 
 
 def status(root: Path) -> int:
@@ -37,6 +45,10 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("init")
     sub.add_parser("validate")
+    doctor_parser = sub.add_parser("doctor", help="Report which workspace this directory resolves to, and why.")
+    doctor_parser.add_argument(
+        "--link", action="store_true", help="Record nested workspaces in the resolved root's workspaces.json"
+    )
     sub.add_parser("sync-ledger")
     sub.add_parser("build-dashboard")
     sub.add_parser("status")
@@ -59,8 +71,11 @@ def main() -> int:
     tracker_parser.add_argument("--include-ledger", action="store_true")
     args = parser.parse_args()
     root = target_root(args.root)
+    if args.command == "doctor":
+        extra = ["--link"] if args.link else []
+        return run("scripts/workspace-doctor.py", root, *extra, explicit_root=args.root)
     if args.command == "init":
-        return run("scripts/init-workspace.py", root)
+        return run("scripts/init-workspace.py", root, explicit_root=args.root)
     if args.command == "validate":
         code = subprocess.call(
             [sys.executable, "-B", str(ROOT / "scripts" / "validate-plugin.py"), "--root", str(ROOT)], cwd=ROOT
@@ -73,7 +88,7 @@ def main() -> int:
         )
         return code
     if args.command in {"sync-ledger", "build-dashboard"}:
-        return run("scripts/sync-ledger.py", root)
+        return run("scripts/sync-ledger.py", root, explicit_root=args.root)
     if args.command == "status":
         return status(root)
     if args.command == "linear-sync":
@@ -82,7 +97,7 @@ def main() -> int:
             extra += ["--results", args.results]
         if args.updates:
             extra += ["--updates", args.updates]
-        return run("scripts/linear-sync.py", root, args.action, *extra)
+        return run("scripts/linear-sync.py", root, args.action, *extra, explicit_root=args.root)
     if args.command == "tracker":
         extra = []
         for flag, value in (
@@ -95,7 +110,7 @@ def main() -> int:
                 extra += [flag, value]
         if args.include_ledger:
             extra.append("--include-ledger")
-        return run("scripts/surface-issue.py", root, args.action, *extra)
+        return run("scripts/surface-issue.py", root, args.action, *extra, explicit_root=args.root)
     return 1
 
 

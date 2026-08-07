@@ -2,7 +2,7 @@
 name: audit-resolver
 description: Read a plan-completion-audit report, plan the fixes, and execute them with safety gates per finding. Verifies between batches; optionally re-runs the audit to confirm closure.
 argument-hint: [audit-report-path-or-flags]
-allowed-tools: Read Write Edit Glob Grep Bash(git:diff) Bash(git:status) Bash(git:log) Bash(git:stash) Bash(npx:*) Bash(npm:*) Bash(pnpm:*) Bash(yarn:*) Bash(python:*) Bash(bash:*) Bash(node:*) Bash(test:*) Bash(cat:*) Bash(wc:*) Bash(find:*) AskUserQuestion Agent
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git:diff), Bash(git:status), Bash(git:log), Bash(git:stash), Bash(npx:*), Bash(npm:*), Bash(pnpm:*), Bash(yarn:*), Bash(python:*), Bash(python3:*), Bash(test:*), Bash(cat:*), Bash(wc:*), Bash(find:*), AskUserQuestion, Agent
 effort: high
 ---
 
@@ -184,6 +184,11 @@ Show the plan; get explicit approval before any writes.
 2. If `--dry-run`: skip this gate, write the plan, stop.
 
 3. If `--no-confirm`: skip this gate, proceed (but HUMAN-INPUT items still gate per finding).
+
+   **`--no-confirm` is only valid for the repository you are already working in.**
+   If the audit report describes a different repository than the current working
+   tree, ignore the flag and run the gate anyway. Skipping approval is a
+   reasonable convenience on your own code and is not one on somebody else's.
 
 ---
 

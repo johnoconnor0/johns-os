@@ -7,8 +7,12 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 from collections.abc import Iterable
+from contextlib import suppress
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -92,14 +96,170 @@ def plugin_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+@lru_cache(maxsize=1)
+def _refused_roots() -> frozenset[Path]:
+    """Directories that must never anchor a resolved root, however they are marked.
+
+    A stray ``.project/.engineering`` in a home or system temp directory is not a
+    project - it is debris from before the workspace became opt-in, and machines
+    that ran an early version of this plugin carry them. Without this guard,
+    promoting the workspace to a resolution marker makes every temporary directory
+    resolve to the system temp root and every path under $HOME resolve to $HOME.
+    The whole test suite runs in temporary directories, so this is load-bearing
+    rather than defensive.
+    """
+    refused: set[Path] = set()
+    with suppress(OSError, RuntimeError):  # home is undefined in some sandboxes
+        home = Path.home().resolve()
+        refused.add(home)
+        refused.update(home.parents)
+    with suppress(OSError, RuntimeError):
+        # The temp directory itself, not its parents: CI sometimes points TMPDIR
+        # inside a checkout, and refusing that checkout's own root would disable
+        # the plugin for the build it is meant to be running in.
+        refused.add(Path(tempfile.gettempdir()).resolve())
+    return frozenset(refused)
+
+
+def is_addressable_root(path: Path) -> bool:
+    """True when `path` may anchor a workspace, whatever markers it carries."""
+    if path.parent == path:  # filesystem or drive root
+        return False
+    if path in _refused_roots():
+        return False
+    parts = set(path.parts)
+    # `.claude` vendors one git clone per installed marketplace. `.project` is
+    # this plugin's own state tree, so a workspace found inside one is a scaffold
+    # some skill wrote rather than a project root - `SCAN_PRUNE_DIRS` already
+    # prunes `.project` everywhere else, and resolution has to agree with scanning.
+    return ".claude" not in parts and ".project" not in parts
+
+
+@dataclass(frozen=True)
+class RootResolution:
+    """A resolved root and the evidence for it.
+
+    The hardest failure to see in this plugin was a correct-looking run against
+    the wrong root: nothing errored, nothing was empty, the answers were simply
+    about a different project. Every tool can now report where it decided it was
+    and which file proved it.
+    """
+
+    root: Path
+    reason: str  # explicit | workspace | repo | fallback
+    marker: str  # the path that proved it, or ""
+    start: Path
+    start_source: str  # argument | CLAUDE_PROJECT_DIR | cwd
+    has_workspace: bool
+    # Every addressable ancestor carrying a workspace, nearest first.
+    workspace_ancestors: tuple[Path, ...]
+
+
+def _start_dir(start: Path | None) -> tuple[Path, str]:
+    """Where the upward walk begins, and what chose it.
+
+    ``CLAUDE_PROJECT_DIR`` is the harness saying which directory the session is
+    about. It sets the START of the walk, never the answer: a session opened at a
+    monorepo root while the work happens in a package must still resolve to the
+    package, and a session opened three directories deep in a repo with no
+    workspace must still resolve to the repo root.
+    """
+    if start is not None:
+        candidate, source = Path(start).expanduser(), "argument"
+    else:
+        raw = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
+        candidate, source = (Path(raw).expanduser(), "CLAUDE_PROJECT_DIR") if raw else (Path.cwd(), "cwd")
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        return Path.cwd().resolve(), "cwd"
+    if resolved.is_dir():
+        return resolved, source
+    # A value naming a *file* means its directory. A value naming nothing at all
+    # is a misconfiguration, and walking from its parent anyway would silently
+    # honour a path the user got wrong.
+    if resolved.is_file():
+        return resolved.parent, source
+    return Path.cwd().resolve(), "cwd"
+
+
+def workspace_ancestors(start: Path) -> tuple[Path, ...]:
+    return tuple(c for c in [start, *start.parents] if is_addressable_root(c) and (c / WORKSPACE).is_dir())
+
+
+def resolve_root(start: Path | None = None, explicit: Path | None = None) -> RootResolution:
+    """Where this invocation's workspace is anchored, and why.
+
+    One upward walk, three markers, nearest wins, and the workspace marker is
+    tested first so a directory carrying both answers "workspace".
+
+    The workspace marker exists because it is the only *deliberate* one. `.git` is
+    incidental - a nested package inside a monorepo has none of its own - so while
+    `.git` was the only marker, a workspace created by `/project-init here` could
+    never be addressed by anything that later read it. The create path and the
+    resolve path disagreed, which is the whole defect.
+
+    The walk never descends. That is what preserves the property
+    ``workspace_exists`` documents: an ancestor walk can only land on a directory
+    somebody deliberately initialised, and it creates nothing, so a hook firing
+    from a generated subfolder still cannot drop a stray `.project` there.
+    """
+    if explicit is not None:
+        exact = Path(explicit).expanduser().resolve()
+        return RootResolution(
+            root=exact,
+            reason="explicit",
+            marker=str(exact),
+            start=exact,
+            start_source="argument",
+            has_workspace=(exact / WORKSPACE).is_dir(),
+            workspace_ancestors=workspace_ancestors(exact),
+        )
+
+    begin, source = _start_dir(start)
+    chosen: Path | None = None
+    reason = marker = ""
+    found: list[Path] = []
+    for candidate in [begin, *begin.parents]:
+        if not is_addressable_root(candidate):
+            continue
+        if (candidate / WORKSPACE).is_dir():
+            found.append(candidate)
+            if chosen is None:
+                chosen, reason, marker = candidate, "workspace", str(candidate / WORKSPACE)
+            continue
+        if chosen is None:
+            if (candidate / ".git").exists():
+                chosen, reason, marker = candidate, "repo", str(candidate / ".git")
+            elif (candidate / ".claude-plugin" / "plugin.json").exists():
+                chosen, reason, marker = candidate, "repo", str(candidate / ".claude-plugin" / "plugin.json")
+    if chosen is None:
+        chosen, reason, marker = begin, "fallback", ""
+    return RootResolution(
+        root=chosen,
+        reason=reason,
+        marker=marker,
+        start=begin,
+        start_source=source,
+        has_workspace=(chosen / WORKSPACE).is_dir(),
+        workspace_ancestors=tuple(found),
+    )
+
+
 def repo_root(start: Path | None = None) -> Path:
-    cur = (start or Path.cwd()).resolve()
-    for candidate in [cur, *cur.parents]:
-        if (candidate / ".git").exists():
-            return candidate
-        if (candidate / ".claude-plugin" / "plugin.json").exists():
-            return candidate
-    return cur
+    """The resolved root. Thin wrapper - most call sites only want the path."""
+    return resolve_root(start).root
+
+
+def resolve_cli_root(root: str | None) -> RootResolution:
+    """The root for one CLI invocation.
+
+    An explicit `--root` is taken **verbatim**. Passing it back through the walk
+    is what made it useless as an escape hatch: pointing the tooling at a nested
+    package silently walked back up to the monorepo root and operated on the wrong
+    project. Omitting `--root` resolves from the working directory.
+    """
+    return resolve_root(explicit=Path(root)) if root else resolve_root()
 
 
 def engineering_root(root: Path | None = None) -> Path:
@@ -123,9 +283,12 @@ def workspace_exists(root: Path | None = None) -> bool:
     The workspace is opt-in per repo: it is created only by explicit user action
     (the /project-init command, ``eng-life init``, or a lifecycle skill writing its
     first artifact) — never by automatic session/post-tool/stop hooks. Until it
-    exists, those hooks stay dormant and must not create it. Anchored to the repo
-    root via ``engineering_root`` so a hook firing from a subfolder never drops a
-    stray ``.project`` in that subfolder.
+    exists, those hooks stay dormant and must not create it.
+
+    Anchored to the nearest deliberately-initialised workspace, else the repo root
+    (see ``resolve_root``). A hook firing from a subfolder still cannot drop a
+    stray ``.project`` there, because the walk only ever goes up: it can land on a
+    directory somebody chose to initialise, and it creates nothing.
     """
     return engineering_root(root).exists()
 
@@ -156,16 +319,116 @@ def read_json_safe(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def write_json(path: Path, data: Any) -> None:
+def _atomic_write(path: Path, payload: str) -> None:
+    """Write through a sibling temp file and one `os.replace`.
+
+    Seven PostToolUse hooks fire on a single edit, several of them writing into
+    this tree at the same time, and `open(path, "w")` truncates before it writes
+    anything. A reader arriving mid-write - or a session ending mid-write - saw a
+    half-written or empty file. `read_json_safe` exists precisely to swallow that,
+    which is evidence it happened rather than a reason to keep causing it.
+
+    The temp file is a sibling, not in the system temp directory: `os.replace` is
+    only atomic within one filesystem. It is atomic on POSIX and on Windows, where
+    it maps to MoveFileEx with MOVEFILE_REPLACE_EXISTING.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="\n") as f:
-        json.dump(data, f, indent=2, sort_keys=True)
-        f.write("\n")
+    handle, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        tmp = None  # type: ignore[assignment]
+    finally:
+        if tmp is not None:
+            with suppress(OSError):
+                tmp.unlink()
+
+
+def write_json(path: Path, data: Any) -> None:
+    _atomic_write(path, json.dumps(data, indent=2, sort_keys=True) + "\n")
 
 
 def write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8", newline="\n")
+    _atomic_write(path, text)
+
+
+# Credentials as they appear *in file contents*, for the case where a file is
+# about to leave the machine. Deliberately not quality_tools.SECRET_PATTERNS: that
+# list matches *mentions* of secret-bearing files in a shell command, which is what
+# a command guard wants and would mangle prose - "check your .env" is not a secret.
+_SECRET_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----[\s\S]*?-----END[^\n]*-----"),
+    re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}"),
+    re.compile(r"\bsk-[A-Za-z0-9]{32,}\b"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"),
+    # JWTs carry claims as well as authority, so they are worth removing whole.
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
+)
+# A password inside a connection string, which none of the token patterns match.
+_DSN_CREDENTIAL = re.compile(r"\b([a-z][a-z0-9+.-]*://)([^\s:@/]+):([^\s@/]+)@")
+# KEY=value lines, matched on the name. Over-redacting a URL costs an advisor a
+# little context; under-redacting one sends a credential to a third party.
+_SECRET_ASSIGNMENT = re.compile(
+    r"(?im)^(\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*"
+    r"(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?|DSN|_URI|_URL)S?)(\s*[=:]\s*)(\S.*)$"
+)
+
+
+def redact_secrets(text: str) -> str:
+    """Credential values replaced with a marker, for text about to leave the box.
+
+    Used on anything bound for a third-party API. Names and structure survive so
+    the text still reads; only the values go.
+    """
+    if not text:
+        return text
+    redacted = _DSN_CREDENTIAL.sub(r"\1\2:<redacted>@", text)
+    for pattern in _SECRET_VALUE_PATTERNS:
+        redacted = pattern.sub("<redacted>", redacted)
+    return _SECRET_ASSIGNMENT.sub(r"\1\2<redacted>", redacted)
+
+
+def hygiene_report_path(root: Path | None = None) -> Path:
+    return engineering_root(root) / "hygiene" / "hygiene-report.json"
+
+
+def write_hygiene_part(root: Path, producer: str, section: dict[str, Any]) -> dict[str, Any]:
+    """Record one producer's keys, then rebuild the combined hygiene report.
+
+    `detect-new-env-vars` and `suggest-gitignore-updates` are adjacent entries in
+    the same PostToolUse matcher group, so they run concurrently on every edit.
+    Both used to read the whole report, replace their own key, and write it back,
+    swallowing a parse failure with an empty dict - so whichever finished second
+    erased the other's section rather than failing.
+
+    Atomic writes alone do not fix that; the read-modify-write is the bug. Each
+    producer now owns a file under `hygiene/parts/`, and the report becomes a view
+    rebuilt from them. Two concurrent rebuilds both read every fragment from disk,
+    so they converge on the same content and a lost race costs nothing.
+
+    Keys no fragment claims - `risks`, `docs_updates`, whatever the
+    update-repo-hygiene skill wrote - are preserved, so the combined file stays
+    the single thing readers and the schema know about.
+    """
+    write_json(hygiene_report_path(root).parent / "parts" / f"{producer}.json", section)
+    return rebuild_hygiene_report(root)
+
+
+def rebuild_hygiene_report(root: Path | None = None) -> dict[str, Any]:
+    report = hygiene_report_path(root)
+    merged = read_json_safe(report)
+    for part in sorted((report.parent / "parts").glob("*.json")):
+        merged.update(read_json_safe(part))
+    merged.setdefault("risks", [])
+    write_json(report, merged)
+    return merged
 
 
 def emit_json(data: Any) -> None:
@@ -192,21 +455,64 @@ def git(args: list[str], cwd: Path | None = None) -> tuple[int, str, str]:
 def is_scannable_root(root: Path) -> bool:
     """True when `root` plausibly holds a single project's sources.
 
-    ``repo_root`` falls back to the cwd when it finds no ``.git`` or plugin
-    manifest above it, so outside a repo this can be handed a home directory, a
-    filesystem root, or an agent config tree. ``~/.claude`` in particular
-    vendors plugin caches and one git clone per installed marketplace — walking
-    it costs hundreds of thousands of files and yields nothing a stack detector
-    or context pack can use. Refuse those roots instead of scanning them.
+    ``repo_root`` falls back to the cwd when it finds no marker above it, so
+    outside a repo this can be handed a home directory, a filesystem root, or an
+    agent config tree. ``~/.claude`` in particular vendors plugin caches and one
+    git clone per installed marketplace - walking it costs hundreds of thousands
+    of files and yields nothing a stack detector or context pack can use.
+
+    Same predicate as ``is_addressable_root``, deliberately: a directory this
+    plugin refuses to scan is one it must also refuse to anchor to, or the two
+    would disagree about the same tree.
     """
-    if root.parent == root:  # filesystem or drive root
-        return False
-    try:
-        if root == Path.home().resolve():
-            return False
-    except (OSError, RuntimeError):  # home undefined in some sandboxes
-        pass
-    return ".claude" not in root.parts
+    return is_addressable_root(root)
+
+
+NESTED_SCAN_MAX_DEPTH = 4
+NESTED_SCAN_MAX_DIRS = 4_000
+
+
+def nested_workspaces(
+    root: Path,
+    max_depth: int = NESTED_SCAN_MAX_DEPTH,
+    max_dirs: int = NESTED_SCAN_MAX_DIRS,
+) -> list[Path]:
+    """Workspaces strictly below `root`. Reporting only.
+
+    Bounded exactly like ``scan_files``, and pruned by the same set - which
+    includes `.project`, so this never descends into a workspace looking for more.
+    Resolution deliberately does not use this: an upward walk stays correct when
+    this listing is truncated or stale, and is cheap enough for every hook.
+    """
+    root = root.resolve()
+    if not is_addressable_root(root):
+        return []
+    found: list[Path] = []
+    for seen, (dirpath, dirnames, _) in enumerate(os.walk(root), 1):
+        if seen > max_dirs:
+            break
+        here = Path(dirpath)
+        if len(here.relative_to(root).parts) >= max_depth:
+            dirnames[:] = []
+        else:
+            dirnames[:] = sorted(name for name in dirnames if name not in SCAN_PRUNE_DIRS)
+        if here != root and (here / WORKSPACE).is_dir():
+            found.append(here)
+            dirnames[:] = []  # a workspace is a leaf; do not nest inside one
+    return sorted(found)
+
+
+def unreachable_workspaces(root: Path) -> list[Path]:
+    """Workspaces buried inside `root`'s own `.project` tree.
+
+    Deliberately separate from ``nested_workspaces``: these are unaddressable by
+    design, since ``is_addressable_root`` refuses anything under `.project`.
+    Reported so they can be moved or removed rather than silently ignored forever.
+    """
+    base = root / ".project"
+    if not base.is_dir():
+        return []
+    return sorted({path.parents[1] for path in base.glob(f"*/*/{WORKSPACE.as_posix()}")})
 
 
 def scan_files(
@@ -370,7 +676,14 @@ def classify_file_path(path: Path) -> str:
     name = path.name.lower()
     suffix = path.suffix.lower()
     text = str(path).replace("\\", "/").lower()
-    if name.startswith(".env") or suffix in {".pem", ".key", ".p12"} or "credential" in name or "secret" in name:
+    if (
+        name.startswith(".env")
+        or suffix in {".pem", ".key", ".p12", ".pfx", ".jks", ".keystore"}
+        or name in {".netrc", "_netrc", ".pgpass", ".htpasswd", ".npmrc", ".pypirc"}
+        or name.startswith(("id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"))
+        or "credential" in name
+        or "secret" in name
+    ):
         return "secret-risk"
     if any(part in parts for part in {"tests", "test", "__tests__", "spec", "specs"}) or name.endswith(
         (".test.ts", ".test.js", ".spec.ts", ".spec.js", "_test.py")
@@ -448,6 +761,13 @@ IGNORED_ENV_NAMES = frozenset(
         # Supplied by the Claude Code harness, never by a project .env. ARGUMENTS is
         # the skill/slash-command placeholder, which appears as `$ARGUMENTS` in hook
         # scripts that check for it.
+        #
+        # CLAUDE_PROJECT_DIR stays here even though `_start_dir` now reads it. This
+        # set governs one thing: which names must never be demanded in a *consuming
+        # project's* .env.example. A variable the harness supplies belongs in
+        # nobody's .env.example, and this plugin reading it does not change that.
+        # Removing it would report CLAUDE_PROJECT_DIR as undocumented in every repo
+        # that installs the plugin.
         "CLAUDE_PLUGIN_ROOT",
         "CLAUDE_PROJECT_DIR",
         "CLAUDE_CONFIG_DIR",

@@ -8,7 +8,7 @@ import json
 import re
 from pathlib import Path
 
-from eng_common import REQUIRED_FRONT_MATTER, artifact_roots, parse_front_matter, repo_root
+from eng_common import REQUIRED_FRONT_MATTER, artifact_roots, parse_front_matter, resolve_cli_root
 
 REQUIRED_SECTIONS = {
     "discovery-brief": [
@@ -180,9 +180,9 @@ def validate_path(path: Path, root: Path | None = None) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="*", help="Artifacts to validate")
-    parser.add_argument("--root", default=".")
+    parser.add_argument("--root", default=None)
     args = parser.parse_args()
-    root = repo_root(Path(args.root))
+    root = resolve_cli_root(args.root).root
     paths = [Path(p) for p in args.paths]
     if not paths:
         paths = [

@@ -16,7 +16,15 @@ import re
 from pathlib import Path
 from typing import Any
 
-from eng_common import SCAN_PRUNE_DIRS, emit_json, engineering_root, relpath, repo_root, workspace_exists, write_json
+from eng_common import (
+    SCAN_PRUNE_DIRS,
+    emit_json,
+    engineering_root,
+    relpath,
+    resolve_cli_root,
+    workspace_exists,
+    write_json,
+)
 
 UI_SUFFIXES = {".html", ".htm", ".jsx", ".tsx", ".vue", ".svelte", ".astro", ".css", ".scss", ".php"}
 
@@ -164,10 +172,10 @@ def check_text(text: str) -> list[dict[str, Any]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="*", help="Files to check. Defaults to UI files under --root.")
-    parser.add_argument("--root", default=".")
+    parser.add_argument("--root", default=None)
     parser.add_argument("--hook", action="store_true", help="Stay silent when nothing is found")
     args = parser.parse_args()
-    root = repo_root(Path(args.root))
+    root = resolve_cli_root(args.root).root
 
     results: list[dict[str, Any]] = []
     for path in scan_targets(root, args.paths):

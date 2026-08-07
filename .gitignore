@@ -19,6 +19,9 @@
 node_modules/
 package-lock.json
 cli/*.tgz
+# Written by cli's prepack from .claude-plugin/marketplace.json, because `files`
+# cannot reach a parent directory. Generated, never edited.
+cli/marketplace.json
 
 # Python bytecode and tool caches
 __pycache__/

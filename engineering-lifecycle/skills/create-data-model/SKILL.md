@@ -41,6 +41,19 @@ Supported: `postgresql` (and Supabase), `mysql` (and MariaDB), `sqlite`,
 `sqlserver`, `mongodb`. See `references/data-model-adapters.md` for what each one
 changes.
 
+**Live introspection is verified for postgresql, sqlite and mongodb only.** The
+mysql and sqlserver paths in `schema-introspect.sh` were provably broken until
+recently — `mysql` was handed a URL where it expects a database *name*, and
+`sqlcmd` got a URL where `-S` expects a bare server with no `-U`/`-d` at all — so
+both always failed into the silent "provide schema manually" branch. They are now
+built from the connection string's parts as each client documents, but have not
+been run against a live MySQL or SQL Server. Treat a successful run on those two
+as the first confirmation, and fall back to pasting the schema if it fails.
+
+Credentials never travel in argv. The password is split out of the connection
+string and passed through `PGPASSWORD` / `MYSQL_PWD` / `SQLCMDPASSWORD`, because
+a command-line operand is readable from `ps` by any other local user.
+
 ## Inputs Inspected
 
 - `prd.md`, `technical-design-document.md` and `system-map/` from the same

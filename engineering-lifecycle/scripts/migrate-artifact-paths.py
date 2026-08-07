@@ -18,7 +18,7 @@ import argparse
 import shutil
 from pathlib import Path
 
-from eng_common import docs_root, emit_json, engineering_root, git, relpath, repo_root
+from eng_common import docs_root, emit_json, engineering_root, git, relpath, resolve_cli_root
 
 # Stage directory -> destination inside docs/engineering/<initiative-id>/.
 # Stages absent from this map stay in the workspace: review notes, testing plans
@@ -92,11 +92,11 @@ def apply_moves(root: Path, moves: list[dict[str, str]], use_git: bool) -> list[
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", default=".")
+    parser.add_argument("--root", default=None)
     parser.add_argument("--apply", action="store_true", help="Actually move files; otherwise dry-run")
     parser.add_argument("--no-git", action="store_true", help="Use a plain move even inside a git repo")
     args = parser.parse_args()
-    root = repo_root(Path(args.root))
+    root = resolve_cli_root(args.root).root
 
     moves = plan_moves(root)
     use_git = not args.no_git and (root / ".git").exists() and shutil.which("git") is not None

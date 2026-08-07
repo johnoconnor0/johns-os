@@ -23,11 +23,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Set up Node
+      # The engine floor, not the latest. Testing only on the newest Node is how
+      # `import.meta.dirname` shipped in a package declaring >=18: every command
+      # threw TypeError on a version the package claimed to support.
+      - name: Set up Node at the declared engine floor
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: '20.11.0'
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -37,15 +39,43 @@ jobs:
       - name: Check the CLI version matches the marketplace
         run: python scripts/check-cli-version.py
 
-      - name: Smoke test the CLI
-        run: |
-          node cli/index.js --version
-          node cli/index.js --help
-          node cli/index.js list
-
       - name: Pack
         run: npm pack --workspaces=false
         working-directory: cli
+
+      # Smoke-testing from the checkout proves nothing: it has
+      # ../.claude-plugin/marketplace.json, which `files` cannot pack, so the
+      # published package took a different code path that CI never executed.
+      # Install the tarball and run the binary the way a user would.
+      - name: Smoke test the packed artifact
+        run: |
+          set -euo pipefail
+          TARBALL="$(ls "$GITHUB_WORKSPACE"/cli/johns-os-*.tgz)"
+          SMOKE="$RUNNER_TEMP/smoke"
+          mkdir -p "$SMOKE"
+          cd "$SMOKE"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund "$TARBALL"
+          BIN=./node_modules/.bin/johns-os
+          "$BIN" --version
+          "$BIN" --help
+          "$BIN" list | tee list.txt
+          # The regression this whole step exists for: without the packaged
+          # manifest, `list` falls back to a hardcoded table with no versions.
+          grep -qE 'marketplace [0-9]+\.[0-9]+\.[0-9]+' list.txt
+          for plugin in engineering-lifecycle business-development ai-utilities; do
+            grep -q "$plugin" list.txt
+          done
+          # Argument validation must reject rather than pass junk through.
+          if "$BIN" install --scope bogus; then echo 'expected --scope bogus to fail'; exit 1; fi
+          if "$BIN" install --nonsense; then echo 'expected --nonsense to fail'; exit 1; fi
+
+      - name: Set up Node for publishing
+        if: ${{ inputs.dry-run == false }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Publish
         if: ${{ inputs.dry-run == false }}

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -92,8 +93,86 @@ def command_show(args: argparse.Namespace) -> int:
     return 0
 
 
+SCHEMAS = ROOT / "marketplace" / "schemas"
+
+_JSON_TYPES: dict[str, tuple[type, ...] | type] = {
+    "object": dict,
+    "array": list,
+    "string": str,
+    "number": (int, float),
+    "integer": int,
+    "boolean": bool,
+}
+
+
+def _type_ok(value: Any, expected: str) -> bool:
+    if expected == "null":
+        return value is None
+    wanted = _JSON_TYPES.get(expected)
+    if wanted is None:
+        return True
+    if expected in {"number", "integer"} and isinstance(value, bool):
+        return False  # bool is an int in Python; JSON Schema disagrees
+    return isinstance(value, wanted)
+
+
+def validate_against_schema(value: Any, schema: dict[str, Any], label: str) -> list[str]:
+    """The subset of JSON Schema these two schema files actually use.
+
+    `type`, `required`, `properties`, `items`, `enum`, `minLength`, `format` and
+    `additionalProperties: false`. Written out rather than taking a `jsonschema`
+    dependency, because the CLI is dependency-free by design and the repository
+    has avoided runtime dependencies everywhere else - and hand-rolling a
+    *weaker* check was the actual defect: `require_keys` tested presence but
+    never type, enum or format, so `risk: "banana"` passed.
+    """
+    errors: list[str] = []
+    declared = schema.get("type")
+    if isinstance(declared, str) and not _type_ok(value, declared):
+        return [f"{label}: expected {declared}, got {type(value).__name__}"]
+    if isinstance(declared, list) and not any(_type_ok(value, item) for item in declared):
+        return [f"{label}: expected one of {declared}, got {type(value).__name__}"]
+
+    if "enum" in schema and value not in schema["enum"]:
+        errors.append(f"{label}: {value!r} is not one of {schema['enum']!r}")
+    if isinstance(value, str):
+        if len(value) < int(schema.get("minLength", 0)):
+            errors.append(f"{label}: shorter than minLength {schema['minLength']}")
+        if schema.get("format") == "uri" and value and not re.match(r"^[a-z][a-z0-9+.-]*:", value):
+            errors.append(f"{label}: {value!r} is not a URI")
+
+    if isinstance(value, dict):
+        properties = schema.get("properties", {})
+        for key in schema.get("required", []):
+            if key not in value:
+                errors.append(f"{label}: missing required key {key}")
+        if schema.get("additionalProperties") is False:
+            for key in value:
+                if key not in properties:
+                    errors.append(f"{label}: unexpected key {key}")
+        for key, subschema in properties.items():
+            if key in value and isinstance(subschema, dict):
+                errors.extend(validate_against_schema(value[key], subschema, f"{label}.{key}"))
+    if isinstance(value, list) and isinstance(schema.get("items"), dict):
+        for index, item in enumerate(value):
+            errors.extend(validate_against_schema(item, schema["items"], f"{label}[{index}]"))
+    return errors
+
+
+def schema_errors(name: str, value: Any, label: str) -> list[str]:
+    """Validate against a schema file, and complain loudly if it is missing.
+
+    Returning "no errors" for an absent schema is how a schema pair comes to sit
+    on disk unread for months while a weaker hand-rolled check stands in for it.
+    """
+    path = SCHEMAS / f"{name}.schema.json"
+    if not path.is_file():
+        return [f"{path}: schema is missing"]
+    return validate_against_schema(value, load_json(path), label)
+
+
 def validate_catalog_shape(data: dict[str, Any]) -> list[str]:
-    errors = require_keys(CATALOG, data, ["id", "name", "description", "version", "updated_at", "plugins"])
+    errors = schema_errors("catalog", data, str(CATALOG.relative_to(ROOT)))
     plugins = data.get("plugins")
     if not isinstance(plugins, list):
         errors.append(f"{CATALOG}: plugins must be an array")
@@ -116,23 +195,11 @@ def validate_catalog_shape(data: dict[str, Any]) -> list[str]:
 
 
 def validate_plugin(plugin: dict[str, Any], record_path: Path) -> list[str]:
-    required = [
-        "id",
-        "name",
-        "summary",
-        "status",
-        "category",
-        "version",
-        "path",
-        "manifest",
-        "source",
-        "capabilities",
-        "tags",
-        "risk",
-        "install",
-        "validation",
-    ]
-    errors = require_keys(record_path, plugin, required)
+    # The required-key list used to be re-declared here by hand, which is how it
+    # drifted from the schema sitting beside it: `homepage` is required by the
+    # schema and was absent from the hand-rolled list, and no value was ever
+    # checked against an enum.
+    errors = schema_errors("plugin", plugin, str(record_path.relative_to(ROOT)))
     plugin_path = ROOT / str(plugin.get("path", ""))
     manifest_path = ROOT / str(plugin.get("manifest", ""))
     if not plugin_path.is_dir():
@@ -150,6 +217,42 @@ def validate_plugin(plugin: dict[str, Any], record_path: Path) -> list[str]:
     for key in ["capabilities", "tags"]:
         if not isinstance(plugin.get(key), list):
             errors.append(f"{record_path}: {key} must be an array")
+    return errors
+
+
+def validate_categories(catalog_data: dict[str, Any]) -> list[str]:
+    """One plugin, one category, across every surface that names it.
+
+    Nothing checked this, so the same plugin was `Developer Tools` in three files
+    and `engineering` in its own catalog record. Version and homepage were already
+    cross-checked; category simply was not, which is the whole reason it drifted.
+
+    The four surfaces are still maintained separately on purpose (ADR-0001), so
+    this compares them rather than generating one from another.
+    """
+    errors: list[str] = []
+    surfaces = [
+        ROOT / "marketplace.json",
+        ROOT / ".agents" / "plugins" / "marketplace.json",
+        ROOT / ".claude-plugin" / "marketplace.json",
+    ]
+    seen: dict[str, dict[str, str]] = {}
+    for path in surfaces:
+        for plugin in load_json(path).get("plugins", []):
+            if isinstance(plugin, dict) and plugin.get("name"):
+                seen.setdefault(plugin["name"], {})[str(path.relative_to(ROOT))] = str(plugin.get("category", ""))
+    for entry in catalog_data.get("plugins", []):
+        if not isinstance(entry, dict) or not entry.get("record"):
+            continue
+        record = load_json(ROOT / entry["record"])
+        if record.get("id"):
+            seen.setdefault(record["id"], {})[entry["record"]] = str(record.get("category", ""))
+
+    for plugin_id, by_surface in sorted(seen.items()):
+        values = set(by_surface.values())
+        if len(values) > 1:
+            detail = ", ".join(f"{where}={value!r}" for where, value in sorted(by_surface.items()))
+            errors.append(f"{plugin_id}: category disagrees across surfaces ({detail})")
     return errors
 
 
@@ -234,6 +337,7 @@ def command_validate(_: argparse.Namespace) -> int:
     data = catalog()
     errors = validate_catalog_shape(data)
     errors.extend(validate_platform_surfaces(data))
+    errors.extend(validate_categories(data))
     errors.extend(validate_codex_interfaces(data))
     for entry in data.get("plugins", []):
         if not isinstance(entry, dict) or not isinstance(entry.get("record"), str):
@@ -262,14 +366,28 @@ def _set_version(path: Path, version: str, errors: list[str]) -> None:
     _write_json(path, data)
 
 
+_SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
+
+
 def command_bump_version(args: argparse.Namespace) -> int:
-    """Set a plugin's version across every marketplace surface, then validate.
+    """Set a plugin's version across the surfaces that carry one, then validate.
 
     Keeps the catalog record, both plugin manifests, and the Claude marketplace
-    entry in lockstep so a release can never drift one surface again.
+    entry in lockstep so a release cannot drift one of them.
+
+    `marketplace.json` and `.agents/plugins/marketplace.json` are deliberately not
+    touched: they carry no version field at all, and adding one is how drift gets
+    introduced rather than avoided. See CONTRIBUTING and ADR-0001.
+
+    Writes are staged and committed only once every target has been resolved. The
+    previous order - mutate five files, then validate - left the repository
+    half-bumped with no rollback whenever validation failed.
     """
     plugin_id = args.plugin_id
     version = args.version
+    if not _SEMVER.match(version):
+        raise SystemExit(f"not a semantic version: {version!r}")
+
     errors: list[str] = []
     data = catalog()
     record_rel = next((e.get("record") for e in data.get("plugins", []) if e.get("id") == plugin_id), None)
@@ -278,23 +396,38 @@ def command_bump_version(args: argparse.Namespace) -> int:
     record = load_json(ROOT / record_rel)
     plugin_path = str(record.get("path", ""))
 
-    _set_version(ROOT / record_rel, version, errors)  # catalog record
-    _set_version(ROOT / plugin_path / ".claude-plugin" / "plugin.json", version, errors)
-    _set_version(ROOT / plugin_path / ".codex-plugin" / "plugin.json", version, errors)
-    mp = ROOT / ".claude-plugin" / "marketplace.json"  # Claude marketplace entry
+    staged: list[tuple[Path, dict[str, Any]]] = []
+    for path in (
+        ROOT / record_rel,
+        ROOT / plugin_path / ".claude-plugin" / "plugin.json",
+        ROOT / plugin_path / ".codex-plugin" / "plugin.json",
+    ):
+        if not path.is_file():
+            errors.append(f"missing version target: {path}")
+            continue
+        staged.append((path, {**load_json(path), "version": version}))
+
+    mp = ROOT / ".claude-plugin" / "marketplace.json"
     if mp.is_file():
         mp_data = load_json(mp)
+        if not any(entry.get("name") == plugin_id for entry in mp_data.get("plugins", [])):
+            errors.append(f"{mp.name}: no entry named {plugin_id}")
         for entry in mp_data.get("plugins", []):
             if entry.get("name") == plugin_id:
                 entry["version"] = version
-        _write_json(mp, mp_data)
-    data["updated_at"] = datetime.now(UTC).strftime("%Y-%m-%dT00:00:00Z")  # refresh timestamp
-    _write_json(CATALOG, data)
+        staged.append((mp, mp_data))
 
     if errors:
+        # Nothing has been written yet, so there is nothing to undo.
         print("\n".join(errors), file=sys.stderr)
         return 1
-    print(f"bumped {plugin_id} to {version} across all marketplace surfaces")
+
+    data["updated_at"] = datetime.now(UTC).strftime("%Y-%m-%dT00:00:00Z")
+    staged.append((CATALOG, data))
+    for path, payload in staged:
+        _write_json(path, payload)
+
+    print(f"bumped {plugin_id} to {version} across {len(staged)} versioned surface(s)")
     return command_validate(args)
 
 

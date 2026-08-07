@@ -10,10 +10,12 @@ import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from eng_common import (
+    RootResolution,
     append_jsonl,
     builds_env_names_dynamically,
     changed_files,
@@ -28,6 +30,7 @@ from eng_common import (
     hook_output,
     load_hook_payload,
     nearest_env_example,
+    nested_workspaces,
     now_iso,
     parse_env_example_keys,
     parse_front_matter,
@@ -36,8 +39,10 @@ from eng_common import (
     read_json,
     read_json_safe,
     relpath,
-    repo_root,
+    resolve_cli_root,
+    resolve_root,
     slugify,
+    unreachable_workspaces,
     workspace_exists,
     write_json,
     write_text,
@@ -90,6 +95,23 @@ INTENT_KEYWORDS = {
         "engineering maturity",
     ],
     "lifecycle": ["lifecycle", "what should happen next", "missing artifacts", "current stage", "next skill"],
+    # Deliberately excludes "review", "all" and "work": `implementation` owns the
+    # generic verbs and would win the max-score tie on any of them. "triage" and
+    # "backlog" are rare enough not to collide with anything.
+    "triage": [
+        "triage",
+        "backlog",
+        "all open",
+        "open tickets",
+        "open issues",
+        "outstanding",
+        "everything on my plate",
+        "workstream",
+        "work streams",
+        "in parallel",
+        "what needs doing",
+        "sweep the queue",
+    ],
     "system-map": ["system map", "map the system", "external systems", "data flow", "failure points", "component map"],
     "api-contract": [
         "api contract",
@@ -185,6 +207,7 @@ SKILL_BY_INTENT = {
     "repo-hygiene": "update-repo-hygiene",
     "council-decision": "run-engineering-council",
     "discovery": "create-discovery-brief",
+    "triage": "triage-workstreams",
 }
 
 AMBIGUOUS_PHRASES = {
@@ -198,17 +221,25 @@ AMBIGUOUS_PHRASES = {
     "do the whole thing": "scope",
 }
 
+# A denylist leaks by construction - this cannot be complete and is not claimed to
+# be. What it can do is not miss the trivial spellings of the same command, which
+# `rm\s+-rf` did: `rm -fr /` and `rm --recursive --force /` both walked past it.
+_RM_FLAGS = r"(?:-[a-z]*[rR][a-z]*f[a-z]*|-[a-z]*f[a-z]*[rR][a-z]*|--recursive|--force|-[rRf])"
 DANGEROUS_COMMANDS = [
-    r"rm\s+-rf\s+/",
-    r"rm\s+-rf\s+\.",
+    rf"rm\s+(?:{_RM_FLAGS}\s+)+/(?:\s|$)",
+    rf"rm\s+(?:{_RM_FLAGS}\s+)+[.~](?:/\s*)?(?:\s|$)",
+    rf"rm\s+(?:{_RM_FLAGS}\s+)+\$\{{?HOME",
     r"git\s+reset\s+--hard",
     r"git\s+clean\s+-fdx",
     r"docker\s+system\s+prune",
     r"drop\s+database",
     r"truncate\s+table",
-    r"curl\b.*\|\s*(sh|bash)",
+    # Fetch piped into an interpreter, whichever fetcher and whichever interpreter.
+    r"(?:curl|wget|iwr|Invoke-WebRequest)\b.*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|python3?|node|perl|ruby)\b",
     r"chmod\s+-R\s+777",
     r"Remove-Item\b.*-Recurse\b.*-Force\b.*C:\\",
+    r"mkfs\.\w+\s+/dev/",
+    r"dd\s+.*\bof=/dev/[sh]d",
 ]
 
 PRODUCTION_PATTERNS = [
@@ -1339,6 +1370,10 @@ class ToolContext:
     path: str
     files: list[str]
     hook_tool_name: str
+    # How `root` was arrived at, so a tool can report it without resolving twice.
+    # The hardest failure to see here was a correct-looking run against the wrong
+    # root: nothing errors, nothing is empty, the answers are about another project.
+    resolution: RootResolution | None = None
 
 
 def _ask_user_question_bridge(c: ToolContext) -> Any:
@@ -1482,6 +1517,7 @@ TOOLS: dict[str, Callable[[ToolContext], Any]] = {
     "active-initiative-resolver": lambda c: active_initiative_resolver(c.root, c.prompt),
     "initiative-drift-detector": lambda c: initiative_drift_detector(c.root, c.prompt, classify_user_intent(c.prompt)),
     "initiative": lambda c: initiative_command(c.root, c.args.action, c.args.id or c.args.name, c.args.text),
+    "workspace-doctor": lambda c: workspace_doctor(c.resolution, link=bool(getattr(c.args, "link", False))),
     # planning and decisions
     "plan-quality-gate": lambda c: plan_quality_gate(c.text or c.prompt),
     "architecture-decision-detector": lambda c: architecture_decision_detector(c.root, c.text or c.prompt),
@@ -1534,15 +1570,114 @@ TOOLS: dict[str, Callable[[ToolContext], Any]] = {
 }
 
 
+# Below this many ungrouped items, one stray ticket is not a triage.
+TRIAGE_MIN_ITEMS = 5
+# And below this many days since the last pull, the answer has not changed.
+TRIAGE_REMIND_AFTER_DAYS = 3
+
+
+def _triage_reminder(tracker: dict[str, Any]) -> str:
+    """The one-line triage prompt, or nothing.
+
+    Three gates, all of which have to pass. Without them this fires on every turn
+    for the rest of the repository's life, which is how a useful reminder trains
+    people to skim past the whole block.
+    """
+    stale = bool(tracker.get("workstreams_stale"))
+    unclustered = int(tracker.get("unclustered") or 0)
+    if stale and tracker.get("workstreams"):
+        return (
+            f"workstreams.json is older than the issue queue ({unclustered} issue(s) added since). "
+            "Run `/triage compile` to regroup."
+        )
+    if unclustered < TRIAGE_MIN_ITEMS:
+        return ""
+    last_fetch = str(tracker.get("last_fetch_at") or "")
+    age_note = ""
+    if last_fetch:
+        try:
+            age = (datetime.now(UTC) - datetime.fromisoformat(last_fetch)).days
+        except ValueError:
+            age = TRIAGE_REMIND_AFTER_DAYS
+        if age < TRIAGE_REMIND_AFTER_DAYS and tracker.get("workstreams"):
+            return ""
+        age_note = f" (last fetch {age} day(s) ago)"
+    return (
+        f"{unclustered} open item(s) are not grouped into workstreams{age_note}. "
+        "Run `/triage` to pull the backlog, cluster it, and fan out analysis in parallel."
+    )
+
+
+def workspace_doctor(resolution: RootResolution | None, link: bool = False) -> dict[str, Any]:
+    """Which workspace this directory resolves to, and the evidence for it.
+
+    The verb that was missing. Every other tool answers a question *about* a
+    project; none of them could answer "which project do you think you are in?".
+    That mattered because the failure mode is silent: a run anchored to the wrong
+    root does not error and does not come back empty, it just answers about
+    somewhere else.
+
+    Read-only unless `--link` is passed. Resolution deliberately does not consult
+    anything this writes.
+    """
+    resolution = resolution or resolve_root()
+    root = resolution.root
+    ancestors = [str(path) for path in resolution.workspace_ancestors]
+    nested = [relpath(path, root) for path in nested_workspaces(root)]
+    unreachable = [relpath(path, root) for path in unreachable_workspaces(root)]
+    registry = load_initiative_registry(root) if resolution.has_workspace else {"active": None, "initiatives": []}
+
+    # Ambiguous means "more than one workspace could plausibly have been meant",
+    # which is exactly when a human should look before anything is written.
+    ambiguous = len(ancestors) > 1 or bool(nested)
+    advice = ""
+    if resolution.reason == "workspace" and len(ancestors) > 1:
+        advice = (
+            f"Anchored to {root}. An ancestor ({ancestors[1]}) has its own separate workspace, "
+            "which is NOT active in this directory. Nearest wins."
+        )
+    elif nested:
+        advice = (
+            f"Anchored to {root}. {len(nested)} workspace(s) exist below it, each a separate lifecycle "
+            "project with its own initiative registry. Work on one of those from inside its own directory."
+        )
+    elif not resolution.has_workspace:
+        advice = f"No lifecycle workspace at {root}. Run `/project-init` to create one, or `/project-init here`."
+
+    result: dict[str, Any] = {
+        "root": str(root),
+        "reason": resolution.reason,
+        "marker": resolution.marker,
+        "start": str(resolution.start),
+        "start_source": resolution.start_source,
+        "has_workspace": resolution.has_workspace,
+        "active_initiative": registry.get("active"),
+        "workspace_ancestors": ancestors,
+        "nested_workspaces": nested,
+        # Buried inside the root's own .project tree, so unaddressable by design.
+        "unreachable_workspaces": unreachable,
+        "ambiguous": ambiguous,
+        "advice": advice,
+        "linked": False,
+    }
+    if link and resolution.has_workspace:
+        index = [{"path": item, "linked_at": now_iso()} for item in nested]
+        write_json(engineering_root(root) / "workspaces.json", {"generated_at": now_iso(), "workspaces": index})
+        result["linked"] = True
+    return result
+
+
 def run_tool(name: str, args: argparse.Namespace) -> dict[str, Any]:
     handler = TOOLS.get(name)
     if handler is None:
         raise SystemExit(f"unknown tool: {name}")
     payload = load_hook_payload() if args.hook else {}
+    resolution = resolve_cli_root(args.root)
     return handler(
         ToolContext(
             args=args,
-            root=repo_root(Path(args.root)),
+            root=resolution.root,
+            resolution=resolution,
             payload=payload,
             prompt=args.prompt or prompt_from_payload(payload),
             text=args.text or text_from_payload(payload),
@@ -1675,6 +1810,13 @@ def render_hook(tool_name: str, result: dict[str, Any]) -> dict[str, Any] | None
                 f"{tracker.get('provider')}{note}. Run `eng-life tracker plan` and execute the "
                 f"operations it returns.{listed}"
             )
+        # The complaint this answers is that the plugin never *offers* to triage.
+        # Gated hard, because a reminder that fires every turn forever gets ignored
+        # - and takes the useful reminders with it. See the anti-slop register.
+        if tracker.get("enabled") and tracker.get("enforcement") != "off":
+            triage_note = _triage_reminder(tracker)
+            if triage_note:
+                messages.append(triage_note)
         # Surfaced every turn so a question the human never answered stops being
         # forgotten the moment the turn that raised it ends.
         questions = result.get("questions") or {}
@@ -1728,7 +1870,9 @@ def cli_main(tool_name: str | None = None) -> int:
     inferred = Path(os.environ.get("QUALITY_TOOL_NAME", "") or Path(__file__).stem).stem
     name = (tool_name or inferred).replace(".py", "")
     parser = argparse.ArgumentParser(description=f"Run Engineering Lifecycle quality tool: {name}")
-    parser.add_argument("--root", default=".")
+    # No default: "omitted" has to be distinguishable from "explicitly here", or
+    # --root cannot be an escape hatch. See `resolve_cli_root`.
+    parser.add_argument("--root", default=None)
     parser.add_argument("--prompt", default="")
     parser.add_argument("--question", default="")
     parser.add_argument("--text", default="")
@@ -1743,6 +1887,11 @@ def cli_main(tool_name: str | None = None) -> int:
         "--action", default="read", help="Verb for multi-action tools (initiative: new|switch|close|list)"
     )
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument(
+        "--link",
+        action="store_true",
+        help="workspace-doctor: record nested workspaces in the resolved root's workspaces.json",
+    )
     parser.add_argument("--id", default="", help="Open-question id to resolve")
     parser.add_argument("--answer", default="", help="Answer text that resolves an open question")
     parser.add_argument(

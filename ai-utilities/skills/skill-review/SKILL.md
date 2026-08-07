@@ -89,7 +89,7 @@ Ground every finding in evidence. Prefer primary evidence (the file, the line, t
 2. Run the deterministic scanner (it does the mechanical work so your reasoning stays on judgement):
 
    ```bash
-   python3 scripts/scan_extension.py <target-path> --json
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/skill-review/scripts/scan_extension.py" <target-path> --json
    ```
 
    The scanner outputs a JSON inventory: artifacts found, manifest/frontmatter validity, declared `allowed-tools`, MCP servers, network endpoints, dangerous code patterns, and candidate secret matches. Read it fully before scoring.

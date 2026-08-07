@@ -101,15 +101,24 @@ def save_initiative_registry(root: Path, registry: dict[str, Any]) -> dict[str, 
     return registry
 
 
-def _topic_tokens(text: str) -> set[str]:
+def topic_tokens(text: str) -> set[str]:
+    """Content words of a piece of text, for overlap scoring.
+
+    Public because workstream clustering scores issue titles the same way. Two
+    different tokenizers over the same corpus would drift.
+    """
     words = re.findall(r"[a-z0-9]+", (text or "").lower())
     return {word for word in words if len(word) > 2 and word not in _STOPWORDS}
 
 
+# Kept as a private alias: this module had it under the old name throughout.
+_topic_tokens = topic_tokens
+
+
 def _initiative_tokens(root: Path, entry: dict[str, Any]) -> set[str]:
     """Tokens describing an initiative: its slug, title, and artifact headings."""
-    tokens = _topic_tokens(entry.get("id", "").replace("-", " "))
-    tokens |= _topic_tokens(entry.get("title", ""))
+    tokens = topic_tokens(entry.get("id", "").replace("-", " "))
+    tokens |= topic_tokens(entry.get("title", ""))
     identifier = entry.get("id", "")
     folders = [engineering_root(root) / "initiatives" / identifier, docs_root(root) / identifier]
     for folder in folders:
@@ -120,8 +129,24 @@ def _initiative_tokens(root: Path, entry: dict[str, Any]) -> set[str]:
                 head = path.read_text(encoding="utf-8")[:400]
             except OSError:
                 continue
-            tokens |= _topic_tokens(head)
+            tokens |= topic_tokens(head)
     return tokens
+
+
+def initiative_token_index(root: Path) -> dict[str, set[str]]:
+    """Token sets for every open initiative, built once.
+
+    ``active_initiative_resolver`` reads up to 20 markdown files per initiative
+    per call. That is affordable once per prompt and ruinous per issue: triaging
+    200 tracker items across 5 initiatives would be 20,000 file reads. Callers
+    with more than one thing to classify build this and pass it in.
+    """
+    registry = load_initiative_registry(root)
+    return {
+        entry["id"]: _initiative_tokens(root, entry)
+        for entry in registry["initiatives"]
+        if entry.get("status") != "closed"
+    }
 
 
 def _overlap(prompt_tokens: set[str], initiative_tokens: set[str]) -> float:
@@ -130,24 +155,29 @@ def _overlap(prompt_tokens: set[str], initiative_tokens: set[str]) -> float:
     return len(prompt_tokens & initiative_tokens) / len(prompt_tokens)
 
 
-def active_initiative_resolver(root: Path, prompt: str) -> dict[str, Any]:
+def active_initiative_resolver(root: Path, prompt: str, index: dict[str, set[str]] | None = None) -> dict[str, Any]:
     """Which initiative this prompt is about.
 
     Matching used to be a literal lowercase substring test against the slug, so
     "the public repo readiness work" did not match `public-repo-readiness`, and
     with two or more initiatives and no slug typed verbatim it gave up entirely.
+
+    `index` is an optional prebuilt ``initiative_token_index``. Pass it when
+    classifying more than one thing: building it per call re-reads up to 20
+    markdown files per initiative each time.
     """
     registry = load_initiative_registry(root)
     entries = [entry for entry in registry["initiatives"] if entry.get("status") != "closed"]
     candidates = [entry["id"] for entry in entries]
     text = prompt.lower()
-    prompt_tokens = _topic_tokens(prompt)
+    prompt_tokens = topic_tokens(prompt)
 
     scored: list[tuple[float, str]] = []
     for entry in entries:
         identifier = entry["id"]
+        tokens = index[identifier] if index is not None and identifier in index else _initiative_tokens(root, entry)
         # An explicitly typed slug is decisive, whatever the token overlap says.
-        score = 1.0 if identifier.lower() in text else _overlap(prompt_tokens, _initiative_tokens(root, entry))
+        score = 1.0 if identifier.lower() in text else _overlap(prompt_tokens, tokens)
         scored.append((score, identifier))
     scored.sort(reverse=True)
 

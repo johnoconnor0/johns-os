@@ -1,5 +1,5 @@
 {
-  "$comment": "Issue filing for this project. The one hand-authored, committed file under .project/.engineering/ - everything else in that tree is regenerable. mcp_server is left null on purpose: the server segment of an MCP tool name is specific to how THIS machine connected, so a committed value would be wrong on anyone else's. reconcile writes the working one into the gitignored tracker/dispatch-state.json, or set ISSUE_TRACKER_MCP_SERVER. Env vars override everything here per session: ISSUE_MANAGEMENT_SOFTWARE, ENABLE_ISSUE_FILING, LINEAR_PROJECT_ID, LINEAR_PROJECT_URL, LINEAR_TEAM_ID, ISSUE_TRACKER_MCP_SERVER.",
+  "$comment": "Issue filing for this project. The one hand-authored, committed file under .project/.engineering/ - everything else in that tree is regenerable. mcp_server is left null on purpose: the server segment of an MCP tool name is specific to how THIS machine connected, so a committed value would be wrong on anyone else's. reconcile writes the working one into the gitignored tracker/dispatch-state.json, or set ISSUE_TRACKER_MCP_SERVER. scope.team and scope.project are null for the same class of reason plus one more: this repository is public, and a tracker's team/project ids identify a private workspace. Set them per machine via LINEAR_TEAM_ID and LINEAR_PROJECT_ID (or LINEAR_PROJECT_URL, which decodes to the same fields). Names are not a substitute - Linear's list_issues rejects a project name and needs the id. Env vars override everything here per session: ISSUE_MANAGEMENT_SOFTWARE, ENABLE_ISSUE_FILING, LINEAR_PROJECT_ID, LINEAR_PROJECT_URL, LINEAR_TEAM_ID, ISSUE_TRACKER_MCP_SERVER.",
   "issue_filing": {
     "capture": {
       "detector": true,
@@ -21,7 +21,7 @@
     "provider": "linear",
     "scope": {
       "project": null,
-      "team": "John OS"
+      "team": null
     },
     "status_map": {}
   },

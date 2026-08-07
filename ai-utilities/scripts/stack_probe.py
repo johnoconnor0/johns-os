@@ -71,6 +71,8 @@ _PACKAGE_MANAGERS = (
     ("Cargo.toml", "cargo"),
     ("go.mod", "go"),
 )
+# The JS managers, mapped to how each runs a binary out of node_modules.
+_JS_MANAGERS = {"npm": "npx", "pnpm": "pnpm exec", "yarn": "yarn", "bun": "bunx"}
 
 
 def _from_workspace(root: Path) -> dict[str, Any] | None:
@@ -84,14 +86,22 @@ def _from_workspace(root: Path) -> dict[str, Any] | None:
 
 
 def _sibling_detector(root: Path) -> Path | None:
-    """`stack_detection.py` from a co-installed engineering-lifecycle, if present."""
-    candidates = [
-        plugin_root().parent / "engineering-lifecycle" / "scripts",
-        root / "engineering-lifecycle" / "scripts",
-    ]
-    for directory in candidates:
-        if (directory / "stack_detection.py").is_file() and (directory / "eng_common.py").is_file():
-            return directory
+    """`stack_detection.py` from a co-installed engineering-lifecycle, if present.
+
+    The plugin cache only. This used to also accept
+    ``root/"engineering-lifecycle"/"scripts"`` - a path *inside the repository
+    being audited* - and `_from_import` executes what it finds there in-process,
+    with that directory inserted at the front of `sys.path` so every subsequent
+    import resolves from it too. Since this plugin exists to be pointed at
+    repositories nobody controls, a repo shipping that directory pair got code
+    execution simply by being audited.
+
+    `root` is unused now. The parameter stays because `resolve_stack` dispatches
+    every rung with the same signature.
+    """
+    directory = plugin_root().parent / "engineering-lifecycle" / "scripts"
+    if (directory / "stack_detection.py").is_file() and (directory / "eng_common.py").is_file():
+        return directory
     return None
 
 
@@ -109,7 +119,9 @@ def _from_import(root: Path) -> dict[str, Any] | None:
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         data = dict(module.detect_stack(root))
-    except Exception:
+    # SystemExit is not an Exception, so a module calling sys.exit() during import
+    # used to take the whole audit down instead of falling through.
+    except (Exception, SystemExit):
         # A detector that raises is a detector that did not answer. Fall through to
         # the vendored probe rather than letting the whole audit fail on it.
         return None
@@ -136,14 +148,19 @@ def _vendored(root: Path) -> dict[str, Any]:
     package_manager = next((name for filename, name in _PACKAGE_MANAGERS if (root / filename).exists()), None)
     scripts = _package_scripts(root)
     commands: dict[str, str] = {}
-    if "test" in scripts:
-        commands["unit"] = "npm test"
-    if "build" in scripts:
-        commands["build"] = "npm run build"
-    if "lint" in scripts:
-        commands["lint"] = "npm run lint"
-    if (root / "tsconfig.json").exists():
-        commands["typecheck"] = "npx tsc --noEmit"
+    # The detected manager, not npm. This used to resolve `package_manager` above
+    # and then ignore it, so a pnpm, yarn or bun repo got `npm test` - which
+    # either fails outright or installs a divergent dependency tree.
+    # `engineering-lifecycle/scripts/stack_detection.py` already did it this way.
+    if package_manager in _JS_MANAGERS:
+        for script, key in (("test", "unit"), ("build", "build"), ("lint", "lint")):
+            if script in scripts:
+                # `<mgr> run <script>` rather than `<mgr> <script>`, which is
+                # equivalent everywhere except bun, where `bun test` is bun's own
+                # test runner and not the package.json script at all.
+                commands[key] = f"{package_manager} run {script}"
+        if (root / "tsconfig.json").exists():
+            commands["typecheck"] = f"{_JS_MANAGERS[package_manager]} tsc --noEmit"
     if package_manager == "python":
         if (root / "tests").is_dir():
             commands["unit"] = "python -m unittest discover -s tests"

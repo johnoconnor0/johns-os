@@ -17,7 +17,7 @@ from eng_common import (
     now_iso,
     parse_front_matter,
     read_json,
-    repo_root,
+    resolve_cli_root,
     write_json,
     write_text,
 )
@@ -572,9 +572,9 @@ def sync(root: Path) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", default=".")
+    parser.add_argument("--root", default=None)
     args = parser.parse_args()
-    root = repo_root(Path(args.root))
+    root = resolve_cli_root(args.root).root
     ledger = sync(root)
     print(f"synced ledger with {ledger['summary']['artifact_count']} artifact(s)")
     return 0

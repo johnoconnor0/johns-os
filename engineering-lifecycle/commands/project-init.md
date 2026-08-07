@@ -14,22 +14,34 @@ skills and hooks active for a repo.
 
 ## Where it goes
 
-- **Default (no argument):** the workspace is created at the **repo root** (the nearest
-  ancestor containing `.git` or `.claude-plugin/plugin.json`). This is correct almost
-  every time — `.project` belongs at the repo root.
+- **Default (no argument):** the workspace is created at the **resolved root** — the
+  nearest ancestor with an existing `.project/.engineering`, else the nearest with
+  `.git` or `.claude-plugin/plugin.json`. This is correct almost every time.
 - **`here` (or `.`):** the workspace is created in the **current working directory
-  exactly**, without walking up. Use this deliberately for a nested package, e.g. running
+  exactly**, without resolving. Use this deliberately for a nested package, e.g. running
   it from `plugins/web-lifter-cloud` to get `plugins/web-lifter-cloud/.project`.
+
+A workspace created with `here` is findable afterwards: the resolver knows about
+the workspace marker, so every later command run from inside that package
+resolves to it rather than walking past it to the monorepo root.
 
 ## Flow
 
+0. **Look before writing.** Run the doctor and read `ambiguous`:
+
+   ```bash
+   python "${CLAUDE_PLUGIN_ROOT}/scripts/workspace-doctor.py"
+   ```
+
+   It creates nothing. It reports which root this directory resolves to, which
+   marker proved it, and every other workspace above or below.
 1. **Resolve target.** Inspect `$ARGUMENTS`:
    - If it contains `here` or `.` → subfolder mode (`--here`), target = current directory.
-   - Otherwise → repo-root mode, target = the resolved repo root.
-2. **Confirm only when ambiguous.** If subfolder mode is requested but the current
-   directory *is* the repo root, or if a `.project/.engineering` already exists at a
-   different level, use `AskUserQuestion` to confirm the intended location before writing.
-   Otherwise proceed — this command is the user's explicit opt-in.
+   - Otherwise → default mode, target = the resolved root the doctor reported.
+2. **Confirm when the doctor says `ambiguous`.** That flag is set when more than one
+   workspace could plausibly have been meant — an ancestor already has one, or one or
+   more exist below. Use `AskUserQuestion` to confirm the intended location before
+   writing. Otherwise proceed — this command is the user's explicit opt-in.
 3. **Initialize** by running the workspace initializer:
 
    ```bash
@@ -51,8 +63,8 @@ skills and hooks active for a repo.
 
 ## Behavioural Rules
 
-1. **Never create `.project` outside the resolved target.** Repo root by default; the
-   current directory only when `here` is explicitly requested.
+1. **Never create `.project` outside the resolved target.** The resolved root by
+   default; the current directory only when `here` is explicitly requested.
 2. **Idempotent.** Safe to run repeatedly; it will not overwrite existing lifecycle
    artifacts.
 3. **No version control.** This command does not stage, commit, or push. `.project/` is

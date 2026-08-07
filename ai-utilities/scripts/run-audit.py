@@ -138,7 +138,13 @@ def _reference_findings(ctx: Ctx, family) -> tuple[FamilyResult, set[str]]:
     return result, unresolved
 
 
-def audit(root: Path, plan_path: Path | None, stamp: str, prefer: str = "") -> dict:
+def audit(
+    root: Path,
+    plan_path: Path | None,
+    stamp: str,
+    prefer: str = "",
+    allow_untrusted_commands: bool = False,
+) -> dict:
     stack = resolve_stack(root, prefer)
     files = collect_files(root)
     resolved_plan = plan_path or find_plan(root)
@@ -147,7 +153,13 @@ def audit(root: Path, plan_path: Path | None, stamp: str, prefer: str = "") -> d
         if resolved_plan and resolved_plan.is_file()
         else {"path": None, "parsed_by": None, "item_count": 0, "items": []}
     )
-    ctx = Ctx(root=root, stack=stack, plan=plan, files=files)
+    ctx = Ctx(
+        root=root,
+        stack=stack,
+        plan=plan,
+        files=files,
+        allow_untrusted_commands=allow_untrusted_commands,
+    )
 
     results: list[FamilyResult] = []
     unresolved: set[str] = set()
@@ -263,6 +275,11 @@ def main() -> int:
     parser.add_argument("--stamp", default="", help="Override the run id. For tests.")
     parser.add_argument("--out", default="", help="Write into this directory instead of the canonical one.")
     parser.add_argument("--print", action="store_true", help="Emit the document on stdout and write nothing.")
+    parser.add_argument(
+        "--allow-untrusted-commands",
+        action="store_true",
+        help="Run check commands taken verbatim from the audited repository's own stack.json",
+    )
     args = parser.parse_args()
 
     # An explicit --root is taken literally. Passing it through repo_root walks up to
@@ -275,7 +292,7 @@ def main() -> int:
     if plan_path and not plan_path.is_absolute():
         plan_path = root / plan_path
 
-    document = audit(root, plan_path, stamp, args.prefer)
+    document = audit(root, plan_path, stamp, args.prefer, args.allow_untrusted_commands)
     if args.print:
         print(json.dumps(document, indent=2, sort_keys=True))
         return 1 if document.get("validation_errors") else 0
