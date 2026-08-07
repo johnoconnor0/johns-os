@@ -3,7 +3,7 @@
   "name": "Engineering Lifecycle",
   "summary": "Move software products through a structured engineering lifecycle from discovery to maintenance.",
   "status": "local",
-  "category": "engineering",
+  "category": "Developer Tools",
   "version": "0.10.0",
   "homepage": "https://weblifter.com.au",
   "path": "engineering-lifecycle",

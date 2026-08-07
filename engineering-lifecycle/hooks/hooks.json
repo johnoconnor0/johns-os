@@ -6,15 +6,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-start-context.py\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-start-context.py\"",
+            "timeout": 20
           },
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/scripts/detect-stack.py\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/scripts/detect-stack.py\"",
+            "timeout": 20
           },
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/load-project-memory.py\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/load-project-memory.py\"",
+            "timeout": 20
           }
         ]
       }
@@ -25,7 +28,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/user-prompt-intake.py\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/user-prompt-intake.py\"",
+            "timeout": 15
           }
         ]
       }
@@ -36,7 +40,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ask-user-question-bridge.py\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ask-user-question-bridge.py\"",
+            "timeout": 10
           }
         ]
       },
@@ -45,15 +50,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/block-dangerous-bash.sh\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/scripts/dangerous-command-guard.py\" --hook",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/block-secret-exfil.sh\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/scripts/secret-exfiltration-guard.py\" --hook",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/scripts/production-environment-guard.py\" --hook"
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/scripts/production-environment-guard.py\" --hook",
+            "timeout": 10
           }
         ]
       },
@@ -62,19 +70,23 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/edit-scope-guard.py\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/edit-scope-guard.py\"",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/scripts/generated-file-guard.py\" --hook"
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/scripts/generated-file-guard.py\" --hook",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/scripts/sensitive-file-policy.py\" --hook"
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/scripts/sensitive-file-policy.py\" --hook",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/data-model-context.py\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/data-model-context.py\"",
+            "timeout": 10
           }
         ]
       }
@@ -85,7 +97,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/capture-question-answers.py\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/capture-question-answers.py\"",
+            "timeout": 20
           }
         ]
       },
@@ -94,31 +107,38 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/detect-new-env-vars.py\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/detect-new-env-vars.py\"",
+            "timeout": 20
           },
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/suggest-gitignore-updates.py\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/suggest-gitignore-updates.py\"",
+            "timeout": 20
           },
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/validate-generated-artifacts.py\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/validate-generated-artifacts.py\"",
+            "timeout": 20
           },
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/sync-ledger.py\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/sync-ledger.py\"",
+            "timeout": 20
           },
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/scripts/schema-drift-check.py\" --hook"
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/scripts/schema-drift-check.py\" --hook",
+            "timeout": 20
           },
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/scripts/reference-check.py\" --hook"
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/scripts/reference-check.py\" --hook",
+            "timeout": 20
           },
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/project-anomaly-check.py\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/project-anomaly-check.py\"",
+            "timeout": 20
           }
         ]
       }
@@ -129,7 +149,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/post-edit-hygiene.py\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/post-edit-hygiene.py\"",
+            "timeout": 30
           }
         ]
       }
@@ -140,27 +161,33 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/hygiene-stop-check.py\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/hygiene-stop-check.py\"",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/capture-session-summary.py\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/capture-session-summary.py\"",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/stop-completion-check.py\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/stop-completion-check.py\"",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/sync-ledger.py\" --stop"
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/sync-ledger.py\" --stop",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/project-anomaly-check.py\" --stop"
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/project-anomaly-check.py\" --stop",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/tracker-dispatch.py\""
+            "command": "python -B \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/tracker-dispatch.py\"",
+            "timeout": 30
           }
         ]
       }

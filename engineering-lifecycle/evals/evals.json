@@ -7,7 +7,7 @@
         "fixtures/artifact-valid.md",
         "fixtures/artifact-invalid.md"
       ],
-      "command": "python scripts/validate-artifact.py evals/fixtures/artifact-valid.md"
+      "command": "python \"${CLAUDE_PLUGIN_ROOT}\"/scripts/validate-artifact.py evals/fixtures/artifact-valid.md"
     },
     {
       "id": "hygiene-report",
@@ -15,7 +15,7 @@
       "fixtures": [
         "fixtures/hygiene-report.json"
       ],
-      "command": "python scripts/validate-schemas.py"
+      "command": "python \"${CLAUDE_PLUGIN_ROOT}\"/scripts/validate-schemas.py"
     },
     {
       "id": "council-report",
@@ -23,7 +23,7 @@
       "fixtures": [
         "fixtures/council-report.json"
       ],
-      "command": "python scripts/validate-schemas.py"
+      "command": "python \"${CLAUDE_PLUGIN_ROOT}\"/scripts/validate-schemas.py"
     },
     {
       "id": "dashboard-data",
@@ -31,7 +31,7 @@
       "fixtures": [
         "fixtures/dashboard-data.json"
       ],
-      "command": "python scripts/validate-schemas.py"
+      "command": "python \"${CLAUDE_PLUGIN_ROOT}\"/scripts/validate-schemas.py"
     },
     {
       "id": "quality-control-scripts",
@@ -84,7 +84,7 @@
       "fixtures": [
         "trigger-evals.json"
       ],
-      "command": "python scripts/prompt-optimization-evaluator.py --root ."
+      "command": "python \"${CLAUDE_PLUGIN_ROOT}\"/scripts/prompt-optimization-evaluator.py --root ."
     },
     {
       "id": "schema-validator",
@@ -94,7 +94,7 @@
         "fixtures/council-report.json",
         "fixtures/dashboard-data.json"
       ],
-      "command": "python scripts/schema-validator.py --root ."
+      "command": "python \"${CLAUDE_PLUGIN_ROOT}\"/scripts/schema-validator.py --root ."
     }
   ]
 }

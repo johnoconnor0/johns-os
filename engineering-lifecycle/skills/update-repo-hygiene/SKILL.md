@@ -25,7 +25,8 @@ Use when the user asks to update hygiene files, inspect generated files, sync en
 
 ## Workflow
 
-1. Run `python hooks/scripts/detect-new-env-vars.py` and `python hooks/scripts/suggest-gitignore-updates.py`.
+1. Run `python "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/detect-new-env-vars.py"` and
+   `python "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/suggest-gitignore-updates.py"`.
 2. Inspect `.project/.engineering/hygiene/hygiene-report.json`.
 3. Apply `.env.example` additions only when explicitly requested, using placeholders only.
 4. Apply `.gitignore` additions only for safe generated/local patterns.

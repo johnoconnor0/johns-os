@@ -222,17 +222,25 @@ AMBIGUOUS_PHRASES = {
     "do the whole thing": "scope",
 }
 
+# A denylist leaks by construction - this cannot be complete and is not claimed to
+# be. What it can do is not miss the trivial spellings of the same command, which
+# `rm\s+-rf` did: `rm -fr /` and `rm --recursive --force /` both walked past it.
+_RM_FLAGS = r"(?:-[a-z]*[rR][a-z]*f[a-z]*|-[a-z]*f[a-z]*[rR][a-z]*|--recursive|--force|-[rRf])"
 DANGEROUS_COMMANDS = [
-    r"rm\s+-rf\s+/",
-    r"rm\s+-rf\s+\.",
+    rf"rm\s+(?:{_RM_FLAGS}\s+)+/(?:\s|$)",
+    rf"rm\s+(?:{_RM_FLAGS}\s+)+[.~](?:/\s*)?(?:\s|$)",
+    rf"rm\s+(?:{_RM_FLAGS}\s+)+\$\{{?HOME",
     r"git\s+reset\s+--hard",
     r"git\s+clean\s+-fdx",
     r"docker\s+system\s+prune",
     r"drop\s+database",
     r"truncate\s+table",
-    r"curl\b.*\|\s*(sh|bash)",
+    # Fetch piped into an interpreter, whichever fetcher and whichever interpreter.
+    r"(?:curl|wget|iwr|Invoke-WebRequest)\b.*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|python3?|node|perl|ruby)\b",
     r"chmod\s+-R\s+777",
     r"Remove-Item\b.*-Recurse\b.*-Force\b.*C:\\",
+    r"mkfs\.\w+\s+/dev/",
+    r"dd\s+.*\bof=/dev/[sh]d",
 ]
 
 PRODUCTION_PATTERNS = [

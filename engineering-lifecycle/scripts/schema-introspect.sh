@@ -67,6 +67,52 @@ echo "**Generated:** $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "**Dialect:** ${DIALECT:-unknown}"
 echo
 
+# --- credentials -----------------------------------------------------------
+#
+# The DSN carries a password, and every client below used to receive it as a
+# command-line operand - visible in `ps` and /proc/<pid>/cmdline to any other
+# local user, on every run. These split it into parts so the password can travel
+# through the environment instead, which each of these clients supports.
+#
+# Parsing is deliberately simple and deliberately not exported: DSN_PASS is set
+# only for the duration of the client call that needs it.
+dsn_field() {
+  # dsn_field <dsn> <scheme|user|pass|host|port|path>
+  printf '%s' "$1" | awk -v want="$2" '
+    {
+      url = $0
+      scheme = ""; rest = url
+      if (index(url, "://") > 0) { scheme = substr(url, 1, index(url, "://") - 1); rest = substr(url, index(url, "://") + 3) }
+      cred = ""; hostpart = rest
+      if (index(rest, "@") > 0) { cred = substr(rest, 1, index(rest, "@") - 1); hostpart = substr(rest, index(rest, "@") + 1) }
+      user = cred; pass = ""
+      if (index(cred, ":") > 0) { user = substr(cred, 1, index(cred, ":") - 1); pass = substr(cred, index(cred, ":") + 1) }
+      path = ""
+      if (index(hostpart, "/") > 0) { path = substr(hostpart, index(hostpart, "/") + 1); hostpart = substr(hostpart, 1, index(hostpart, "/") - 1) }
+      sub(/\?.*$/, "", path)
+      host = hostpart; port = ""
+      if (index(hostpart, ":") > 0) { host = substr(hostpart, 1, index(hostpart, ":") - 1); port = substr(hostpart, index(hostpart, ":") + 1) }
+      if (want == "scheme") print scheme
+      else if (want == "user") print user
+      else if (want == "pass") print pass
+      else if (want == "host") print host
+      else if (want == "port") print port
+      else if (want == "path") print path
+    }'
+}
+
+DSN_USER=$(dsn_field "$DSN" user)
+DSN_PASS=$(dsn_field "$DSN" pass)
+DSN_HOST=$(dsn_field "$DSN" host)
+DSN_PORT=$(dsn_field "$DSN" port)
+DSN_DB=$(dsn_field "$DSN" path)
+# The same connection string with the password removed, for clients that take a
+# URL. Safe to appear in argv.
+DSN_SAFE=$DSN
+if [ -n "$DSN_PASS" ]; then
+  DSN_SAFE=$(printf '%s' "$DSN" | sed "s|:$(printf '%s' "$DSN_PASS" | sed 's|[\\/&.*^$[]|\\\\&|g')@|@|")
+fi
+
 emit_manual() {
   echo "**Source:** Manual — please paste schema below"
   echo
@@ -103,7 +149,7 @@ case "$DIALECT" in
       echo
       echo "## Tables (public schema)"
       echo '```'
-      psql "$DSN" -c "
+      PGPASSWORD="$DSN_PASS" psql "$DSN_SAFE" -c "
         SELECT table_name,
                (SELECT count(*) FROM information_schema.columns c WHERE c.table_name = t.table_name) AS columns
         FROM information_schema.tables t
@@ -114,14 +160,14 @@ case "$DIALECT" in
       echo
       echo "## Extensions"
       echo '```'
-      psql "$DSN" -c "SELECT extname, extversion FROM pg_extension ORDER BY extname;" 2>/dev/null || true
+      PGPASSWORD="$DSN_PASS" psql "$DSN_SAFE" -c "SELECT extname, extversion FROM pg_extension ORDER BY extname;" 2>/dev/null || true
       echo '```'
       echo
       echo "## Migrations"
       echo '```'
       # supabase_migrations exists only on Supabase; fall back to a common table name.
-      psql "$DSN" -c "SELECT version, name FROM supabase_migrations.schema_migrations ORDER BY version DESC LIMIT 20;" 2>/dev/null \
-        || psql "$DSN" -c "SELECT * FROM schema_migrations ORDER BY 1 DESC LIMIT 20;" 2>/dev/null \
+      PGPASSWORD="$DSN_PASS" psql "$DSN_SAFE" -c "SELECT version, name FROM supabase_migrations.schema_migrations ORDER BY version DESC LIMIT 20;" 2>/dev/null \
+        || PGPASSWORD="$DSN_PASS" psql "$DSN_SAFE" -c "SELECT * FROM schema_migrations ORDER BY 1 DESC LIMIT 20;" 2>/dev/null \
         || echo "(no recognised migrations table)"
       echo '```'
     else
@@ -134,7 +180,7 @@ case "$DIALECT" in
       echo
       echo "## Tables"
       echo '```'
-      mysql --table "$DSN" -e "
+      MYSQL_PWD="$DSN_PASS" mysql --table -h "$DSN_HOST" ${DSN_PORT:+-P "$DSN_PORT"} -u "$DSN_USER" "$DSN_DB" -e "
         SELECT TABLE_NAME, TABLE_ROWS,
                (SELECT COUNT(*) FROM information_schema.COLUMNS c
                  WHERE c.TABLE_NAME = t.TABLE_NAME AND c.TABLE_SCHEMA = DATABASE()) AS columns
@@ -146,7 +192,7 @@ case "$DIALECT" in
       echo
       echo "## Foreign keys"
       echo '```'
-      mysql --table "$DSN" -e "
+      MYSQL_PWD="$DSN_PASS" mysql --table -h "$DSN_HOST" ${DSN_PORT:+-P "$DSN_PORT"} -u "$DSN_USER" "$DSN_DB" -e "
         SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME
         FROM information_schema.KEY_COLUMN_USAGE
         WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL
@@ -180,7 +226,7 @@ case "$DIALECT" in
       echo
       echo "## Tables"
       echo '```'
-      sqlcmd -S "$DSN" -Q "
+      SQLCMDPASSWORD="$DSN_PASS" sqlcmd -S "$DSN_HOST${DSN_PORT:+,$DSN_PORT}" -U "$DSN_USER" -d "$DSN_DB" -Q "
         SELECT t.name AS table_name, COUNT(c.name) AS columns
         FROM sys.tables t LEFT JOIN sys.columns c ON c.object_id = t.object_id
         GROUP BY t.name ORDER BY t.name;
@@ -189,7 +235,7 @@ case "$DIALECT" in
       echo
       echo "## Foreign keys"
       echo '```'
-      sqlcmd -S "$DSN" -Q "
+      SQLCMDPASSWORD="$DSN_PASS" sqlcmd -S "$DSN_HOST${DSN_PORT:+,$DSN_PORT}" -U "$DSN_USER" -d "$DSN_DB" -Q "
         SELECT fk.name, OBJECT_NAME(fk.parent_object_id) AS from_table,
                OBJECT_NAME(fk.referenced_object_id) AS to_table
         FROM sys.foreign_keys fk ORDER BY fk.name;
@@ -207,7 +253,7 @@ case "$DIALECT" in
       echo
       echo "## Collections"
       echo '```'
-      mongosh "$DSN" --quiet --eval '
+      mongosh "$DSN_SAFE" ${DSN_USER:+--username "$DSN_USER"} ${DSN_PASS:+--password "$DSN_PASS"} --quiet --eval '
         db.getCollectionNames().forEach(function (name) {
           var doc = db.getCollection(name).findOne() || {};
           print(name + ": " + Object.keys(doc).join(", "));
@@ -217,7 +263,7 @@ case "$DIALECT" in
       echo
       echo "## Indexes"
       echo '```'
-      mongosh "$DSN" --quiet --eval '
+      mongosh "$DSN_SAFE" ${DSN_USER:+--username "$DSN_USER"} ${DSN_PASS:+--password "$DSN_PASS"} --quiet --eval '
         db.getCollectionNames().forEach(function (name) {
           db.getCollection(name).getIndexes().forEach(function (index) {
             print(name + ": " + index.name + " " + JSON.stringify(index.key));

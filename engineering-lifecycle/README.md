@@ -271,8 +271,8 @@ only inspect and block, they never write.
 Canonical hook scripts:
 
 - `session-start-context.py`
-- `block-dangerous-bash.sh`
-- `block-secret-exfil.sh`
+- `dangerous-command-guard.py`
+- `secret-exfiltration-guard.py`
 - `detect-new-env-vars.py`
 - `suggest-gitignore-updates.py`
 - `validate-generated-artifacts.py`

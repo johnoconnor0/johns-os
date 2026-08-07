@@ -43,16 +43,41 @@ REQUIRED_FILES = [
 ]
 
 
-def validate_skill(path: Path) -> list[str]:
+def validate_skill(path: Path, plugin_root: Path | None = None) -> list[str]:
     errors: list[str] = []
     text = path.read_text(encoding="utf-8")
     fm, body = parse_front_matter(text)
     for key in ["name", "description"]:
         if key not in fm:
             errors.append(f"{path}: missing skill front matter key {key}")
+    # A skill with no declared ceiling has every tool available to the session.
+    # Two shipped that way for a long time - including the only one licensed to
+    # edit production source - because the requirement was prose in a CHANGELOG
+    # entry rather than a check. Prose does not hold this kind of line.
+    if "allowed-tools" not in fm:
+        errors.append(
+            f"{path}: missing allowed-tools. A skill without one inherits the whole session's "
+            "tool surface; declare the minimum it needs."
+        )
     for section in ["Trigger", "When To Use", "Outputs", "Safety Constraints"]:
         if f"## {section}" not in body:
             errors.append(f"{path}: missing section {section}")
+    # Plugin-owned scripts must be anchored. A bare relative path only resolves
+    # when the working directory happens to be the plugin checkout, so the
+    # documented step silently does nothing everywhere else.
+    #
+    # Gated on the file actually existing in this plugin, which is what separates
+    # a broken self-reference from a correct reference to the *host* repository's
+    # own entrypoint - `python scripts/validate-repo.py` in audit-resolver means
+    # the audited repo's script, and anchoring that would be wrong.
+    if plugin_root is not None:
+        for match in re.finditer(r"python3?\s+((?:scripts|hooks)/[\w./-]+\.py)", body):
+            relative = match.group(1)
+            if (plugin_root / relative).is_file():
+                errors.append(
+                    f"{path}: `{relative}` is a script this plugin ships, invoked relative to the "
+                    'working directory. Anchor it: python "${CLAUDE_PLUGIN_ROOT}/' + relative + '"'
+                )
     return errors
 
 
@@ -132,7 +157,7 @@ def validate_plugin(root: Path) -> list[str]:
     """
     errors: list[str] = []
     for path in sorted((root / "skills").glob("*/SKILL.md")):
-        errors.extend(validate_skill(path))
+        errors.extend(validate_skill(path, root))
     for path in sorted((root / "schemas").glob("*.json")):
         if path.stat().st_size == 0:
             errors.append(f"empty schema: {path.relative_to(root)}")

@@ -1,5 +1,6 @@
 ---
 name: implement-feature-safely
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(git:*), Bash(python:*), Bash(npm:*), Bash(npx:*), Bash(pnpm:*), Bash(yarn:*), AskUserQuestion, Agent
 description: Use only after planning to guide implementation in small verified slices while respecting architecture, tests, repository conventions, and hygiene.
 ---
 
