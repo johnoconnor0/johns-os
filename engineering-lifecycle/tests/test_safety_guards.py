@@ -1114,7 +1114,6 @@ class SensitiveFilePolicyTests(GuardContractMixin, unittest.TestCase):
                 self.assertTrue(quality_tools.sensitive_file_policy(path, "print")["sensitive"], path)
 
     @unittest.skipIf(os.name == "nt", "on Windows the platform path parser already splits on backslashes")
-    @unittest.expectedFailure
     def test_a_backslash_spelled_path_is_classified_on_posix_too(self) -> None:
         # DEFECT, and a portability one: `classify_file_path` takes `path.name`
         # from the platform's own parser, so `..\\..\\.env` is `.env` on Windows
@@ -1176,7 +1175,6 @@ class SensitiveFilePolicyTests(GuardContractMixin, unittest.TestCase):
         self.assertEqual(blocked, [])
 
     @unittest.skipUnless(SYMLINKS, "creating symlinks needs Developer Mode or elevation on Windows")
-    @unittest.expectedFailure
     def test_a_symlink_is_classified_by_its_own_name_not_its_target(self) -> None:
         # DEFECT: name-based classification is what makes traversal harmless (see
         # above), and it is also what makes this work - a link called `notes.md`

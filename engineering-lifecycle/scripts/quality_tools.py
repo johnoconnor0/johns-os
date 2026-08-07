@@ -1375,8 +1375,39 @@ def secret_exfiltration_guard(command: str = "", text: str = "", path: str = "")
     }
 
 
+def _symlink_target_category(path: str) -> str | None:
+    """The category of what a link points at, when it points at something.
+
+    Classification is by name everywhere else, and deliberately so: it needs no
+    filesystem, it works on paths that do not exist yet, and it is what makes a
+    traversal string harmless rather than a lookup. The gap that leaves is a link
+    called `notes.md` pointing at `.env` - documentation by name, a credential in
+    fact, and printable. Creating that link is one command and is not itself a
+    guarded action, so the two-step is within reach of a compromised instruction.
+
+    Resolving only when the path is really a link on disk closes it without
+    giving anything up: a name that does not exist still classifies by name.
+    Every filesystem error is swallowed on purpose - a broken link, a permission
+    denial or a symlink loop must leave the name-based verdict standing rather
+    than take the guard down with it.
+    """
+    try:
+        candidate = Path(path)
+        if not candidate.is_symlink():
+            return None
+        return classify_file_path(candidate.resolve())
+    except (OSError, ValueError, RuntimeError):
+        return None
+
+
 def sensitive_file_policy(path: str, action: str = "read") -> dict[str, Any]:
     category = classify_file_path(Path(path))
+    if category != "secret-risk":
+        # The more sensitive of the two readings wins. A link is only ever an
+        # escalation here, never a way to declassify what it points at.
+        target = _symlink_target_category(path)
+        if target == "secret-risk":
+            category = target
     sensitive = category == "secret-risk"
     decision = (
         "block"

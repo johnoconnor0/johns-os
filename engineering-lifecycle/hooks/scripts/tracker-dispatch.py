@@ -103,6 +103,20 @@ def main() -> int:
 
     token = _queue_token(pending)
     state = read_json_safe(state_path(root))
+
+    # The reset comes BEFORE the cap, which is the whole of it. Checking the cap
+    # first meant the counter from a finished session was still standing when the
+    # next one asked, so brake 3 returned before this line could ever run: one
+    # block in any session silenced every session after it, permanently. A brake
+    # that never releases is a mute button, and the critical issue surfaced
+    # tomorrow is exactly the one it would have swallowed.
+    session = payload.get("session_id")
+    if session and state.get("session_id") != session:
+        # A genuinely new session resets the cap; the token still guards repeats,
+        # and it is deliberately not reset here - a queue already raised should
+        # not be raised again just because the session changed.
+        state["blocks_this_session"] = 0
+
     # Brake 2: this exact queue has already been raised once.
     if state.get("last_block_token") == token:
         return 0
@@ -112,10 +126,6 @@ def main() -> int:
 
     from eng_common import now_iso
 
-    session = payload.get("session_id")
-    if session and state.get("session_id") != session:
-        # A genuinely new session resets the cap; the token still guards repeats.
-        state["blocks_this_session"] = 0
     state.update(
         {
             "last_block_token": token,

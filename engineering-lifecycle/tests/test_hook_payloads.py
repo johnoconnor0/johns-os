@@ -1552,7 +1552,6 @@ class ConcurrentWriteTests(FixtureMixin, unittest.TestCase):
                 self.assertEqual(strays, [], f"round {round_number} left temp files behind: {strays}")
 
     @unittest.skipUnless(sys.platform == "win32", "os.replace over an open destination only fails on Windows")
-    @unittest.expectedFailure
     def test_a_hook_survives_a_sibling_holding_the_file_it_is_rewriting(self) -> None:
         """CONFIRMED GAP: `os.replace` onto a file another hook has open kills the hook.
 
@@ -1703,7 +1702,6 @@ class TrackerDispatchTests(FixtureMixin, unittest.TestCase):
         self.assert_clean_exit(entry, proc)
         self.assertEqual(proc.stdout.strip(), "", "a new session re-raised a queue that had not changed")
 
-    @unittest.expectedFailure
     def test_a_genuinely_different_queue_is_raised_again(self) -> None:
         """CONFIRMED GAP: the per-session cap is checked before the session is read.
 

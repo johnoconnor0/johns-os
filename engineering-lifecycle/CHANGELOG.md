@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.4 - 2026-08-08
+
+The last four recorded defects. **No `@unittest.expectedFailure` remains anywhere
+in the repository** — every defect these suites documented is now a passing test
+rather than a marked one.
+
+### Fixed
+
+- **A backslash-spelled path classified differently on POSIX.** `classify_file_path` took the basename from the platform's own parser, so `..\..\.env` was `.env` on Windows and the whole undivided string on Linux and macOS — where it fell through to `config` and printing it was allowed. The function already normalised the string for its `generated` check and not for the secret check, so one input got two readings out of one function. Splitting now happens on the normalised text throughout, which is what `wrong_initiative_write` has always done. Reachable without anything exotic: the harness passes whatever the tool call contained, and an agent working over a Windows checkout from WSL or a container supplies exactly this.
+- **A symlink was classified by its own name rather than its target.** A link called `notes.md` pointing at `.env` read as documentation and could be printed; creating that link is one command and is not itself a guarded action, so the two-step was within reach. The target is now resolved **when the path is really a link on disk**, and only ever as an escalation. Classification stays name-based everywhere else on purpose — it needs no filesystem, works on paths that do not exist yet, and is what makes a traversal string harmless rather than a lookup. Every filesystem error is swallowed so a broken link or a symlink loop leaves the name-based verdict standing instead of taking the guard down.
+- **An atomic rename is not a tolerant one.** `os.replace` maps to `MoveFileEx` on Windows, which refuses outright while another process holds the destination open. No reader ever saw a torn file — the atomicity claim held — but the writer died with an unhandled `PermissionError`, and `validate-generated-artifacts.py` and `sync-ledger.py` are adjacent entries in the same PostToolUse group, so they run together on every edit and the validator opens every generated `.json` in the tree the ledger is rewriting. A short bounded retry now absorbs the ordinary case. Where a handle outlives the whole write, the ledger sync reports on stderr and exits 0 rather than raising: everything it writes is derived and rebuilt in full next pass, so losing one costs a stale dashboard, while raising costs the hook — and a PostToolUse hook that dies is one that silently stops running.
+- **The Stop-hook brake was a mute button.** `tracker-dispatch.py` checked its per-session cap *before* the branch that resets that cap for a new session, so the counter from a finished session was still standing when the next one asked. One block in any session silenced every session after it, permanently — including the critical issue surfaced tomorrow, which is precisely the one it would have swallowed. The reset now comes first. The token brake is deliberately not reset with it: a queue already raised should not be raised again merely because the session changed.
+
 ## 0.10.3 - 2026-08-07
 
 Thirty-one of the thirty-four recorded guard defects, closed in both directions.
