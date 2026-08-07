@@ -800,6 +800,20 @@ def classify_file_path(path: Path) -> str:
     name = path.name.lower()
     suffix = path.suffix.lower()
     text = str(path).replace("\\", "/").lower()
+    # Two exemptions before the secret test, both for files that LOOK like the
+    # thing they sit next to and are the opposite of it.
+    #
+    # A `.env.example` is a list of variable NAMES with no values - this plugin
+    # generates one itself, then used to refuse to read it back. A `.pub` is a
+    # public key; publishing it is what it is for. Treating either as a secret
+    # trains people to wave the guard through, which costs more than the rule
+    # earns. `authorized_keys` is listed here for the same reason, with one
+    # caveat worth keeping in mind: it decides who may log in, so a WRITE to it
+    # is security-relevant even though a read is not - that is an access-control
+    # question this classifier is not the right place to answer.
+    template_suffixes = (".example", ".sample", ".template", ".dist")
+    if name.endswith(template_suffixes) or suffix == ".pub" or name == "authorized_keys":
+        return "config"
     if (
         name.startswith(".env")
         or suffix in {".pem", ".key", ".p12", ".pfx", ".jks", ".keystore"}

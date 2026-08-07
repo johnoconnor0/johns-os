@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import hashlib
 import json
 import os
@@ -15,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from eng_common import (
+    DOCS_ROOT,
     HookPayload,
     RootResolution,
     append_jsonl,
@@ -226,41 +229,189 @@ AMBIGUOUS_PHRASES = {
 # A denylist leaks by construction - this cannot be complete and is not claimed to
 # be. What it can do is not miss the trivial spellings of the same command, which
 # `rm\s+-rf` did: `rm -fr /` and `rm --recursive --force /` both walked past it.
-_RM_FLAGS = r"(?:-[a-z]*[rR][a-z]*f[a-z]*|-[a-z]*f[a-z]*[rR][a-z]*|--recursive|--force|-[rRf])"
+#
+# Three rules hold for every pattern below, because a guard that breaks any one of
+# them is worse than no guard at all.
+#
+# 1. Flag order never decides anything. `Remove-Item -Force -Recurse` is the same
+#    command as `-Recurse -Force`, so an ordered pattern is defeated by typing the
+#    parameters the other way round - the `rm -fr` bug wearing Windows clothes.
+# 2. The target is anchored, not the flags. What makes a deletion catastrophic is
+#    that it points at `/`, `~`, `C:\` or a system directory. `rm -rf ./build` and
+#    `Remove-Item -Recurse -Force C:\repo\dist` are housekeeping, and denying them
+#    is how a user learns to switch the guard off - after which nothing is guarded.
+# 3. Position matters, because naming a command is not running one. See `_CMD`.
+_RM_FLAGS = (
+    r"(?:-[a-z]*[rR][a-z]*f[a-z]*|-[a-z]*f[a-z]*[rR][a-z]*"
+    # GNU coreutils has refused a bare `rm -rf /` for twenty years, so this flag is
+    # the one spelling that actually empties a modern Linux box - and it sat
+    # between the recognised flags and the `/`, breaking the alternation below.
+    r"|--recursive|--force|--no-preserve-root|-[rRf])"
+)
+
+# A wildcard standing for "everything in this directory". `/*` and `~/*` erase
+# precisely what `/` and `~` erase, and need no `--no-preserve-root` to do it,
+# which is why they are the spelling people actually reach for. `~/.cache` is not
+# one of these and must stay ordinary, so the glob may hold only dots and stars.
+_GLOB = r"(?:[.*]*\*)"
+# Nothing that would make the target a longer path may follow. This is the whole
+# of the anchoring in rule 2 - it keeps `/tmp/build` out of the `/` pattern and
+# `C:\repo\dist` out of the `C:\` one - and because `)` and a backtick are not
+# path characters, it is also what finally catches `$(rm -rf /)`.
+_END = r"(?![\w\\/$~.*])"
+# Command position. This guard reads text, not a parse tree, so the only signal it
+# has for telling `git clean -fdx` from a commit message *about* `git clean -fdx`
+# is where the words sit: first on the line, after a shell operator, inside a
+# substitution, or behind an interpreter's `-c`. That is not a shell parser and
+# does not pretend to be one - a mention that happens to follow a `;` is still
+# refused, and quoting cannot be tracked without one - but it is what turns the
+# two commits this repository blocked while writing this denylist, and the issue
+# filed about the false positive, back into ordinary work. `xargs` and friends are
+# consumed because `echo x | xargs rm -rf /` runs the deletion just the same.
+_CMD = (
+    r"(?:^|[\n;&|(`]|\$\(|\s-c\s|\s-Command\s)"
+    r"[\s'\"]*"
+    r"(?:(?:sudo|doas|xargs|env|time|nohup|nice)\s+)*"
+)
+# `--help` prints usage and exits, on every tool named here. Scoped to the current
+# segment so that `docker system prune --help && rm -rf /` still loses its second
+# half - a whole-line exemption would be a bypass with a flag for a key.
+_NO_HELP = r"(?![^\n;&|]*(?:--help|[-/]\?|--dry-run))"
+# Top-level directories whose loss is the loss of the machine. `/tmp` is absent on
+# purpose: a scratch directory under it is where a build actually cleans up.
+_SYSTEM_DIRS = r"(?:etc|usr|var|bin|sbin|lib(?:32|64)?|boot|home|opt|root|srv|sys|proc|dev)"
+_POSIX_ROOT = rf"/(?:{_SYSTEM_DIRS}(?:/{_GLOB})?|{_GLOB})?{_END}"
+# `~` and `$HOME` are one target with two spellings and must behave identically:
+# the home directory itself, or a glob of it, is the disaster; a named directory
+# under it is a Tuesday. The pair used to be wrong in opposite directions -
+# `rm -rf ~/*` ran while `rm -rf $HOME/.cache` was denied.
+_HOME = r"(?:~|\$HOME|\$\{HOME\}|\$env:USERPROFILE|%USERPROFILE%)"
+_HOME_TARGET = rf"{_HOME}(?:[\\/](?:{_GLOB})?)?{_END}"
+_CWD_TARGET = rf"\.(?:{_GLOB}|[\\/](?:{_GLOB})?)?{_END}"
+
+# Windows is where this plugin is developed, shipped and run, so the PowerShell
+# and cmd.exe spellings are first-class here rather than an afterthought.
+# PowerShell binds parameters by name and resolves any unambiguous prefix, so
+# `-Rec`/`-Fo` are `-Recurse`/`-Force`; cmd.exe spells the same two `/s` and `/q`;
+# and the POSIX aliases carry them bundled as `-rf`.
+_WIN_VERBS = r"(?:Remove-Item|rmdir|erase|rm|ri|rd|del)"
+_WIN_RECURSE = rf"(?:-r(?:e(?:c(?:u(?:r(?:s(?:e)?)?)?)?)?)?|{_RM_FLAGS}|/s)\b"
+_WIN_FORCE = rf"(?:-f(?:o(?:r(?:c(?:e)?)?)?)?|{_RM_FLAGS}|/[qf])\b"
+_WIN_SYS_DIRS = r"(?:Windows|System32|Users|ProgramData|Program\s?Files(?:\s?\(x86\))?)"
+# Every drive letter, not just C:, plus UNC shares and the profile directory -
+# where the SSH keys and cloud credentials actually live.
+_WIN_ROOT = (
+    rf"(?:[A-Za-z]:[\\/](?:{_GLOB}|{_WIN_SYS_DIRS})?"
+    rf"|\\\\[^\s\\]+\\[^\s\\]+"
+    rf"|{_HOME}(?:[\\/](?:{_GLOB})?)?){_END}"
+)
+
 DANGEROUS_COMMANDS = [
-    rf"rm\s+(?:{_RM_FLAGS}\s+)+/(?:\s|$)",
-    rf"rm\s+(?:{_RM_FLAGS}\s+)+[.~](?:/\s*)?(?:\s|$)",
-    rf"rm\s+(?:{_RM_FLAGS}\s+)+\$\{{?HOME",
-    r"git\s+reset\s+--hard",
-    r"git\s+clean\s+-fdx",
-    r"docker\s+system\s+prune",
-    r"drop\s+database",
-    r"truncate\s+table",
+    # POSIX deletion, decided by what is being deleted rather than by which flags
+    # were typed. `\b` in front of `rm` is why `confirm -rf .` is not a deletion.
+    rf"{_CMD}rm\b\s+(?:{_RM_FLAGS}\s+)+{_POSIX_ROOT}",
+    rf"{_CMD}rm\b\s+(?:{_RM_FLAGS}\s+)+{_HOME_TARGET}",
+    rf"{_CMD}rm\b\s+(?:{_RM_FLAGS}\s+)+{_CWD_TARGET}",
+    rf"{_CMD}git\s+reset\s+--hard{_NO_HELP}",
+    rf"{_CMD}git\s+clean\s+(?:-[a-z]*f[a-z]*d[a-z]*|-[a-z]*d[a-z]*f[a-z]*)\b{_NO_HELP}",
+    # A local reset loses one machine's work; a force push over a shared branch
+    # loses everyone's and cannot be undone from the client. `--force-with-lease`
+    # is the spelling that refuses to overwrite work it has not seen, so it stays.
+    rf"{_CMD}git\s+push\b(?=[^\n]*\s(?:--force\b(?!-with-lease)|-f\b))"
+    r"[^\n]*\s(?:main|master|trunk|production)\b",
+    rf"{_CMD}docker\s+system\s+prune{_NO_HELP}",
+    rf"{_CMD}drop\s+database\b{_NO_HELP}",
+    rf"{_CMD}truncate\s+table\b{_NO_HELP}",
     # Fetch piped into an interpreter, whichever fetcher and whichever interpreter.
     r"(?:curl|wget|iwr|Invoke-WebRequest)\b.*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|python3?|node|perl|ruby)\b",
-    r"chmod\s+-R\s+777",
-    r"Remove-Item\b.*-Recurse\b.*-Force\b.*C:\\",
+    # World-writable `/` is a privilege escalation. World-writable `./public` is
+    # inelegant setup work, so the target is anchored here exactly as it is for
+    # `rm`, and the flag may sit on either side of the mode, which chmod allows.
+    rf"{_CMD}chmod\b(?=[^\n]*\s0?777\b)(?=[^\n]*\s(?:-[a-z]*R[a-z]*|--recursive)\b)[^\n]*\s{_POSIX_ROOT}",
+    # The most recognisable destructive one-liner there is: no privileges needed,
+    # and it takes the machine down too hard for the agent to report what it did.
+    r":\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:",
+    # History destruction is the anti-forensic step - afterwards nobody can
+    # reconstruct what the agent ran, which is the record these guards exist for.
+    # Reading a history file is fine; emptying, redirecting over or deleting it is
+    # not, so the verb is required.
+    rf"{_CMD}history\s+-c\b",
+    r"\bClear-History\b",
+    r">\s*[^\n|;&]*\b(?:bash|zsh|sh|ksh|fish)_history\b",
+    rf"{_CMD}{_WIN_VERBS}\b[^\n|;&]*\b(?:bash|zsh|sh|ksh|fish)_history\b",
+    # Recursive force-delete of a drive root, a UNC share or the user profile, in
+    # PowerShell or cmd.exe, with the two parameters in either order and under any
+    # of the aliases. The lookaheads are what make the order irrelevant.
+    rf"{_CMD}{_WIN_VERBS}\b(?=[^\n]*\s{_WIN_RECURSE})(?=[^\n]*\s{_WIN_FORCE})[^\n]*?{_WIN_ROOT}",
+    # Whole-volume erasure: the Windows counterparts of `mkfs` and `dd of=/dev/…`,
+    # which destroy below the filesystem so nothing above them can recover.
+    rf"{_CMD}(?:Format-Volume|Clear-Disk|diskpart)\b{_NO_HELP}",
+    rf"{_CMD}format\s+[A-Za-z]:{_NO_HELP}",
     r"mkfs\.\w+\s+/dev/",
-    r"dd\s+.*\bof=/dev/[sh]d",
+    # NVMe and virtio nodes, not only the SATA and IDE naming: `[sh]d` covered the
+    # disks being retired rather than the ones this runs on.
+    r"dd\s+.*\bof=/dev/(?:[sh]d|nvme|vd|xvd|mmcblk|disk)",
 ]
 
 PRODUCTION_PATTERNS = [
-    r"DATABASE_URL=.*prod",
-    r"vercel\s+--prod",
+    # `prod` as a word, not as a substring. The bare form flagged any host that
+    # merely contained the letters - `staging-prodigy.example.com` asked for
+    # production approval - and an approval prompt that fires on staging is one
+    # people learn to click through, which is the failure mode that matters here.
+    r"DATABASE_URL=.*\bprod(?:uction)?\b",
+    # Both spellings. `vercel --prod` and `vercel deploy --prod` do the same
+    # thing, and only the first was recognised - so the form the CLI's own help
+    # text shows was the one that skipped the approval gate.
+    r"vercel\s+(?:deploy\s+)?--prod",
     r"railway\s+up",
     r"supabase\s+db\s+push\s+--linked",
     r"kubectl\s+apply",
     r"terraform\s+apply",
+    # The other hosts this plugin's own skills tell people to deploy to. Matched
+    # on the deploy verb rather than on an environment flag, the same way
+    # `kubectl apply` and `terraform apply` already are: for these three the
+    # default target IS the live one, so requiring the flag would mean the
+    # riskiest spelling - the one with nothing after `deploy` - was the only one
+    # that skipped the gate.
+    r"wrangler\s+(?:pages\s+)?deploy\b",
+    r"\bfly(?:ctl)?\s+deploy\b",
+    r"gcloud\s+run\s+deploy\b",
 ]
 
 SECRET_PATTERNS = [
-    r"\.env(\.|$|\s)",
+    # A dotenv FILE, not the string ".env" wherever it appears.
+    #
+    # The old `\.env(\.|$|\s)` matched the `.env.` inside `process.env.ANYTHING`,
+    # so every edit to a file that reads an environment variable was reported as
+    # secret exfiltration - the widest false positive in the plugin, firing on
+    # ordinary JavaScript. The lookbehind requires the dot to start a filename
+    # rather than continue an expression, which is the actual distinction.
+    #
+    # `.env.local` and `.env.production` still match. `.env.example` and its
+    # siblings do not: a template of placeholder names is the opposite of a
+    # secret, and this plugin generates one itself.
+    r"(?<![A-Za-z0-9_.])\.env(?!\.(?:example|sample|template|dist)\b)(?:\.[A-Za-z0-9_-]+)?(?![A-Za-z0-9_])",
     r"BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY",
     r"sk-[A-Za-z0-9_-]{12,}",
     r"gh[pousr]_[A-Za-z0-9_]{20,}",
     r"xox[baprs]-[A-Za-z0-9-]{20,}",
     r"postgres(?:ql)?://[^@\s]+:[^@\s]+@",
     r"service-account\.json",
+    # AWS. The access key id is the reliable half - it has a fixed prefix and a
+    # fixed length, where a secret access key is 40 characters of base64 alphabet
+    # and matching that shape alone would fire on any hash of similar length.
+    # Catching the id is enough to refuse the pair, since the id is what travels
+    # beside the secret in every leaked credential file.
+    r"\b(?:AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}\b",
+    r"\baws_secret_access_key\s*=",
+    # Bearer tokens. Anchored on the scheme rather than the token shape, because
+    # the token is arbitrary and the scheme is not.
+    r"\bAuthorization:\s*Bearer\s+[A-Za-z0-9._~+/=-]{16,}",
+    # And the bare token, because a JWT copied out of a session does not bring
+    # its header with it. `eyJ` is not a guess: every JWT begins with the base64
+    # of `{"`, so the three dot-separated segments starting that way are the
+    # shape itself rather than a heuristic about length.
+    r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}",
 ]
 
 
@@ -1070,12 +1221,142 @@ def failure_pattern_miner(root: Path) -> dict[str, Any]:
     return {"patterns": patterns, "recommendations": []}
 
 
+# 8, not 12. `cm0gLXJmIC8` - the base64 of the root deletion, and the payload the
+# suite tests with - is 11 characters unpadded, so a 12-character floor excluded
+# the exact case this decoder exists for.
+_B64_TOKEN = re.compile(r"[A-Za-z0-9+/]{8,}={0,2}")
+_QUOTED_SPAN = re.compile(r"'([^']{4,})'|\"([^\"]{4,})\"")
+# Decoding only happens when the command has somewhere to SEND a payload: a
+# decoder, an interpreter, or an eval. Without this gate the decoder reads every
+# command, and at an 8-character floor an ordinary word is valid base64 - which
+# is not hypothetical. `grep -rn 'drop database' migrations/` decoded
+# `migrations`, then unwrapped the quotes, then reported a legitimate grep as an
+# attempt to drop a database. Encoding is only dangerous when something is going
+# to run the result, and that is exactly what this looks for.
+_INTERPRETER_SINK = re.compile(
+    r"\|\s*(?:sudo\s+)?(?:sh|bash|zsh|ksh|fish|python3?|node|perl|ruby|pwsh|powershell)\b|\beval\b",
+    re.I,
+)
+_DECODER_SINK = re.compile(
+    r"\b(?:base64|xxd|openssl\s+enc|uudecode|certutil)\b|-[Ee](?:nc(?:odedCommand)?)?\s+[A-Za-z0-9+/]{8,}",
+    re.I,
+)
+_HEX_RUN = re.compile(r"\b(?:[0-9a-fA-F]{2}){6,}\b")
+_HEX_ESCAPE = re.compile(r"(?:\\x[0-9a-fA-F]{2})+")
+_OCTAL_ESCAPE = re.compile(r"(?:\\[0-3][0-7]{2})+")
+
+
+def _decoded_candidates(command: str) -> list[str]:
+    """Every plaintext this command could hand an interpreter.
+
+    A denylist that reads only the literal text stops at the first `base64 -d`.
+    `curl … | sh` was blocked while `base64 -d … | sh` was not, though the second
+    is strictly worse: the payload travels inline, so there is no URL for a human
+    or a proxy to notice.
+
+    Decoding rather than refusing the wrapper is the deliberate choice. Refusing
+    `base64 -d` outright would also refuse `base64 -d < cert.b64 > cert.pem`, and
+    a guard that blocks ordinary work gets switched off. Decoding cannot produce
+    that failure: the decoded text is only ever *added* to what the denylist
+    reads, so a new refusal requires the decoded bytes to themselves spell a
+    destructive command. A certificate does not.
+
+    Substitution happens **in place**. `echo -e '\\162\\155 -rf /'` encodes only
+    the verb, so decoding the escape run on its own yields `rm` and loses the
+    arguments that make it dangerous; put back where it was, it reads `rm -rf /`.
+
+    This is not a sandbox and does not claim to be. One layer, three encodings,
+    no evaluation - nested or variant-alphabet payloads still get past, which is
+    a property of denylists rather than of this function.
+    """
+    if not (_DECODER_SINK.search(command) or _INTERPRETER_SINK.search(command)):
+        return []
+    candidates: list[str] = []
+
+    def unescape(text: str) -> str:
+        text = _HEX_ESCAPE.sub(
+            lambda m: bytes.fromhex(m.group(0).replace("\\x", "")).decode("latin-1"),
+            text,
+        )
+        return _OCTAL_ESCAPE.sub(
+            lambda m: "".join(chr(int(g, 8)) for g in re.findall(r"\\([0-3][0-7]{2})", m.group(0))),
+            text,
+        )
+
+    unescaped = unescape(command)
+    if unescaped != command:
+        candidates.append(unescaped)
+
+    hexed = _HEX_RUN.sub(
+        lambda m: bytes.fromhex(m.group(0)).decode("latin-1"),
+        command,
+    )
+    if hexed != command:
+        candidates.append(hexed)
+        # The run on its own as well as in place. `eval $(echo <hex> | xxd -r -p)`
+        # decodes to a payload that sits in argument position, and the denylist
+        # deliberately only matches a command position - that anchor is what stops
+        # it firing on a commit message quoting a command. Piping the payload to
+        # an interpreter is precisely what moves it back into command position,
+        # so the isolated fragment is the honest thing to scan.
+        candidates.extend(bytes.fromhex(run).decode("latin-1") for run in _HEX_RUN.findall(command))
+
+    for token in set(_B64_TOKEN.findall(command)):
+        try:
+            raw = base64.b64decode(token + "=" * (-len(token) % 4))
+        except (binascii.Error, ValueError):
+            continue
+        # utf-16-le as well as utf-8: `-EncodedCommand` carries UTF-16LE, which
+        # decodes under utf-8 to the right letters separated by NULs, so the
+        # denylist's `\s` would never bridge them.
+        for encoding in ("utf-8", "utf-16-le"):
+            try:
+                decoded = raw.decode(encoding)
+            except (UnicodeDecodeError, ValueError):
+                continue
+            if decoded.isprintable() or "\n" in decoded:
+                candidates.append(command.replace(token, decoded))
+                candidates.append(decoded)
+
+    # Finally, the contents of any quoted span - but only when an interpreter is
+    # actually on the other end of a pipe. `printf '<payload>' | sh` puts the
+    # payload inside quotes, where the command-position anchor correctly refuses
+    # to look, and then hands it straight to a shell; unwrapping is what makes the
+    # two readings agree.
+    #
+    # Requiring the *pipe*, not merely a decoder's name, is the difference between
+    # that and prose. Gating this on `_DECODER_SINK` was enough to make a
+    # description of this very fix - which says "base64 -d" and quotes an escaped
+    # payload as an example - refuse to be committed. Naming a decoder is not
+    # running one, exactly as naming a command is not running one.
+    if not _INTERPRETER_SINK.search(command):
+        return candidates
+    for candidate in list(candidates):
+        for single, double in _QUOTED_SPAN.findall(candidate):
+            candidates.append(single or double)
+    return candidates
+
+
 def dangerous_command_guard(command: str) -> dict[str, Any]:
     hits = [pattern for pattern in DANGEROUS_COMMANDS if re.search(pattern, command, re.I)]
+    encoded = False
+    if not hits:
+        for candidate in _decoded_candidates(command):
+            found = [pattern for pattern in DANGEROUS_COMMANDS if re.search(pattern, candidate, re.I)]
+            if found:
+                hits, encoded = found, True
+                break
+    reason = "Dangerous shell command detected."
+    if encoded:
+        # Say that it was encoded. "Dangerous shell command detected" against a
+        # line of base64 reads like a false positive, and a refusal the user
+        # cannot account for is one they will override.
+        reason = "Dangerous shell command detected in an encoded payload."
     return {
         "blocked": bool(hits),
         "matches": hits,
-        "reason": "Dangerous shell command detected." if hits else "No dangerous command detected.",
+        "encoded": encoded,
+        "reason": reason if hits else "No dangerous command detected.",
     }
 
 
@@ -1703,6 +1984,15 @@ def run_tool(name: str, args: argparse.Namespace) -> dict[str, Any]:
     return result
 
 
+def _segment_after(parts: list[str], marker: tuple[str, ...]) -> str | None:
+    """The segment following `marker` wherever that run of segments appears."""
+    width = len(marker)
+    for start in range(len(parts) - width):
+        if tuple(parts[start : start + width]) == marker:
+            return parts[start + width]
+    return None
+
+
 def wrong_initiative_write(root: Path, path: str) -> dict[str, Any]:
     """True when an edit targets an initiative other than the active one.
 
@@ -1713,14 +2003,28 @@ def wrong_initiative_write(root: Path, path: str) -> dict[str, Any]:
     result: dict[str, Any] = {"mismatch": False, "target": None, "active": None}
     if not path or not workspace_exists(root):
         return result
-    parts = Path(str(path).replace("\\", "/")).as_posix().split("/")
-    if "initiatives" not in parts:
-        return result
-    index = parts.index("initiatives")
-    if index + 1 >= len(parts):
-        return result
-    target = parts[index + 1]
-    if target.endswith(".json"):  # registry.json and friends are not initiatives
+    # Which initiative a write LANDS in, not which one it sets off from. A route
+    # like `initiatives/<active>/../<other>/prd.md` reads as in-scope segment by
+    # segment and lands somewhere else entirely, so collapse `..` before asking.
+    # `Path.as_posix()` does not do that; `os.path.normpath` does - and it hands
+    # back backslashes on Windows, hence the second replace.
+    parts = os.path.normpath(str(path).replace("\\", "/")).replace("\\", "/").split("/")
+    target = _segment_after(parts, ("initiatives",))
+    if target is not None and target.endswith(".json"):
+        target = None  # registry.json and friends are not initiatives
+    if target is None:
+        # An initiative is two trees, not one: the machine state under
+        # `initiatives/<id>/` and the deliverables under the docs root, which
+        # carries no `initiatives` segment at all. The docs half is where the
+        # PRD actually lands, so leaving it uncovered left the guard watching
+        # the half that matters least. Only a registered id counts here - the
+        # docs root also holds files that belong to no initiative, and
+        # questioning those would be the false alarm that gets a guard disabled.
+        registry = load_initiative_registry(root)
+        candidate = _segment_after(parts, tuple(DOCS_ROOT.as_posix().split("/")))
+        if candidate and any(entry.get("id") == candidate for entry in registry["initiatives"]):
+            result.update(target=candidate, active=registry["active"])
+            result["mismatch"] = bool(registry["active"] and candidate != registry["active"])
         return result
     active = load_initiative_registry(root)["active"]
     result.update(target=target, active=active, mismatch=bool(active and target != active))

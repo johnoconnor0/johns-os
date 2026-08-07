@@ -365,14 +365,14 @@ class DestructiveCommandTests(GuardContractMixin, unittest.TestCase):
             with self.subTest(command=command):
                 self.block(command)
 
-    @unittest.expectedFailure
-    def test_no_preserve_root_defeats_the_denylist(self) -> None:
-        # DEFECT: the highest-value miss in the whole denylist. GNU coreutils
+    def test_no_preserve_root_does_not_defeat_the_denylist(self) -> None:
+        # This was the highest-value miss in the whole denylist. GNU coreutils
         # refuses `rm -rf /` outright and has done for twenty years, so the only
         # spelling that actually destroys a modern Linux box is the one carrying
-        # `--no-preserve-root` - and that flag sits between the recognised flags
-        # and the `/`, breaking the `(flags)+/` alternation. The guard blocks the
-        # command that cannot work and permits the command that can.
+        # `--no-preserve-root` - and that flag sat between the recognised flags
+        # and the `/`, breaking the `(flags)+/` alternation. The guard blocked the
+        # command that cannot work and permitted the command that can. The flag is
+        # now one of the recognised ones, so it no longer splits the run.
         leaks = self.leaks(
             [
                 f"{RM} -rf --no-preserve-root /",
@@ -382,35 +382,34 @@ class DestructiveCommandTests(GuardContractMixin, unittest.TestCase):
         )
         self.assertEqual(leaks, [])
 
-    @unittest.expectedFailure
-    def test_a_glob_after_the_root_slash_defeats_the_denylist(self) -> None:
-        # DEFECT: the root patterns end `/(?:\s|$)`, so the `/` must be the last
+    def test_a_glob_after_the_root_slash_is_blocked_too(self) -> None:
+        # The root patterns used to end `/(?:\s|$)`, so the `/` had to be the last
         # thing on the line. `rm -rf /*` expands to every top-level directory and
         # needs no `--no-preserve-root`, which makes it the form people actually
-        # reach for. It is not blocked.
+        # reach for, and it walked past. The named system directories are here for
+        # the same reason: `/etc` is not the root but losing it is the machine.
         leaks = self.leaks([f"{RM} -rf /*", f"{RM} -rf /home/*", f"{RM} -rf /etc"])
         self.assertEqual(leaks, [])
 
-    @unittest.expectedFailure
-    def test_a_glob_under_the_home_directory_defeats_the_denylist(self) -> None:
-        # DEFECT, and the same shape as the root glob above, but on the target
-        # that matters more in practice: `~` is where the SSH keys, the cloud
-        # credentials and the unpushed work live. `rm -rf ~` is blocked because
-        # the pattern requires the line to end after `~` or `~/`; `rm -rf ~/*`
-        # expands to exactly the same set of files and is not.
+    def test_a_glob_under_the_home_directory_is_blocked_too(self) -> None:
+        # The same shape as the root glob above, but on the target that matters
+        # more in practice: `~` is where the SSH keys, the cloud credentials and
+        # the unpushed work live. `rm -rf ~` was blocked because the pattern
+        # required the line to end after `~` or `~/`; `rm -rf ~/*` expands to
+        # exactly the same set of files and was not.
         #
-        # Note which side of this already works: the `$HOME` pattern has no such
-        # terminator, so `rm -rf $HOME/*` IS blocked. Two spellings of one
-        # command, one guarded and one not, is the `rm -fr` bug over again.
+        # The `$HOME` spelling never had that terminator, so `rm -rf $HOME/*` was
+        # already blocked. Two spellings of one command, one guarded and one not,
+        # is the `rm -fr` bug over again - both now run through one anchor, and
+        # `LegitimateWorkTests` holds the other end of it.
         leaks = self.leaks([f"{RM} -rf ~/*", f"{RM} -rf ~/.*"])
         self.assertEqual(leaks, [])
 
-    @unittest.expectedFailure
-    def test_nvme_devices_are_outside_the_disk_overwrite_pattern(self) -> None:
-        # DEFECT, in the `dd` pattern only: `of=/dev/[sh]d` covers SATA and IDE
-        # naming. NVMe has been the default on new machines for years and its
-        # nodes are `/dev/nvme0n1`, and a VM's virtio disk is `/dev/vda`, so the
-        # pattern covers the disks being retired and not the ones it runs on.
+    def test_nvme_and_virtio_devices_are_inside_the_disk_overwrite_pattern(self) -> None:
+        # This was a hole in the `dd` pattern only: `of=/dev/[sh]d` covers SATA
+        # and IDE naming. NVMe has been the default on new machines for years and
+        # its nodes are `/dev/nvme0n1`, and a VM's virtio disk is `/dev/vda`, so
+        # the pattern covered the disks being retired and not the ones it runs on.
         #
         # This list previously also carried `mkfs.ext4 /dev/nvme0n1p1`, which is
         # blocked - `mkfs\.\w+\s+/dev/` names no device family. Leaving it here
@@ -420,29 +419,29 @@ class DestructiveCommandTests(GuardContractMixin, unittest.TestCase):
         leaks = self.leaks(["dd if=/dev/zero of=/dev/nvme0n1", "dd if=/dev/zero of=/dev/vda"])
         self.assertEqual(leaks, [])
 
-    @unittest.expectedFailure
     def test_chmod_accepts_its_flags_after_the_mode(self) -> None:
-        # DEFECT: the `rm -fr` bug again, in a different pattern. `chmod\s+-R\s+777`
-        # requires that exact token order, but chmod accepts the flag anywhere and
+        # The `rm -fr` bug again, in a different pattern. `chmod\s+-R\s+777`
+        # required that exact token order, but chmod accepts the flag anywhere and
         # accepts `0777`. World-writable `/` is a privilege escalation, not a
-        # tidiness problem.
+        # tidiness problem. The mode and the flag are now two independent
+        # lookaheads, which is what makes their order irrelevant.
         leaks = self.leaks(["chmod 777 -R /", "chmod -R 0777 /", "chmod --recursive 777 /"])
         self.assertEqual(leaks, [])
 
-    @unittest.expectedFailure
-    def test_the_fork_bomb_has_no_pattern_at_all(self) -> None:
-        # DEFECT: no entry in `DANGEROUS_COMMANDS` describes a fork bomb. It is
+    def test_the_fork_bomb_is_blocked(self) -> None:
+        # No entry in `DANGEROUS_COMMANDS` used to describe a fork bomb. It is
         # the single most recognisable destructive one-liner in existence, it
         # needs no privileges, and it takes the machine down hard enough that the
-        # agent cannot report what it did.
+        # agent cannot report what it did. Both spacings are one pattern.
         leaks = self.leaks([":(){ :|:& };:", ":() { :|: & }; :"])
         self.assertEqual(leaks, [])
 
-    @unittest.expectedFailure
-    def test_shell_history_wipes_have_no_pattern(self) -> None:
-        # DEFECT: no pattern covers history destruction, on any platform. This is
+    def test_shell_history_wipes_are_blocked(self) -> None:
+        # No pattern used to cover history destruction, on any platform. This is
         # the anti-forensic step - after it, nobody can reconstruct what the agent
         # ran, which is precisely the record these guards exist to protect.
+        # Reading a history file is untouched; emptying, redirecting over or
+        # deleting one is what the patterns require.
         leaks = self.leaks(
             [
                 "history -c",
@@ -453,13 +452,14 @@ class DestructiveCommandTests(GuardContractMixin, unittest.TestCase):
         )
         self.assertEqual(leaks, [])
 
-    @unittest.expectedFailure
-    def test_force_pushing_over_a_protected_branch_has_no_pattern(self) -> None:
-        # DEFECT: `git reset --hard` is blocked but `git push --force origin main`
-        # is not, and the second is the worse of the two - a local reset loses one
+    def test_force_pushing_over_a_protected_branch_is_blocked(self) -> None:
+        # `git reset --hard` was blocked while `git push --force origin main` was
+        # not, and the second is the worse of the two - a local reset loses one
         # machine's work, a force push over main loses everyone's and cannot be
         # undone from the client. This repository's own global instructions
         # prohibit it in prose; the guard is where prose becomes enforcement.
+        # `--force-with-lease` is the spelling that refuses to overwrite work it
+        # has not seen, and `LegitimateWorkTests` keeps it running.
         leaks = self.leaks(
             [
                 "git push --force origin main",
@@ -476,27 +476,29 @@ class WindowsCommandTests(GuardContractMixin, unittest.TestCase):
     This plugin is developed on Windows, its CI runs Windows, and its users run
     Windows. A destructive-command denylist that only understands POSIX shells is
     not a partial defence on that machine - it is no defence, because the agent
-    reaches for PowerShell first. `DANGEROUS_COMMANDS` contains exactly one
-    Windows entry.
+    reaches for PowerShell first. `DANGEROUS_COMMANDS` used to contain exactly one
+    Windows entry, ordered, C:-only, and over-broad in the one direction it did
+    reach. Both ends of that are pinned here.
     """
 
     def leaks(self, commands) -> list[str]:
         return [c for c in commands if not quality_tools.dangerous_command_guard(c)["blocked"]]
 
     def test_the_one_recognised_powershell_spelling_is_blocked(self) -> None:
-        # The single Windows entry, pinned so a rewrite of the pattern cannot
-        # lose the one case that currently works.
+        # The one case the single original Windows entry got right, pinned so a
+        # rewrite of the pattern cannot lose it.
         command = f"{REMOVE_ITEM} -Recurse -Force C:\\"
         result = quality_tools.dangerous_command_guard(command)
         self.assertTrue(result["blocked"])
         self.assertRefused("dangerous-command-guard", result, "deny", given=command, must_not_echo=(command,))
 
-    @unittest.expectedFailure
     def test_powershell_parameters_may_be_given_in_any_order(self) -> None:
-        # DEFECT: the pattern hardcodes `-Recurse` before `-Force`. PowerShell
+        # The pattern used to hardcode `-Recurse` before `-Force`. PowerShell
         # binds named parameters by name, so `-Force -Recurse` is the identical
-        # command - this is the `rm -fr` bug, reintroduced verbatim in the
-        # Windows pattern after it was fixed on the POSIX side.
+        # command - this was the `rm -fr` bug, reintroduced verbatim in the
+        # Windows pattern after it was fixed on the POSIX side. The two
+        # parameters are now independent lookaheads, and the target is matched
+        # separately, so it may sit before them as `-Path` or after them.
         leaks = self.leaks(
             [
                 f"{REMOVE_ITEM} -Force -Recurse C:\\",
@@ -506,13 +508,12 @@ class WindowsCommandTests(GuardContractMixin, unittest.TestCase):
         )
         self.assertEqual(leaks, [])
 
-    @unittest.expectedFailure
-    def test_powershell_aliases_and_abbreviated_parameters_are_unrecognised(self) -> None:
-        # DEFECT: PowerShell resolves any unambiguous parameter prefix and ships
-        # `rm`, `del`, `ri` and `erase` as aliases of Remove-Item. `rm -r -fo` is
-        # what a developer actually types on Windows, and it is invisible to both
+    def test_powershell_aliases_and_abbreviated_parameters_are_recognised(self) -> None:
+        # PowerShell resolves any unambiguous parameter prefix and ships `rm`,
+        # `del`, `ri` and `erase` as aliases of Remove-Item. `rm -r -fo` is what a
+        # developer actually types on Windows, and it used to be invisible to both
         # the POSIX patterns (which need a bare `/`, `.` or `~`) and the Windows
-        # one (which needs the literal string `Remove-Item`).
+        # one (which needed the literal string `Remove-Item`).
         leaks = self.leaks(
             [
                 f"{RM} -r -fo C:\\",
@@ -523,12 +524,11 @@ class WindowsCommandTests(GuardContractMixin, unittest.TestCase):
         )
         self.assertEqual(leaks, [])
 
-    @unittest.expectedFailure
-    def test_the_powershell_pattern_only_knows_the_c_drive(self) -> None:
-        # DEFECT: the pattern ends in the literal `C:\`, so a second drive, a
-        # UNC share and the user's profile are all unguarded - while the POSIX
-        # side does cover `$HOME` and `~`. The profile directory is where the
-        # SSH keys and cloud credentials live.
+    def test_every_drive_root_the_profile_and_a_unc_share_are_known(self) -> None:
+        # The pattern used to end in the literal `C:\`, so a second drive, a UNC
+        # share and the user's profile were all unguarded - while the POSIX side
+        # did cover `$HOME` and `~`. The profile directory is where the SSH keys
+        # and cloud credentials live.
         leaks = self.leaks(
             [
                 f"{REMOVE_ITEM} -Recurse -Force D:\\",
@@ -540,11 +540,10 @@ class WindowsCommandTests(GuardContractMixin, unittest.TestCase):
         )
         self.assertEqual(leaks, [])
 
-    @unittest.expectedFailure
-    def test_whole_volume_erasure_has_no_windows_pattern(self) -> None:
-        # DEFECT: the POSIX equivalents (`mkfs`, `dd of=/dev/...`) are both
-        # covered; their Windows counterparts are not covered at all. These
-        # destroy below the filesystem, so nothing above them can recover.
+    def test_whole_volume_erasure_is_blocked_on_windows_too(self) -> None:
+        # The POSIX equivalents (`mkfs`, `dd of=/dev/...`) were both covered;
+        # their Windows counterparts were not covered at all. These destroy below
+        # the filesystem, so nothing above them can recover.
         leaks = self.leaks(
             [
                 "Format-Volume -DriveLetter C -Force",
@@ -555,26 +554,26 @@ class WindowsCommandTests(GuardContractMixin, unittest.TestCase):
         )
         self.assertEqual(leaks, [])
 
-    @unittest.expectedFailure
-    def test_the_cmd_exe_spellings_are_unrecognised(self) -> None:
-        # DEFECT: cmd.exe is still what `.bat` files and a great deal of copied
-        # advice use, and neither recursive-delete spelling is covered.
+    def test_the_cmd_exe_spellings_are_recognised(self) -> None:
+        # cmd.exe is still what `.bat` files and a great deal of copied advice
+        # use, and neither recursive-delete spelling used to be covered. `/s` and
+        # `/q` are the same two parameters as `-Recurse` and `-Force`.
         leaks = self.leaks(["rd /s /q C:\\", "rmdir /s /q C:\\", "del /f /s /q C:\\*"])
         self.assertEqual(leaks, [])
 
     def denials(self, commands) -> list[str]:
         return [c for c in commands if quality_tools.dangerous_command_guard(c)["blocked"]]
 
-    @unittest.expectedFailure
-    def test_the_windows_pattern_denies_every_path_on_the_system_drive(self) -> None:
-        # DEFECT, and the inverse of every case above: the pattern is
-        # `Remove-Item\b.*-Recurse\b.*-Force\b.*C:\`, which asks only that `C:\`
-        # appear somewhere to the right of the flags - so it matches every
+    def test_ordinary_paths_on_the_system_drive_are_not_denied(self) -> None:
+        # The inverse of every case above, and just as important: the pattern was
+        # `Remove-Item\b.*-Recurse\b.*-Force\b.*C:\`, which asked only that `C:\`
+        # appear somewhere to the right of the flags - so it matched every
         # absolute path on the system drive. Clearing `dist` or `node_modules`
         # by full path is routine, and it is what the agent does when the
-        # working directory is ambiguous. It is denied, while `D:\` and the
-        # user profile (above) are allowed. A guard this far inverted is one a
-        # user turns off, and then nothing is guarded.
+        # working directory is ambiguous. It was denied, while `D:\` and the
+        # user profile (above) were allowed. A guard this far inverted is one a
+        # user turns off, and then nothing is guarded. The drive root now has to
+        # be the whole target, or carry a glob, or name a system directory.
         #
         # This test was previously named `..._is_denied` while asserting that
         # nothing is denied, so the run summary said the opposite of the finding.
@@ -615,13 +614,13 @@ class ShellOperatorTests(GuardContractMixin, unittest.TestCase):
                 self.assertTrue(result["blocked"], command)
                 self.assertRefused("dangerous-command-guard", result, "deny", given=command, must_not_echo=(command,))
 
-    @unittest.expectedFailure
-    def test_command_substitution_hides_the_payload(self) -> None:
-        # DEFECT: `$(rm -rf /)` and its backtick form are not blocked, because
-        # the root patterns require whitespace or end-of-string after the `/` and
-        # the closing bracket supplies neither. The shell runs the substitution
+    def test_command_substitution_does_not_hide_the_payload(self) -> None:
+        # `$(rm -rf /)` and its backtick form used to walk past, because the root
+        # patterns required whitespace or end-of-string after the `/` and the
+        # closing bracket supplies neither. The shell runs the substitution
         # first, so this is not a weakened form of the command - it is the
-        # command, executed earlier.
+        # command, executed earlier. The terminator is now "no path character
+        # follows", which a bracket and a backtick both satisfy.
         leaks = self.leaks([f"$({RM} -rf /)", f"echo `{RM} -rf /`", f"eval $({RM} -rf /)"])
         self.assertEqual(leaks, [])
 
@@ -652,7 +651,6 @@ class EncodingBypassTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertTrue(quality_tools.dangerous_command_guard(command)["blocked"], command)
 
-    @unittest.expectedFailure
     def test_base64_decoded_into_an_interpreter_is_not_recognised(self) -> None:
         # DEFECT: `curl ... | sh` is blocked but `base64 -d ... | sh` is not,
         # though the second is strictly worse - the payload travels inline, so
@@ -667,7 +665,6 @@ class EncodingBypassTests(unittest.TestCase):
         )
         self.assertEqual(leaks, [])
 
-    @unittest.expectedFailure
     def test_powershell_encodedcommand_is_not_recognised(self) -> None:
         # DEFECT, and the most serious of the three on this platform.
         # `-EncodedCommand` exists to carry a base64 UTF-16LE script past
@@ -683,7 +680,6 @@ class EncodingBypassTests(unittest.TestCase):
         )
         self.assertEqual(leaks, [])
 
-    @unittest.expectedFailure
     def test_hex_and_escape_encoded_payloads_are_not_recognised(self) -> None:
         # DEFECT: the same idea without base64. Recorded for completeness - a
         # decoder rule that handles base64 and not this has moved the boundary
@@ -740,7 +736,6 @@ class SecretExfiltrationTests(GuardContractMixin, unittest.TestCase):
                 self.assertFalse(result["blocked"], f"{label}: {result['matches']}")
                 self.assertNoRefusal("secret-exfiltration-guard", result)
 
-    @unittest.expectedFailure
     def test_aws_credentials_have_no_pattern(self) -> None:
         # DEFECT: `SECRET_PATTERNS` covers GitHub, OpenAI, Slack and Postgres but
         # not AWS, whose key id has the most recognisable fixed shape of the lot
@@ -753,7 +748,6 @@ class SecretExfiltrationTests(GuardContractMixin, unittest.TestCase):
         ]
         self.assertEqual(leaks, [])
 
-    @unittest.expectedFailure
     def test_bearer_tokens_have_no_pattern(self) -> None:
         # DEFECT: an `Authorization: Bearer <jwt>` header pasted into a file or a
         # curl command is the most common way a live session credential escapes,
@@ -769,7 +763,6 @@ class SecretExfiltrationTests(GuardContractMixin, unittest.TestCase):
         ]
         self.assertEqual(leaks, [])
 
-    @unittest.expectedFailure
     def test_reading_an_environment_variable_in_source_is_treated_as_exfiltration(self) -> None:
         # DEFECT, and the widest false positive in the plugin. The pattern
         # `\.env(\.|$|\s)` matches the `.env.` inside `process.env.ANYTHING`, so
@@ -788,7 +781,6 @@ class SecretExfiltrationTests(GuardContractMixin, unittest.TestCase):
         ]
         self.assertEqual(blocked, [])
 
-    @unittest.expectedFailure
     def test_the_env_example_template_this_plugin_generates_is_treated_as_a_secret(self) -> None:
         # DEFECT: `.env.example` is placeholder-only by definition, this plugin
         # has a hook that generates and updates it, and `.gitignore` here carries
@@ -863,19 +855,19 @@ class LegitimateWorkTests(GuardContractMixin, unittest.TestCase):
                 self.assertFalse(result["blocked"], f"{command!r}: {result['matches']}")
                 self.assertNoRefusal("dangerous-command-guard", result)
 
-    @unittest.expectedFailure
-    def test_the_same_deletion_spelled_with_HOME_is_denied(self) -> None:
-        # DEFECT, and the exact mirror of the `~/*` hole recorded in
-        # `DestructiveCommandTests`. The `~` pattern ends `(?:/\s*)?(?:\s|$)`, so
-        # it only fires when the home directory is the entire target - correct,
-        # and why the three commands above are allowed. The `$HOME` pattern ends
-        # at `\$\{?HOME` with no terminator at all, so it fires on everything
+    def test_the_same_deletion_spelled_with_HOME_is_allowed_too(self) -> None:
+        # The exact mirror of the `~/*` hole recorded in
+        # `DestructiveCommandTests`. The `~` pattern ended `(?:/\s*)?(?:\s|$)`, so
+        # it only fired when the home directory was the entire target - correct,
+        # and why the three commands above are allowed. The `$HOME` pattern ended
+        # at `\$\{?HOME` with no terminator at all, so it fired on everything
         # underneath it too.
         #
-        # The pair is what makes this bad: `rm -rf ~/.cache` runs and
-        # `rm -rf $HOME/.cache` is denied, while `rm -rf ~/*` runs and
-        # `rm -rf $HOME/*` is denied. One pattern is too narrow and the other
-        # too broad, in opposite directions, for two spellings of one command.
+        # The pair was what made this bad: `rm -rf ~/.cache` ran and
+        # `rm -rf $HOME/.cache` was denied, while `rm -rf ~/*` ran and
+        # `rm -rf $HOME/*` was denied. One pattern too narrow and the other too
+        # broad, in opposite directions, for two spellings of one command. They
+        # are one anchor now, so this test and the `~/*` one cannot drift apart.
         blocked = self.blocked(
             [
                 f"{RM} -rf $HOME/.cache/uv",
@@ -885,15 +877,15 @@ class LegitimateWorkTests(GuardContractMixin, unittest.TestCase):
         )
         self.assertEqual(blocked, [])
 
-    @unittest.expectedFailure
-    def test_a_command_whose_name_merely_ends_in_rm_trips_the_deletion_patterns(self) -> None:
-        # DEFECT: every `rm` pattern starts `rm\s+` with no word boundary in
-        # front of it, so any token ending in those two letters carries the
-        # match. `confirm -rf .` is denied. So are `charm`, `swarm`, `term` and
-        # `affirm` - and `git rm` is only spared because the paths it is given
+    def test_a_command_whose_name_merely_ends_in_rm_does_not_trip_the_patterns(self) -> None:
+        # Every `rm` pattern used to start `rm\s+` with no word boundary in
+        # front of it, so any token ending in those two letters carried the
+        # match. `confirm -rf .` was denied. So were `charm`, `swarm`, `term` and
+        # `affirm` - and `git rm` was only spared because the paths it is given
         # are relative. This is the same class as the commit-message false
-        # positive below: the guard is matching text, not commands. `\brm\s+`
-        # closes it, and costs nothing on any real deletion.
+        # positive below: the guard was matching text, not commands. `\brm` plus
+        # the command-position requirement closes it, and costs nothing on any
+        # real deletion.
         blocked = self.blocked(
             [
                 "confirm -rf .",
@@ -905,15 +897,15 @@ class LegitimateWorkTests(GuardContractMixin, unittest.TestCase):
         )
         self.assertEqual(blocked, [])
 
-    @unittest.expectedFailure
-    def test_a_scoped_recursive_chmod_is_denied_with_the_root_one(self) -> None:
-        # DEFECT, and the mirror of `test_chmod_accepts_its_flags_after_the_mode`:
-        # `chmod\s+-R\s+777` names no target at all, so it denies every recursive
+    def test_a_scoped_recursive_chmod_is_not_denied_with_the_root_one(self) -> None:
+        # The mirror of `test_chmod_accepts_its_flags_after_the_mode`:
+        # `chmod\s+-R\s+777` named no target at all, so it denied every recursive
         # 777 anywhere - a checkout's `public/`, a freshly cloned `node_modules`,
         # an upload directory on a dev box. Only `/` is the privilege escalation;
-        # the rest is ordinary, if inelegant, setup work. The pattern is
+        # the rest is ordinary, if inelegant, setup work. The pattern was
         # simultaneously too narrow (flag order, `0777`) and too broad (any
         # path), which is the worst of both and the reason it gets switched off.
+        # It carries the same root anchor as the deletion patterns now.
         blocked = self.blocked(
             [
                 "chmod -R 777 ./public",
@@ -924,9 +916,10 @@ class LegitimateWorkTests(GuardContractMixin, unittest.TestCase):
         self.assertEqual(blocked, [])
 
     def test_the_literal_flags_inside_a_quoted_message_are_allowed(self) -> None:
-        # Talking about a dangerous command is not running one. This case works
-        # because the root patterns need a path after the flags; the cases in the
-        # expected failure below do not, and that is the difference.
+        # Talking about a dangerous command is not running one. These worked even
+        # before the guard learned about command position, because the root
+        # patterns need a path after the flags and a sentence does not supply
+        # one; the cases below needed the position rule as well.
         for command in (
             f'git commit -m "document why {RM} -rf is blocked"',
             f"grep -rn '{RM} -rf' engineering-lifecycle/tests/",
@@ -936,16 +929,26 @@ class LegitimateWorkTests(GuardContractMixin, unittest.TestCase):
                 result = quality_tools.dangerous_command_guard(command)
                 self.assertFalse(result["blocked"], f"{command!r}: {result['matches']}")
 
-    @unittest.expectedFailure
-    def test_a_commit_message_describing_the_guard_trips_the_guard(self) -> None:
-        # DEFECT: the guard scans the raw command line with no notion of quoting,
-        # so any string that merely *names* a denylisted command is denied - a
+    def test_a_commit_message_describing_the_guard_does_not_trip_the_guard(self) -> None:
+        # The guard scanned the raw command line with no notion of position, so
+        # any string that merely *named* a denylisted command was denied - a
         # commit message, an echo, a grep over the migrations directory. This is
         # not a hypothetical: it blocked two of this repository's own commits
         # while the denylist was being written, both of them commits about the
         # denylist. Every entry without a required argument (`git reset --hard`,
-        # `docker system prune`, `drop database`, `truncate table`) has this
-        # problem; the `rm` entries do not, because they require a path.
+        # `docker system prune`, `drop database`, `truncate table`) had this
+        # problem; the `rm` entries did not, because they require a path.
+        #
+        # The fix is command position, not quote tracking, which cannot be done
+        # without a shell parser: a denylisted command counts when it opens the
+        # line, follows a shell operator, sits in a substitution, or comes after
+        # an interpreter's `-c` - and `bash -c "..."` is why the quote itself
+        # cannot be the signal. `--help` is exempted per segment, so
+        # `docker system prune --help` reads usage while
+        # `docker system prune --help && rm -rf /` still loses its second half.
+        # What remains uncovered is a *mention* directly after an operator, as in
+        # `echo hi; "git clean -fdx"`, which stays denied. That is the residue of
+        # not parsing, and it is recorded rather than claimed to be closed.
         blocked = self.blocked(
             [
                 f'git commit -m "guard against {GIT_RESET_HARD} in hooks"',
@@ -990,7 +993,6 @@ class ProductionEnvironmentTests(GuardContractMixin, unittest.TestCase):
                 self.assertFalse(result["requires_approval"], f"{command!r}: {result['matches']}")
                 self.assertNoRefusal("production-environment-guard", result)
 
-    @unittest.expectedFailure
     def test_the_vercel_deploy_subcommand_form_is_not_recognised(self) -> None:
         # DEFECT: `PRODUCTION_PATTERNS` matches `vercel\s+--prod`, but the form
         # Vercel documents is `vercel deploy --prod`, and the flag is no longer
@@ -1009,7 +1011,6 @@ class ProductionEnvironmentTests(GuardContractMixin, unittest.TestCase):
         ]
         self.assertEqual(leaks, [])
 
-    @unittest.expectedFailure
     def test_a_non_production_database_url_containing_the_letters_prod(self) -> None:
         # DEFECT: `DATABASE_URL=.*prod` is a substring match with a wildcard in
         # front of it, so it fires on any connection string in which those four
@@ -1159,7 +1160,6 @@ class SensitiveFilePolicyTests(GuardContractMixin, unittest.TestCase):
                 self.assertFalse(result["sensitive"], path)
                 self.assertNoRefusal("sensitive-file-policy", result)
 
-    @unittest.expectedFailure
     def test_a_public_key_is_treated_as_the_private_key_beside_it(self) -> None:
         # DEFECT: `name.startswith(("id_rsa", "id_ed25519", ...))` is a prefix
         # test, and `id_rsa.pub` has the prefix. The public key is the half you
@@ -1193,7 +1193,6 @@ class SensitiveFilePolicyTests(GuardContractMixin, unittest.TestCase):
             link.symlink_to(secret)
             self.assertTrue(quality_tools.sensitive_file_policy(str(link), "print")["sensitive"])
 
-    @unittest.expectedFailure
     def test_the_env_example_template_is_treated_as_a_live_secret_file(self) -> None:
         # DEFECT, mirroring the secret-guard case: `.env.example` holds
         # placeholders by definition, this plugin generates it, and printing it
@@ -1312,6 +1311,11 @@ class WrongInitiativeWriteTests(GuardContractMixin, unittest.TestCase):
                 str(Path(".project") / ".engineering" / "initiatives"),
                 str(Path("src") / "app.ts"),
                 "",
+                # The docs tree is covered now, so its non-initiative content has
+                # to stay uncovered: a loose file at the docs root, and a folder
+                # there that names no initiative, are both ordinary writes.
+                str(Path(".project") / "docs" / "engineering" / "README.md"),
+                str(Path(".project") / "docs" / "engineering" / "shared" / "glossary.md"),
             ):
                 with self.subTest(path=path):
                     result = quality_tools.wrong_initiative_write(target, path)
@@ -1326,28 +1330,25 @@ class WrongInitiativeWriteTests(GuardContractMixin, unittest.TestCase):
             path = str(Path(".project") / ".engineering" / "initiatives" / "anything" / "prd.md")
             self.assertFalse(quality_tools.wrong_initiative_write(Path(tmp), path)["mismatch"])
 
-    @unittest.expectedFailure
     def test_a_dot_dot_segment_walks_into_another_initiative_unchallenged(self) -> None:
-        # DEFECT: the guard reads the segment immediately after `initiatives` and
-        # never normalises the path, so a route that *starts* at the active
-        # initiative and then climbs out reports itself as in-scope. The write
-        # lands in `billing-exports` while the guard says `push-notifications`.
-        # `Path.as_posix()` does not collapse `..`; `os.path.normpath` does, and
-        # applying it before the split closes this without touching anything else.
+        # A route that *starts* at the active initiative and then climbs out used
+        # to report itself as in-scope: the write lands in `billing-exports` while
+        # the guard says `push-notifications`. `Path.as_posix()` does not collapse
+        # `..`; `os.path.normpath` does, and the guard now applies it before the
+        # split, so the classification follows where the write lands.
         with tempfile.TemporaryDirectory() as tmp:
             target = self.workspace(tmp)
             escape = ".project/.engineering/initiatives/push-notifications/../billing-exports/prd.md"
             self.assertTrue(quality_tools.wrong_initiative_write(target, escape)["mismatch"])
 
-    @unittest.expectedFailure
     def test_the_docs_half_of_an_initiative_is_outside_the_guard(self) -> None:
-        # DEFECT: creating an initiative builds two trees - the machine state
-        # under `.project/.engineering/initiatives/<id>/` and the human-readable
+        # Creating an initiative builds two trees - the machine state under
+        # `.project/.engineering/initiatives/<id>/` and the human-readable
         # deliverables under `.project/docs/engineering/<id>/`. Only the first
-        # contains the literal segment `initiatives`, so the drift guard covers
-        # the state and not the documents, and the documents are the deliverable.
-        # A PRD written into the wrong initiative is exactly the failure this
-        # guard was added for.
+        # contains the literal segment `initiatives`, so the drift guard used to
+        # cover the state and not the documents, and the documents are the
+        # deliverable. A PRD written into the wrong initiative is exactly the
+        # failure this guard was added for.
         with tempfile.TemporaryDirectory() as tmp:
             target = self.workspace(tmp)
             docs_path = str(Path(".project") / "docs" / "engineering" / "billing-exports" / "prd.md")
