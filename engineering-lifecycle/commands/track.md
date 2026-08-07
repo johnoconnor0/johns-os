@@ -2,7 +2,7 @@
 name: track
 description: File surfaced issues into the configured issue tracker, or configure issue tracking for this project.
 argument-hint: "[status|plan|file|add \"<title>\"|init|on|off]"
-allowed-tools: Bash, Read, AskUserQuestion
+allowed-tools: Bash, Read, Write, AskUserQuestion
 ---
 
 # Track
@@ -54,7 +54,7 @@ Any of it can be overridden per session by environment variables:
 1. **Get the plan.**
 
    ```bash
-   python "${CLAUDE_PLUGIN_ROOT}/scripts/surface-issue.py" --root . plan --include-ledger
+   python "${CLAUDE_PLUGIN_ROOT}/scripts/surface-issue.py" plan --include-ledger
    ```
 
    If it returns `configured: false`, stop and report why — `provider_reason` says.
@@ -68,7 +68,7 @@ Any of it can be overridden per session by environment variables:
 3. **Reconcile.** Write `[{key, id, url, identifier}]` to a file and:
 
    ```bash
-   python "${CLAUDE_PLUGIN_ROOT}/scripts/surface-issue.py" --root . reconcile \
+   python "${CLAUDE_PLUGIN_ROOT}/scripts/surface-issue.py" reconcile \
      --results <file> --mcp-server <the server segment that worked>
    ```
 

@@ -20,7 +20,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from eng_common import engineering_root, now_iso, read_json, relpath, repo_root, write_json
+from eng_common import engineering_root, now_iso, read_json, relpath, repo_root, resolve_cli_root, write_json
 
 PRIORITY_MAP = {"urgent": 1, "high": 2, "normal": 3, "low": 4}
 HASH_FIELDS = ("title", "status", "owner", "priority", "description")
@@ -218,7 +218,7 @@ def apply_pull(root: Path, updates: list[dict]) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", default=".")
+    parser.add_argument("--root", default=None)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("plan", help="Emit the push plan (create/update) for the model to execute via MCP.")
     sub.add_parser("pending", help="Print how many tasks need pushing (for hooks).")
@@ -227,7 +227,7 @@ def main() -> int:
     pull_parser = sub.add_parser("apply-pull", help="Apply pulled Linear statuses to local tasks.")
     pull_parser.add_argument("--updates", required=True, help="JSON file: [{key, status}]")
     args = parser.parse_args()
-    root = repo_root(Path(args.root))
+    root = resolve_cli_root(args.root).root
 
     if args.command == "plan":
         print(json.dumps(build_plan(root), indent=2, sort_keys=True))

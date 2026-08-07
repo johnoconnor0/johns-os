@@ -6,15 +6,15 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from eng_common import WORKSPACE, engineering_root, repo_root, write_text
+from eng_common import WORKSPACE, engineering_root, repo_root, resolve_cli_root, write_text
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", default=".")
+    parser.add_argument("--root", default=None)
     parser.add_argument("--out", default=str(WORKSPACE / "reports" / "mermaid-index.md").replace("\\", "/"))
     args = parser.parse_args()
-    root = repo_root(Path(args.root))
+    root = resolve_cli_root(args.root).root
     diagrams = sorted(engineering_root(root).rglob("*.mmd"))
     lines = ["# Mermaid Diagram Index", ""]
     if diagrams:

@@ -20,7 +20,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from eng_common import emit_json, read_json, relpath, repo_root, workspace_exists, write_json
+from eng_common import emit_json, read_json, relpath, repo_root, resolve_cli_root, workspace_exists, write_json
 from tracker import (
     ISSUE_STATUSES,
     KINDS,
@@ -62,7 +62,7 @@ _STARTER = {
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", default=".")
+    parser.add_argument("--root", default=None)
     parser.add_argument("--provider", default="", help="Override the configured provider for this call")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -96,7 +96,7 @@ def main() -> int:
     sub.add_parser("off", help="Create the DISABLED sentinel.")
 
     args = parser.parse_args()
-    root = repo_root(Path(args.root))
+    root = resolve_cli_root(args.root).root
     override = args.provider or None
 
     if args.command == "record":

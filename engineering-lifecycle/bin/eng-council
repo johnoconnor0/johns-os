@@ -11,9 +11,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "council.py"
 CALLER_ROOT = Path.cwd().resolve()
 
+# No --root injection. `--root` is now taken verbatim by the scripts, so passing
+# the caller's cwd would pin the run to whatever directory it was launched from
+# and defeat the resolution that finds a nested workspace. Omitting it lets
+# council.py resolve, using this cwd as the start of the walk.
 args = [*sys.argv[1:]]
-if "--root" not in args:
-    args.extend(["--root", str(CALLER_ROOT)])
 
 # -B keeps __pycache__ out of the installed plugin directory.
 raise SystemExit(subprocess.call([sys.executable, "-B", str(SCRIPT), *args], cwd=CALLER_ROOT))

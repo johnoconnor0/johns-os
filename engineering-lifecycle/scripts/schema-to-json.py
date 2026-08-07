@@ -16,7 +16,7 @@ from pathlib import Path
 
 from data_model import parse_document_model, parse_schema_sql, render_erd
 from dialects import DIALECTS, model_filename, resolve_dialect
-from eng_common import docs_root, emit_json, relpath, repo_root, write_json, write_text
+from eng_common import docs_root, emit_json, relpath, repo_root, resolve_cli_root, write_json, write_text
 
 
 def initiative_data_dir(root: Path, initiative: str) -> Path:
@@ -25,7 +25,7 @@ def initiative_data_dir(root: Path, initiative: str) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", default=".")
+    parser.add_argument("--root", default=None)
     parser.add_argument("--initiative", default="", help="Initiative id. Defaults to the active one.")
     parser.add_argument("--schema", default="", help="Path to the schema file. Overrides --initiative.")
     parser.add_argument(
@@ -37,7 +37,7 @@ def main() -> int:
     parser.add_argument("--no-erd", action="store_true", help="Skip regenerating erd.mmd")
     args = parser.parse_args()
 
-    root = repo_root(Path(args.root))
+    root = resolve_cli_root(args.root).root
     dialect, reason = resolve_dialect(root, args.dialect)
     if args.schema:
         schema = Path(args.schema)

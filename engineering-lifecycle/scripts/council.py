@@ -21,6 +21,7 @@ from eng_common import (
     redact_secrets,
     relpath,
     repo_root,
+    resolve_cli_root,
     slugify,
     write_json,
     write_text,
@@ -716,7 +717,7 @@ def main() -> int:
     ask_parser.add_argument("--question", required=True)
     ask_parser.add_argument("--context", action="append", default=[])
     ask_parser.add_argument("--run-id")
-    ask_parser.add_argument("--root", default=".")
+    ask_parser.add_argument("--root", default=None)
     ask_parser.add_argument(
         "--mode",
         choices=["deterministic-local", "live-model"],
@@ -741,7 +742,7 @@ def main() -> int:
         "--quorum-min", type=int, default=int(os.environ.get("ENGINEERING_COUNCIL_QUORUM_MIN", "3"))
     )
     args = parser.parse_args()
-    root = repo_root(Path(args.root))
+    root = resolve_cli_root(args.root).root
     if args.command == "ask":
         path = ask(
             root,

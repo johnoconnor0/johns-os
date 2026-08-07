@@ -37,6 +37,7 @@ from eng_common import (
     read_json_safe,
     relpath,
     repo_root,
+    resolve_cli_root,
     workspace_exists,
     write_json,
 )
@@ -586,12 +587,12 @@ def scan(root: Path, minimum: str = "low") -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", default=".")
+    parser.add_argument("--root", default=None)
     parser.add_argument("--hook", action="store_true", help="Stay silent when nothing is found")
     parser.add_argument("--severity", default="low", choices=list(SEVERITY_ORDER))
     parser.add_argument("--emit-queue", action="store_true", help="Push findings into the surfaced-issues queue")
     args = parser.parse_args()
-    root = repo_root(Path(args.root))
+    root = resolve_cli_root(args.root).root
 
     if not workspace_exists(root):
         if args.hook:

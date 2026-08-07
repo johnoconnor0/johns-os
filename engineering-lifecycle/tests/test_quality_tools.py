@@ -3018,6 +3018,215 @@ class BoundedScanTests(unittest.TestCase):
             self.assertEqual(quality_tools.workspace_globs(root), ["libs/*"])
 
 
+class RootResolutionTests(unittest.TestCase):
+    """Which project the tooling thinks it is in.
+
+    The failure this prevents is silent: a run anchored to the wrong root does not
+    error and does not come back empty, it answers about a different project.
+    """
+
+    def _tree(self, tmp: str) -> Path:
+        root = Path(tmp).resolve()
+        (root / ".git").mkdir()
+        (root / "apps" / "pkg" / "src").mkdir(parents=True)
+        return root
+
+    def test_a_workspace_created_with_here_is_resolvable_from_inside_it(self) -> None:
+        # The headline regression. `--here` was the only code path in the plugin
+        # that skipped the walk, so it could create a workspace that nothing which
+        # later read the tree could address - the create path and the resolve path
+        # disagreed. This is the poolslip case.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._tree(tmp)
+            pkg = root / "apps" / "pkg"
+            subprocess.run(
+                [sys.executable, "-B", str(SCRIPTS / "init-workspace.py"), "--here"],
+                cwd=pkg,
+                check=True,
+                capture_output=True,
+            )
+            self.assertTrue((pkg / ".project" / ".engineering").is_dir())
+            self.assertEqual(eng_common.repo_root(pkg / "src"), pkg)
+
+    def test_nearest_existing_workspace_wins_over_the_git_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._tree(tmp)
+            pkg = root / "apps" / "pkg"
+            for base in (root, pkg):
+                (base / ".project" / ".engineering").mkdir(parents=True)
+            resolution = eng_common.resolve_root(pkg / "src")
+            self.assertEqual(resolution.root, pkg)
+            self.assertEqual(resolution.reason, "workspace")
+            self.assertEqual(list(resolution.workspace_ancestors), [pkg, root])
+
+    def test_a_nested_workspace_is_never_resolved_into_from_above(self) -> None:
+        # The walk only goes up. That is what preserves the property
+        # workspace_exists documents: a hook firing anywhere can only land on a
+        # directory somebody deliberately initialised, and creates nothing.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._tree(tmp)
+            (root / ".project" / ".engineering").mkdir(parents=True)
+            (root / "apps" / "pkg" / ".project" / ".engineering").mkdir(parents=True)
+            (root / "tools").mkdir()
+            self.assertEqual(eng_common.resolve_root(root / "tools").root, root)
+
+    def test_a_nested_git_repo_beats_an_ancestor_workspace(self) -> None:
+        # Both markers are checked in one loop, so nearest genuinely wins in both
+        # directions rather than workspace always outranking .git.
+        with tempfile.TemporaryDirectory() as tmp:
+            outer = Path(tmp).resolve()
+            (outer / ".project" / ".engineering").mkdir(parents=True)
+            inner = outer / "inner"
+            (inner / ".git").mkdir(parents=True)
+            (inner / "x").mkdir()
+            resolution = eng_common.resolve_root(inner / "x")
+            self.assertEqual(resolution.root, inner)
+            self.assertEqual(resolution.reason, "repo")
+            self.assertFalse(resolution.has_workspace)
+
+    def test_a_workspace_in_home_or_temp_never_anchors_a_root(self) -> None:
+        # The landmine. This machine carries debris workspaces at ~/.project and
+        # $TEMP/.project from before the workspace became opt-in. Without this
+        # guard, promoting the workspace to a resolution marker makes every
+        # tempfile.TemporaryDirectory() in this suite resolve to the system temp
+        # root, and every path under $HOME resolve to $HOME.
+        self.assertFalse(eng_common.is_addressable_root(Path(tempfile.gettempdir()).resolve()))
+        self.assertFalse(eng_common.is_addressable_root(Path.home().resolve()))
+        # A directory *inside* temp is still perfectly addressable.
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertTrue(eng_common.is_addressable_root(Path(tmp).resolve()))
+
+    def test_a_workspace_inside_another_workspace_is_not_addressable(self) -> None:
+        # SCAN_PRUNE_DIRS already prunes `.project` everywhere else, so resolution
+        # has to agree: a workspace found under one is a scaffold some skill wrote,
+        # not a project root. This repo's ventures tree has six of them.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".git").mkdir()
+            buried = root / ".project" / "planned" / "x"
+            (buried / ".project" / ".engineering").mkdir(parents=True)
+            self.assertEqual(eng_common.resolve_root(buried).root, root)
+            self.assertEqual(eng_common.unreachable_workspaces(root), [buried])
+
+    def test_resolution_reports_the_marker_that_proved_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            self.assertEqual(eng_common.resolve_root(root).reason, "fallback")
+            (root / ".git").mkdir()
+            repo = eng_common.resolve_root(root)
+            self.assertEqual((repo.reason, repo.marker), ("repo", str(root / ".git")))
+            (root / ".project" / ".engineering").mkdir(parents=True)
+            ws = eng_common.resolve_root(root)
+            self.assertEqual((ws.reason, ws.marker), ("workspace", str(root / ".project" / ".engineering")))
+            explicit = eng_common.resolve_root(explicit=root)
+            self.assertEqual(explicit.reason, "explicit")
+
+    def test_claude_project_dir_sets_the_start_of_the_walk_not_the_answer(self) -> None:
+        # The harness says which directory the session is about, and the plugin
+        # ignored it entirely. Using it as the *answer* would be wrong in both
+        # directions: a session opened at a monorepo root while the work happens
+        # in a package must still resolve to the package.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._tree(tmp)
+            pkg = root / "apps" / "pkg"
+            (pkg / ".project" / ".engineering").mkdir(parents=True)
+            with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(pkg / "src")}):
+                resolution = eng_common.resolve_root()
+                self.assertEqual(resolution.root, pkg)
+                self.assertEqual(resolution.start_source, "CLAUDE_PROJECT_DIR")
+                # An explicit start argument outranks the harness.
+                self.assertEqual(eng_common.resolve_root(root).start_source, "argument")
+            # A value naming nothing is ignored rather than obeyed - honouring its
+            # parent would silently accept a path the user got wrong.
+            with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(root / "does-not-exist-at-all")}):
+                self.assertEqual(eng_common.resolve_root().start_source, "cwd")
+            # A value naming a file means its directory.
+            marker = pkg / "package.json"
+            marker.write_text("{}", encoding="utf-8")
+            with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(marker)}):
+                self.assertEqual(eng_common.resolve_root().root, pkg)
+
+    def test_claude_project_dir_stays_ignored_by_env_hygiene(self) -> None:
+        # IGNORED_ENV_NAMES governs which names must never be demanded in a
+        # *consuming project's* .env.example. A variable the harness supplies
+        # belongs in nobody's, and this plugin reading it does not change that.
+        self.assertIn("CLAUDE_PROJECT_DIR", eng_common.IGNORED_ENV_NAMES)
+
+    def test_root_flag_is_used_verbatim(self) -> None:
+        # --root was passed back through the walk, so pointing the tooling at a
+        # nested package silently walked up to the monorepo root and operated on
+        # the wrong project. It was not an escape hatch at all.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._tree(tmp)
+            (root / ".project" / ".engineering").mkdir(parents=True)
+            pkg = root / "apps" / "pkg"
+            (pkg / ".project" / ".engineering").mkdir(parents=True)
+            self.assertEqual(eng_common.resolve_cli_root(str(pkg)).root, pkg)
+            self.assertEqual(eng_common.resolve_cli_root(str(pkg)).reason, "explicit")
+
+            subprocess.run(
+                [sys.executable, "-B", str(SCRIPTS / "sync-ledger.py"), "--root", str(pkg)],
+                cwd=root,
+                check=True,
+                capture_output=True,
+            )
+            self.assertTrue((pkg / ".project" / ".engineering" / "ledger" / "ledger.json").exists())
+            self.assertFalse((root / ".project" / ".engineering" / "ledger" / "ledger.json").exists())
+
+    def test_nested_scan_is_bounded_and_pruned(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "node_modules" / "dep" / ".project" / ".engineering").mkdir(parents=True)
+            (root / "apps" / "pkg" / ".project" / ".engineering").mkdir(parents=True)
+            (root / "a" / "b" / "c" / "d" / "e" / ".project" / ".engineering").mkdir(parents=True)
+            found = eng_common.nested_workspaces(root)
+            self.assertEqual(found, [root / "apps" / "pkg"])
+
+
+class WorkspaceDoctorTests(unittest.TestCase):
+    def _doctor(self, cwd: Path) -> dict:
+        proc = subprocess.run(
+            [sys.executable, "-B", str(SCRIPTS / "workspace-doctor.py")],
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return json.loads(proc.stdout)
+
+    def test_doctor_reports_the_resolved_root_and_why(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".git").mkdir()
+            pkg = root / "apps" / "pkg"
+            (pkg / "src").mkdir(parents=True)
+            for base in (root, pkg):
+                (base / ".project" / ".engineering").mkdir(parents=True)
+            report = self._doctor(pkg / "src")
+            self.assertEqual(Path(report["root"]), pkg)
+            self.assertEqual(report["reason"], "workspace")
+            self.assertEqual(len(report["workspace_ancestors"]), 2)
+            self.assertTrue(report["ambiguous"])
+            self.assertIn("NOT active", report["advice"])
+
+    def test_doctor_creates_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".git").mkdir()
+            report = self._doctor(root)
+            self.assertFalse(report["has_workspace"])
+            self.assertFalse((root / ".project").exists())
+
+    def test_doctor_lists_workspaces_it_cannot_address(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".git").mkdir()
+            (root / ".project" / ".engineering").mkdir(parents=True)
+            (root / ".project" / "planned" / "x" / ".project" / ".engineering").mkdir(parents=True)
+            report = self._doctor(root)
+            self.assertEqual(report["unreachable_workspaces"], [".project/planned/x"])
+
+
 class CouncilEgressTests(unittest.TestCase):
     """What leaves the machine when a council runs live.
 

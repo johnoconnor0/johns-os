@@ -33,11 +33,16 @@ from eng_common import (
     parse_front_matter,
     permission_output,
     placeholder_for_env,
+    nested_workspaces,
     read_json,
     read_json_safe,
     relpath,
     repo_root,
+    resolve_cli_root,
+    resolve_root,
+    RootResolution,
     slugify,
+    unreachable_workspaces,
     workspace_exists,
     write_json,
     write_text,
@@ -1339,6 +1344,10 @@ class ToolContext:
     path: str
     files: list[str]
     hook_tool_name: str
+    # How `root` was arrived at, so a tool can report it without resolving twice.
+    # The hardest failure to see here was a correct-looking run against the wrong
+    # root: nothing errors, nothing is empty, the answers are about another project.
+    resolution: RootResolution | None = None
 
 
 def _ask_user_question_bridge(c: ToolContext) -> Any:
@@ -1482,6 +1491,7 @@ TOOLS: dict[str, Callable[[ToolContext], Any]] = {
     "active-initiative-resolver": lambda c: active_initiative_resolver(c.root, c.prompt),
     "initiative-drift-detector": lambda c: initiative_drift_detector(c.root, c.prompt, classify_user_intent(c.prompt)),
     "initiative": lambda c: initiative_command(c.root, c.args.action, c.args.id or c.args.name, c.args.text),
+    "workspace-doctor": lambda c: workspace_doctor(c.resolution, link=bool(getattr(c.args, "link", False))),
     # planning and decisions
     "plan-quality-gate": lambda c: plan_quality_gate(c.text or c.prompt),
     "architecture-decision-detector": lambda c: architecture_decision_detector(c.root, c.text or c.prompt),
@@ -1534,15 +1544,79 @@ TOOLS: dict[str, Callable[[ToolContext], Any]] = {
 }
 
 
+def workspace_doctor(resolution: RootResolution | None, link: bool = False) -> dict[str, Any]:
+    """Which workspace this directory resolves to, and the evidence for it.
+
+    The verb that was missing. Every other tool answers a question *about* a
+    project; none of them could answer "which project do you think you are in?".
+    That mattered because the failure mode is silent: a run anchored to the wrong
+    root does not error and does not come back empty, it just answers about
+    somewhere else.
+
+    Read-only unless `--link` is passed. Resolution deliberately does not consult
+    anything this writes.
+    """
+    resolution = resolution or resolve_root()
+    root = resolution.root
+    ancestors = [str(path) for path in resolution.workspace_ancestors]
+    nested = [relpath(path, root) for path in nested_workspaces(root)]
+    unreachable = [relpath(path, root) for path in unreachable_workspaces(root)]
+    registry = load_initiative_registry(root) if resolution.has_workspace else {"active": None, "initiatives": []}
+
+    # Ambiguous means "more than one workspace could plausibly have been meant",
+    # which is exactly when a human should look before anything is written.
+    ambiguous = len(ancestors) > 1 or bool(nested)
+    advice = ""
+    if resolution.reason == "workspace" and len(ancestors) > 1:
+        advice = (
+            f"Anchored to {root}. An ancestor ({ancestors[1]}) has its own separate workspace, "
+            "which is NOT active in this directory. Nearest wins."
+        )
+    elif nested:
+        advice = (
+            f"Anchored to {root}. {len(nested)} workspace(s) exist below it, each a separate lifecycle "
+            "project with its own initiative registry. Work on one of those from inside its own directory."
+        )
+    elif not resolution.has_workspace:
+        advice = f"No lifecycle workspace at {root}. Run `/project-init` to create one, or `/project-init here`."
+
+    result: dict[str, Any] = {
+        "root": str(root),
+        "reason": resolution.reason,
+        "marker": resolution.marker,
+        "start": str(resolution.start),
+        "start_source": resolution.start_source,
+        "has_workspace": resolution.has_workspace,
+        "active_initiative": registry.get("active"),
+        "workspace_ancestors": ancestors,
+        "nested_workspaces": nested,
+        # Buried inside the root's own .project tree, so unaddressable by design.
+        "unreachable_workspaces": unreachable,
+        "ambiguous": ambiguous,
+        "advice": advice,
+        "linked": False,
+    }
+    if link and resolution.has_workspace:
+        index = [
+            {"path": item, "linked_at": now_iso()}
+            for item in nested
+        ]
+        write_json(engineering_root(root) / "workspaces.json", {"generated_at": now_iso(), "workspaces": index})
+        result["linked"] = True
+    return result
+
+
 def run_tool(name: str, args: argparse.Namespace) -> dict[str, Any]:
     handler = TOOLS.get(name)
     if handler is None:
         raise SystemExit(f"unknown tool: {name}")
     payload = load_hook_payload() if args.hook else {}
+    resolution = resolve_cli_root(args.root)
     return handler(
         ToolContext(
             args=args,
-            root=repo_root(Path(args.root)),
+            root=resolution.root,
+            resolution=resolution,
             payload=payload,
             prompt=args.prompt or prompt_from_payload(payload),
             text=args.text or text_from_payload(payload),
@@ -1728,7 +1802,9 @@ def cli_main(tool_name: str | None = None) -> int:
     inferred = Path(os.environ.get("QUALITY_TOOL_NAME", "") or Path(__file__).stem).stem
     name = (tool_name or inferred).replace(".py", "")
     parser = argparse.ArgumentParser(description=f"Run Engineering Lifecycle quality tool: {name}")
-    parser.add_argument("--root", default=".")
+    # No default: "omitted" has to be distinguishable from "explicitly here", or
+    # --root cannot be an escape hatch. See `resolve_cli_root`.
+    parser.add_argument("--root", default=None)
     parser.add_argument("--prompt", default="")
     parser.add_argument("--question", default="")
     parser.add_argument("--text", default="")
@@ -1743,6 +1819,11 @@ def cli_main(tool_name: str | None = None) -> int:
         "--action", default="read", help="Verb for multi-action tools (initiative: new|switch|close|list)"
     )
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument(
+        "--link",
+        action="store_true",
+        help="workspace-doctor: record nested workspaces in the resolved root's workspaces.json",
+    )
     parser.add_argument("--id", default="", help="Open-question id to resolve")
     parser.add_argument("--answer", default="", help="Answer text that resolves an open question")
     parser.add_argument(

@@ -19,6 +19,7 @@ from eng_common import (
     read_json,
     relpath,
     repo_root,
+    resolve_cli_root,
     workspace_exists,
     write_json,
 )
@@ -33,10 +34,10 @@ def find_models(root: Path) -> list[Path]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", default=".")
+    parser.add_argument("--root", default=None)
     parser.add_argument("--hook", action="store_true", help="Stay silent when there is nothing to report")
     args = parser.parse_args()
-    root = repo_root(Path(args.root))
+    root = resolve_cli_root(args.root).root
 
     # Each model records the dialect it was built in, so the migration directories
     # searched follow that model rather than a fixed Postgres/Supabase list.

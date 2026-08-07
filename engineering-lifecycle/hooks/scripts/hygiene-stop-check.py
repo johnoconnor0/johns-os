@@ -3,13 +3,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-ROOT = Path.cwd()
-REPORT = ROOT / ".project" / ".engineering" / "hygiene" / "hygiene-report.json"
-
 
 def main() -> int:
+    # `ROOT` and `REPORT` used to be computed here from a bare `Path.cwd()`. They
+    # were never read, and their only effect was to suggest to the next reader
+    # that this hook inspects the hygiene report. It does not.
     # Stop hooks must stay silent. Any stdout here is injected back into the
     # conversation as context and re-invokes the model, producing an endless
     # "(Standing by.)" loop. Surface hygiene reminders on UserPromptSubmit (the

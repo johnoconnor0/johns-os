@@ -16,7 +16,17 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from eng_common import emit_json, engineering_root, hook_additional_context, plugin_root, repo_root, workspace_exists
+from eng_common import (
+    emit_json,
+    engineering_root,
+    hook_additional_context,
+    nested_workspaces,
+    plugin_root,
+    relpath,
+    resolve_root,
+    unreachable_workspaces,
+    workspace_exists,
+)
 
 
 def provenance() -> str:
@@ -64,8 +74,44 @@ def _surfacing_directive(root: Path) -> str:
     )
 
 
+def _neighbours(resolution) -> str:
+    """What else on disk could plausibly have been meant.
+
+    A session anchored to the wrong workspace produces no error and no empty
+    output - it simply answers about a different project. Naming the alternatives
+    up front is the only cheap way to catch that.
+    """
+    lines: list[str] = []
+    ancestors = resolution.workspace_ancestors
+    if resolution.reason == "workspace" and len(ancestors) > 1:
+        higher = str(ancestors[1]).replace("\\", "/")
+        lines.append(
+            f"This is a nested workspace: the nearest one wins. {higher} has its own separate "
+            "workspace and it is NOT active this session. Initiatives, ledger, registry and drift "
+            "checks all come from here."
+        )
+    nested = nested_workspaces(resolution.root)
+    if nested:
+        listed = ", ".join(relpath(path, resolution.root) for path in nested[:5])
+        more = f" (+{len(nested) - 5} more)" if len(nested) > 5 else ""
+        lines.append(
+            f"{len(nested)} other workspace(s) exist below this root: {listed}{more}. Each is a separate "
+            "lifecycle project with its own initiative registry, and this session writes only into the "
+            "root workspace. If the user's request is about one of those, say so and ask which root to "
+            "use before writing any lifecycle artifact - do not write into another workspace from here."
+        )
+    buried = unreachable_workspaces(resolution.root)
+    if buried:
+        lines.append(
+            f"{len(buried)} further workspace(s) are buried under `.project/` and cannot be addressed at "
+            "all. `eng-life doctor` lists them."
+        )
+    return ("\n" + "\n".join(lines)) if lines else ""
+
+
 def main() -> int:
-    root = repo_root()
+    resolution = resolve_root()
+    root = resolution.root
     workspace = engineering_root(root)
     display_root = str(root).replace("\\", "/")
     display_ws = str(workspace).replace("\\", "/")
@@ -73,8 +119,10 @@ def main() -> int:
     if workspace_exists(root):
         message = (
             f"{provenance()}\n"
-            f"Engineering Lifecycle workspace detected at {display_ws}. "
+            f"Engineering Lifecycle workspace detected at {display_ws} "
+            f"(matched by {resolution.reason}). "
             "Lifecycle hooks and skills are active for this repo; proceed."
+            f"{_neighbours(resolution)}"
             f"{_surfacing_directive(root)}"
         )
     else:
@@ -94,6 +142,7 @@ def main() -> int:
             "the user runs `/project-init here` from that subfolder.\n"
             "  - If the user declines, proceed with their request without the workspace and do not "
             "ask again this session."
+            f"{_neighbours(resolution)}"
         )
 
     emit_json(hook_additional_context("SessionStart", message))

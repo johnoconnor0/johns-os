@@ -13,7 +13,7 @@ from eng_common import (  # noqa: F401  (ACTION_RE re-exported for existing call
     now_iso,
     read_json,
     relpath,
-    repo_root,
+    resolve_cli_root,
     slugify,
     write_json,
 )
@@ -92,10 +92,10 @@ def merge_with_existing(path: Path, items: list[dict]) -> list[dict]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("inputs", nargs="+")
-    parser.add_argument("--root", default=".")
+    parser.add_argument("--root", default=None)
     parser.add_argument("--out", default=str(WORKSPACE / "ledger" / "action-items.json").replace("\\", "/"))
     args = parser.parse_args()
-    root = repo_root(Path(args.root))
+    root = resolve_cli_root(args.root).root
     out = root / args.out
     items = merge_with_existing(out, collect(root, [Path(p) for p in args.inputs]))
     payload = {"generated_at": now_iso(), "action_items": items}

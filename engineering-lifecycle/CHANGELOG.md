@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.10.0 - 2026-08-07
+
+### Fixed
+
+- **A workspace created by `/project-init here` could never be found again.** `repo_root` tested only for `.git` and `.claude-plugin/plugin.json`, and `init-workspace.py --here` was the one code path in the plugin that skipped the walk — so the create path and the resolve path disagreed. A workspace deliberately placed in a nested package was invisible to every hook, skill and script that later read the tree, which instead resolved past it to the monorepo root and answered about a different project. Resolution now tests the workspace marker first, nearest wins, and creation goes through the same function. Two real trees were in this state (`apps/poolslip`, `apps/cleaningproof` under a `ventures` monorepo) and neither needed migrating: the moment the marker counts, they work.
+- **`--root` was not an escape hatch.** Every CLI script passed it back through the walk, so pointing the tooling at a nested package silently walked up and operated on the parent. It is now taken verbatim across all fourteen scripts, and the wrappers (`eng-life`, `eng-council`, `/track`) stop injecting the caller's cwd — injecting it would pin every run to the launch directory and defeat the resolution that finds a nested workspace.
+- **`CLAUDE_PROJECT_DIR` was ignored.** The harness says which directory the session is about and the plugin never read it. It now sets the *start* of the walk, never the answer: using it as the answer would pin a monorepo-root session away from the package being worked on. It stays in `IGNORED_ENV_NAMES`, which governs an unrelated question — which names a *consuming project's* `.env.example` must not be asked to document.
+- `update-env-example.py` read the hygiene report from a hardcoded path under a bare `Path.cwd()`, so running it from anywhere but the repo root found nothing and reported nothing to add. `hygiene-stop-check.py` computed two constants it never used, whose only effect was to imply it inspects a report it does not. Four hook scripts resolved their root at import time, binding the answer to whatever cwd the process had when the module loaded.
+
+### Added
+
+- **`eng-life doctor`** — which workspace this directory resolves to, which marker proved it, every ancestor carrying one, every workspace nested below, and every workspace buried inside `.project/` that cannot be addressed at all. Read-only; `--link` optionally records the nested ones in `workspaces.json`, which is a convenience index and is never an input to resolution. This is the verb that was missing: every other tool answers a question *about* a project and none could answer "which project do you think you are in?" — which matters because that failure is silent.
+- SessionStart now names the resolved root and its marker, and says explicitly when a nested workspace has won over an ancestor's, or when other workspaces exist below the one in use.
+
+### Security
+
+- **The council no longer sends credentials to model providers.** `--context <dir>` was expanded with `rglob("*")` and every file read into the prompt, so a directory argument swept dotenv files, key material and git config — which carries tokens — into a POST body. `ENGINEERING_COUNCIL_MAX_CONTEXT_CHARS` bounded how much of that went, not whether, so a cost control read as a privacy one. Secret-risk files are now withheld and reported rather than silently dropped, credential values in what does go are redacted before truncation, and endpoints are restricted to HTTPS on the two vendor hosts — the URL overrides carried the live API key as well as the context, and nothing checked the scheme.
+- **State writes are atomic.** There was no `os.replace` anywhere in production code across roughly 45 writers, while seven PostToolUse hooks fire on a single edit. Worse, two adjacent hooks did read-modify-write on the same `hygiene-report.json` and swallowed parse failures, so whichever finished second erased the other's section. Each producer now owns a fragment under `hygiene/parts/` and the combined report is a derived view.
+
 ## 0.9.0 - 2026-08-06
 
 ### Added
