@@ -229,6 +229,85 @@ class FindingsTests(unittest.TestCase):
         problems = findings_mod.validate_document(document, families.registered_ids())
         self.assertTrue(any("registered but absent" in problem for problem in problems))
 
+    def _document_with(self, finding: dict) -> dict:
+        return {
+            "schema": findings_mod.SCHEMA,
+            "families": [{"id": name, "outcome": "passed", "reason": "", "finding_ids": []} for name in ["secrets"]],
+            "findings": [finding],
+        }
+
+    def test_every_finding_status_round_trips(self) -> None:
+        for status in findings_mod.FINDING_STATUSES:
+            with self.subTest(status=status):
+                needs_reason = status in findings_mod.FINDING_STATUSES_NEEDING_REASON
+                finding = findings_mod.Finding(
+                    family="secrets",
+                    rule="secret/generic-assignment",
+                    severity="critical",
+                    title="Possible credential",
+                    status=status,
+                    status_reason="checked, it is a fixture" if needs_reason else "",
+                )
+                self.assertEqual(finding.validate(), [])
+                self.assertEqual(finding.as_dict()["status"], status)
+                self.assertEqual(finding.dismissed, status in findings_mod.DISMISSED_STATUSES)
+
+    def test_a_dismissed_finding_must_state_a_reason(self) -> None:
+        # Same rule the family outcomes already carry: the claim that something needs
+        # no action is exactly the claim that has to show its evidence.
+        for status in findings_mod.FINDING_STATUSES_NEEDING_REASON:
+            with self.subTest(status=status):
+                bare = self._document_with(_finding_dict(status=status, status_reason=""))
+                self.assertTrue(
+                    any("must state a reason" in problem for problem in findings_mod.validate_document(bare, [])),
+                    f"{status} with no reason must not validate",
+                )
+                explained = self._document_with(_finding_dict(status=status, status_reason="because"))
+                self.assertEqual(findings_mod.validate_document(explained, []), [])
+
+    def test_an_unknown_finding_status_is_rejected(self) -> None:
+        # It was a free string, so a typo in a hand-edit was silently accepted and
+        # then silently counted as live work.
+        document = self._document_with(_finding_dict(status="flase-positive", status_reason="typo"))
+        self.assertTrue(any("unknown status" in problem for problem in findings_mod.validate_document(document, [])))
+
+    def test_an_unknown_severity_is_rejected(self) -> None:
+        # Unknown severities sorted last via a `99` fallback and dropped out of the
+        # header counts entirely, so the finding existed and was invisible.
+        document = self._document_with(_finding_dict(severity="blocker"))
+        self.assertTrue(any("unknown severity" in problem for problem in findings_mod.validate_document(document, [])))
+
+    def test_dismissed_findings_are_excluded_from_the_document_totals(self) -> None:
+        def finding(status: str) -> findings_mod.Finding:
+            return findings_mod.Finding(
+                family="secrets",
+                rule="secret/generic-assignment",
+                severity="critical",
+                title=f"Possible credential ({status})",
+                status=status,
+                status_reason="fixture" if status != "open" else "",
+            )
+
+        document = findings_mod.build_document(
+            run_id="T",
+            generated_at="2026-01-01T00:00:00+00:00",
+            root=".",
+            plan={"path": None, "parsed_by": None, "item_count": 0},
+            stack={},
+            results=[
+                findings_mod.FamilyResult(
+                    id="secrets",
+                    title="Secrets",
+                    outcome="failed",
+                    findings=[finding("open"), finding("false-positive"), finding("accepted-risk")],
+                )
+            ],
+            plan_items=[],
+        )
+        self.assertEqual(document["totals"]["critical"], 1)
+        self.assertEqual(document["totals"]["findings_open"], 1)
+        self.assertEqual(document["totals"]["findings_dismissed"], 2)
+
 
 class FamilyRegistryTests(unittest.TestCase):
     def _ctx(self, **stack) -> families.Ctx:
@@ -254,6 +333,29 @@ class FamilyRegistryTests(unittest.TestCase):
     def test_registry_ids_are_unique(self) -> None:
         ids = families.registered_ids()
         self.assertEqual(len(ids), len(set(ids)))
+
+
+def _finding_dict(**overrides) -> dict:
+    """A findings.json finding entry, shaped as `Finding.as_dict` emits it."""
+    base = {
+        "id": "F001",
+        "identity": "abc123",
+        "content_hash": "def456",
+        "family": "secrets",
+        "rule": "secret/generic-assignment",
+        "severity": "critical",
+        "title": "Possible hardcoded credential in api/src/api.test.ts",
+        "detail": "",
+        "evidence": [{"path": "api/src/api.test.ts", "line": 25, "excerpt": ""}],
+        "plan_items": [],
+        "route": {},
+        "suggested_strategy": "human-input",
+        "status": "open",
+        "status_reason": "",
+        "tracker": {"provider": None, "issue_id": None, "url": None},
+    }
+    base.update(overrides)
+    return base
 
 
 class RenderTests(unittest.TestCase):
@@ -323,6 +425,61 @@ class RenderTests(unittest.TestCase):
         text = render_report.render(self._document("not-checked", "needs judgement"))
         self.assertIn("## Not run (1)", text)
         self.assertIn("needs judgement", text)
+
+    def _with_findings(self, findings: list[dict]) -> dict:
+        document = self._document("not-checked", "assessed by the skill")
+        document["findings"] = findings
+        document["families"].append(
+            {
+                "id": "secrets",
+                "title": "Secret exposure",
+                "outcome": "failed",
+                "reason": "",
+                "applies_because": "always relevant",
+                "commands": [],
+                "finding_ids": [item["id"] for item in findings],
+            }
+        )
+        return document
+
+    def test_an_open_finding_is_counted_and_listed(self) -> None:
+        text = render_report.render(self._with_findings([_finding_dict()]))
+        self.assertIn("Critical 1 ·", text)
+        self.assertIn("### Critical (1)", text)
+        self.assertNotIn("## Dismissed", text)
+
+    def test_a_dismissed_finding_leaves_the_counts_and_gains_a_reason(self) -> None:
+        # The whole defect: an assessment written into findings.json changed nothing
+        # in report.md, so six examined criticals still read as six things to fix.
+        text = render_report.render(
+            self._with_findings(
+                [
+                    _finding_dict(
+                        status="false-positive",
+                        status_reason="the literal says `not-a-real-token`; it is a test fixture",
+                    )
+                ]
+            )
+        )
+        self.assertIn("Critical 0 ·", text)
+        self.assertNotIn("### Critical (1)", text)
+        self.assertIn("## Dismissed (1)", text)
+        self.assertIn("not-a-real-token", text)
+        self.assertIn("false-positive", text)
+        # And the verdict table stops advertising it as outstanding work.
+        self.assertIn("| Secret exposure | **FAILED** | 0 |", text)
+
+    def test_a_stale_persisted_total_does_not_win_over_the_findings(self) -> None:
+        # `totals` is written once and the document is hand-edited afterwards, so a
+        # renderer that trusts it reports the pre-assessment number forever.
+        document = self._with_findings([_finding_dict(status="false-positive", status_reason="test fixture")])
+        document["totals"]["critical"] = 7
+        self.assertIn("Critical 0 ·", render_report.render(document))
+
+    def test_a_plan_item_missing_its_status_does_not_break_the_render(self) -> None:
+        document = self._document("failed")
+        del document["plan_items"][0]["status"]
+        self.assertIn("Plan Completion Audit", render_report.render(document))
 
 
 class ResolverTests(unittest.TestCase):

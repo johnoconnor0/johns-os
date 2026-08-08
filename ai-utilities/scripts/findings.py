@@ -49,6 +49,19 @@ OUTCOMES_NEEDING_REASON = ("not-applicable", "not-checked", "errored")
 
 SEVERITIES = ("critical", "warning", "suggestion")
 
+# What the model concluded about a finding a mechanical check raised. `Finding.status`
+# was a free string that nothing validated and the renderer never read, so a run that
+# examined six criticals and dismissed all six rendered identically to one that had
+# examined none of them: still six criticals in the header, no trace of the work. The
+# family vocabulary above was already the right design; this is that design applied
+# one level down.
+FINDING_STATUSES = ("open", "false-positive", "accepted-risk", "fixed")
+# Anything other than `open` is a claim that this finding needs no action, which is
+# exactly the claim that has to carry its evidence.
+FINDING_STATUSES_NEEDING_REASON = ("false-positive", "accepted-risk", "fixed")
+# The statuses that take a finding out of the live counts.
+DISMISSED_STATUSES = ("false-positive", "accepted-risk", "fixed")
+
 _DIGITS = re.compile(r"\d+")
 
 
@@ -78,11 +91,27 @@ class Finding:
     route: dict[str, Any] = field(default_factory=dict)
     suggested_strategy: str = "plan-first"
     status: str = "open"
+    status_reason: str = ""
     id: str = ""
 
     @property
     def primary_path(self) -> str:
         return self.evidence[0].path if self.evidence else ""
+
+    @property
+    def dismissed(self) -> bool:
+        return self.status in DISMISSED_STATUSES
+
+    def validate(self) -> list[str]:
+        errors: list[str] = []
+        label = self.id or self.rule
+        if self.severity not in SEVERITIES:
+            errors.append(f"{label}: unknown severity {self.severity!r}")
+        if self.status not in FINDING_STATUSES:
+            errors.append(f"{label}: unknown status {self.status!r}")
+        if self.status in FINDING_STATUSES_NEEDING_REASON and not self.status_reason.strip():
+            errors.append(f"{label}: status {self.status!r} must state a reason")
+        return errors
 
     @property
     def identity(self) -> str:
@@ -97,6 +126,7 @@ class Finding:
                 "title": self.title,
                 "severity": self.severity,
                 "status": self.status,
+                "status_reason": self.status_reason,
                 "evidence": [item.as_dict() for item in self.evidence],
             },
             sort_keys=True,
@@ -118,6 +148,7 @@ class Finding:
             "route": self.route,
             "suggested_strategy": self.suggested_strategy,
             "status": self.status,
+            "status_reason": self.status_reason,
             "tracker": {"provider": None, "issue_id": None, "url": None},
         }
 
@@ -180,7 +211,16 @@ def build_document(
     plan_items: list[dict[str, Any]],
 ) -> dict[str, Any]:
     findings = assign_ids(results)
-    counts = {severity: sum(1 for item in findings if item.severity == severity) for severity in SEVERITIES}
+    # Severity counts are over OPEN findings only. A dismissed finding that still
+    # counts is how "Critical 7" survived six documented dismissals and told the
+    # reader there were seven things to fix.
+    live = [item for item in findings if not item.dismissed]
+    counts = {severity: sum(1 for item in live if item.severity == severity) for severity in SEVERITIES}
+    dismissed = {
+        status: sum(1 for item in findings if item.status == status)
+        for status in DISMISSED_STATUSES
+        if any(item.status == status for item in findings)
+    }
     by_outcome = {outcome: sum(1 for item in results if item.outcome == outcome) for outcome in OUTCOMES}
     return {
         "schema": SCHEMA,
@@ -195,6 +235,9 @@ def build_document(
         "totals": {
             **counts,
             **{f"families_{outcome.replace('-', '_')}": count for outcome, count in by_outcome.items()},
+            "findings_open": len(live),
+            "findings_dismissed": len(findings) - len(live),
+            "dismissed_by_status": dismissed,
             "plan_items": len(plan_items),
             "plan_items_complete": sum(1 for item in plan_items if item.get("status") == "complete"),
         },
@@ -226,4 +269,19 @@ def validate_document(document: dict[str, Any], registered: list[str]) -> list[s
         for finding_id in family.get("finding_ids", []):
             if finding_id not in known:
                 errors.append(f"{family.get('id')}: names unknown finding {finding_id}")
+    # Findings were never validated at all. `severity` outside SEVERITIES sorts last
+    # via a `99` fallback and drops out of the counts silently, and `status` had no
+    # vocabulary to be outside of. Both are checked here because this is the only
+    # validator the audit actually calls, and because this document gets hand-edited:
+    # the model writes its assessment straight into findings.json, so the vocabulary
+    # is worth nothing unless something rejects a typo in it.
+    for finding in document.get("findings", []):
+        label = finding.get("id") or finding.get("rule")
+        if finding.get("severity") not in SEVERITIES:
+            errors.append(f"{label}: unknown severity {finding.get('severity')!r}")
+        status = finding.get("status", "open")
+        if status not in FINDING_STATUSES:
+            errors.append(f"{label}: unknown status {status!r}")
+        if status in FINDING_STATUSES_NEEDING_REASON and not str(finding.get("status_reason", "")).strip():
+            errors.append(f"{label}: status {status!r} must state a reason")
     return errors

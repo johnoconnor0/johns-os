@@ -248,7 +248,11 @@ def audit(
     )
     if scope_warning:
         document["scope_warnings"] = [scope_warning]
-    problems = validate_document(document, registered_ids())
+    # `FamilyResult.validate` had never run outside the test suite, so its four
+    # invariants - including "failed with no findings" and "passed with findings" -
+    # had never been checked against a real run.
+    problems = [problem for result in results for problem in result.validate()]
+    problems += validate_document(document, registered_ids())
     if problems:
         document["validation_errors"] = problems
     return document
