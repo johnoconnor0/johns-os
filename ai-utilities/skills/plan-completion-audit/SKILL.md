@@ -125,22 +125,55 @@ SQLite the database is a file.
 **`interface-alignment`** - only when both sides were detected. Every call the
 frontend makes must name something the backend actually exposes, and vice versa.
 
+Also assess what the mechanical checks raised. A finding you have examined and judged
+needs no action gets a `status` and a `status_reason` in `findings[]`:
+
+| `status` | Means |
+| --- | --- |
+| `open` | Real, outstanding. The default |
+| `false-positive` | The check matched something that is not the thing it detects |
+| `accepted-risk` | Real, and a deliberate decision not to act |
+| `fixed` | Already addressed since the scan ran |
+
+Anything other than `open` **must** carry a `status_reason`; validation rejects it
+otherwise, for the same reason a `not-applicable` family must say why. Dismissed
+findings leave the severity counts and the prioritised actions and appear in their own
+section with the reason, so the work of checking them is visible instead of lost.
+
 ### 4. Record what you assessed
 
-Write your statuses back so the report reflects them:
+Edit `findings.json` in place, then re-render. Two commands, in this order:
 
-```bash
-python "${CLAUDE_PLUGIN_ROOT}/scripts/run-audit.py" --root . --plan <path> --stamp <same-stamp>
-```
-
-Then update `plan_items[].status`, set the `plan-inventory` family outcome, and
-re-render:
+1. Write your conclusions into the file: `plan_items[].status` and `.reason`, the
+   `plan-inventory` family `outcome`, and `findings[].status` / `.status_reason`.
+2. Re-render:
 
 ```bash
 python "${CLAUDE_PLUGIN_ROOT}/scripts/render_report.py" <dir>/findings.json --out <dir>/report.md
 ```
 
 The rendered report is a fold over what ran. There is no template to fill in.
+
+**Do not re-run `run-audit.py` to save your assessment.** It regenerates
+`findings.json` from scratch and the write truncates, so a re-run after editing
+destroys exactly the work you meant to keep. This step used to say to re-run with
+`--stamp` and *then* hand-edit; that ordering only ever worked one way round and
+nothing enforced it.
+
+`--stamp` overrides the run id so a second run reuses one output directory instead of
+creating a sibling. It is for tests and for resuming a run that was interrupted before
+any assessment existed - its own `--help` says "For tests." It is not part of this
+step.
+
+To check a hand-edited file against the vocabularies without rendering:
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/scripts/render_report.py" <dir>/findings.json --check
+```
+
+It exits non-zero and names each problem. A normal render also validates: it still
+writes the report, but exits non-zero and the report says at the top that the document
+did not validate.
 
 ### 5. File the findings, if a tracker is configured
 
@@ -178,7 +211,12 @@ instead of creating duplicates.
 - **Do not mark a family passed that did not run.** The five outcomes exist so that
   never has to happen; `findings.py` rejects a document that tries.
 - **Do not invent a plan inventory.** If no plan parsed, stop and ask.
-- **Do not report a completion percentage you did not establish.**
+- **Do not report a completion percentage you did not establish.** Nor one over an
+  inventory the extractor did not fully account for - check `plan.coverage.confident`.
+- **Do not dismiss a finding without a `status_reason`.** Validation rejects it, for
+  the same reason a `not-applicable` family must say why.
+- **Do not re-run `run-audit.py` after recording an assessment.** The write truncates,
+  so it destroys the assessment.
 - Absence of code for a planned feature is a finding, not a pass.
 
 ## Reference

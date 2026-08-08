@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
-from findings import DISMISSED_STATUSES
+from families import registered_ids
+from findings import DISMISSED_STATUSES, validate_document
 
 _OUTCOME_LABEL = {
     "passed": "PASSED",
@@ -355,16 +357,44 @@ def _action_list(document: dict[str, Any], findings: dict[str, Any]) -> list[str
 
 
 def main() -> int:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("findings", help="Path to a findings.json")
     parser.add_argument("--out", default="", help="Write here instead of stdout")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Validate the document and report problems, rendering nothing.",
+    )
     args = parser.parse_args()
     document = json.loads(Path(args.findings).read_text(encoding="utf-8"))
+
+    # This file is hand-edited between the audit and the render, and rendering never
+    # looked at whether the edit was well-formed - so a typo in a status or a severity
+    # rendered happily and silently changed what the report claimed.
+    problems = validate_document(document, registered_ids())
+    if args.check:
+        for problem in problems:
+            print(problem, file=sys.stderr)
+        print(f"{len(problems)} problem(s) in {args.findings}", file=sys.stderr)
+        return 1 if problems else 0
+
+    if problems:
+        # So the banner reflects the file as it is now, not as run-audit left it.
+        document["validation_errors"] = problems
     text = render(document)
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8", newline="\n")
     else:
         print(text)
+    if problems:
+        # Rendered anyway - a report the reader can see beats a refusal - but the
+        # exit code and the report itself both say it did not validate.
+        print(f"{len(problems)} validation problem(s); see --check", file=sys.stderr)
+        return 1
     return 0
 
 

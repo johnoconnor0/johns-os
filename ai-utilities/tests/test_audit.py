@@ -7,7 +7,9 @@ the validator discovers `*/tests` now, and this file is what it finds here.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import sys
 import tempfile
 import unittest
@@ -684,6 +686,50 @@ class RenderTests(unittest.TestCase):
         document = self._document("not-checked", "assessed by the skill")
         document["scope_warnings"] = ["file scope fell back to a directory walk"]
         self.assertIn("Scope warning", render_report.render(document))
+
+    def _render_cli(self, document: dict, *extra: str) -> tuple[int, str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "findings.json"
+            audit_common.write_json(path, document)
+            argv = ["render_report.py", str(path), *extra]
+            err = io.StringIO()
+            with (
+                mock.patch.object(sys, "argv", argv),
+                contextlib.redirect_stdout(io.StringIO()),
+                contextlib.redirect_stderr(err),
+            ):
+                code = render_report.main()
+        return code, err.getvalue()
+
+    def _validatable(self) -> dict:
+        # A document shaped so validate_document has no complaint of its own.
+        document = self._document("not-checked", "assessed by the skill")
+        document["schema"] = findings_mod.SCHEMA
+        document["families"] = [
+            {"id": name, "title": name, "outcome": "not-checked", "reason": "n/a", "finding_ids": []}
+            for name in families.registered_ids()
+        ]
+        return document
+
+    def test_check_accepts_a_well_formed_document(self) -> None:
+        code, _err = self._render_cli(self._validatable(), "--check")
+        self.assertEqual(code, 0)
+
+    def test_check_rejects_a_typo_in_a_hand_edited_status(self) -> None:
+        # WEB-405: step 4 is a hand-edit, and nothing validated the result. A typo in
+        # a status rendered happily and silently changed what the report claimed.
+        document = self._validatable()
+        document["findings"] = [_finding_dict(status="flase-positive", status_reason="typo")]
+        code, err = self._render_cli(document, "--check")
+        self.assertEqual(code, 1)
+        self.assertIn("unknown status", err)
+
+    def test_a_render_of_an_invalid_document_still_writes_but_exits_non_zero(self) -> None:
+        document = self._validatable()
+        document["findings"] = [_finding_dict(severity="blocker")]
+        code, err = self._render_cli(document)
+        self.assertEqual(code, 1)
+        self.assertIn("validation problem", err)
 
     def test_validation_errors_are_no_longer_invisible(self) -> None:
         # They were written into findings.json and rendered nowhere, so a document
