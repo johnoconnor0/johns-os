@@ -43,7 +43,12 @@ over the gap.
   of the *absolute* path, so a checkout under a directory named `tests` skipped the
   scan entirely while `api.leads.test.ts` in `api/src/` was treated as production
   source. Test-path matches are now down-weighted rather than dropped, and the loosest
-  rule weighs an obvious-dummy denylist and Shannon entropy before raising.
+  rule weighs an obvious-dummy denylist and Shannon entropy before raising. A test-path
+  literal that also announces itself as a fixture — AWS's published example access key,
+  constants named `FAKE_PEM` — is dropped rather than down-weighted, because
+  down-weighting alone traded six false criticals for sixteen false suggestions.
+  Production source is never second-guessed on the shape-specific patterns, where a
+  false negative is what costs.
 - **`engineering-lifecycle` is resolved by install layout.** The probe used a sibling
   path that only resolves in a source checkout; installed, it pointed inside
   `ai-utilities` and skipped the version directory. `docs-references` therefore
