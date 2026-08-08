@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from eng_common import workspace_exists  # noqa: E402
+from eng_common import CAPTURE_TEXT, workspace_exists  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "project-anomaly-check.py"
 
@@ -33,7 +33,7 @@ def main() -> int:
         # On Stop the detector still runs and still queues what it finds - the
         # queue is what the dispatcher acts on. It just does it silently.
         command.append("--emit-queue")
-    proc = subprocess.run(command, text=True, capture_output=True, check=False)
+    proc = subprocess.run(command, capture_output=True, check=False, **CAPTURE_TEXT)
     if stop_mode:
         return 0
     if proc.stdout.strip():

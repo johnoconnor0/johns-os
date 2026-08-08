@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from eng_common import (
+    CAPTURE_TEXT,
     classify_file_path,
     engineering_root,
     now_iso,
@@ -406,9 +407,9 @@ def call_command_adapter(payload: dict[str, Any], timeout: int) -> str:
     proc = subprocess.run(
         command_parts(command),
         input=json.dumps(payload),
-        text=True,
         capture_output=True,
         check=False,
+        **CAPTURE_TEXT,
         timeout=timeout,
     )
     if proc.returncode != 0:

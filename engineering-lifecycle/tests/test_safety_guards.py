@@ -65,6 +65,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -75,6 +76,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
+import eng_common
 import quality_tools
 
 # Denylisted literals, kept out of any contiguous run of source text. See the
@@ -1351,6 +1353,97 @@ class WrongInitiativeWriteTests(GuardContractMixin, unittest.TestCase):
             target = self.workspace(tmp)
             docs_path = str(Path(".project") / "docs" / "engineering" / "billing-exports" / "prd.md")
             self.assertTrue(quality_tools.wrong_initiative_write(target, docs_path)["mismatch"])
+
+
+class ChildOutputDecodingTests(unittest.TestCase):
+    """Every capturing subprocess call must name its encoding.
+
+    `text=True` on its own decodes with `locale.getencoding()` - cp1252 on a default
+    Windows install, which leaves 0x81, 0x8D, 0x8F, 0x90 and 0x9D undefined. One byte
+    of UTF-8 from a child raises UnicodeDecodeError, and where the call also passes
+    `timeout=` that exception is raised inside the reader thread `Popen.communicate`
+    uses on Windows: the thread dies, `is_alive()` is then false so no TimeoutExpired
+    is raised, and `subprocess.run` returns `stdout=None` beside the real exit code.
+    Nothing propagates.
+
+    The same defect in `ai-utilities` made two audit families report `passed` on
+    evidence they had never read. Here it would let a hook see no `git status` output
+    and conclude the tree is clean. This is a scan rather than seven separate
+    assertions because the failure mode is a call site being *added* without the
+    kwarg, which no per-site test can catch.
+    """
+
+    CALL = re.compile(r"subprocess\.(?:run|Popen|check_output|check_call)\s*\(")
+
+    def _calls(self, path: Path):
+        """Each capturing subprocess call in `path`, as (line number, source)."""
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for match in self.CALL.finditer(text):
+            depth, index = 0, match.end() - 1
+            while index < len(text):
+                if text[index] == "(":
+                    depth += 1
+                elif text[index] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                index += 1
+            call = text[match.start() : index + 1]
+            if "capture_output" in call or "stdout=" in call or "PIPE" in call:
+                yield text[: match.start()].count("\n") + 1, call
+
+    def _sources(self):
+        for directory in (ROOT / "scripts", ROOT / "hooks" / "scripts", ROOT / "bin"):
+            if not directory.is_dir():
+                continue
+            for path in sorted(directory.iterdir()):
+                if path.is_file() and (path.suffix == ".py" or not path.suffix):
+                    yield path
+
+    def test_no_capturing_call_decodes_with_the_platform_codepage(self) -> None:
+        offenders = [
+            f"{path.relative_to(ROOT).as_posix()}:{line}"
+            for path in self._sources()
+            for line, call in self._calls(path)
+            if "encoding=" not in call and "CAPTURE_TEXT" not in call
+        ]
+        self.assertEqual(offenders, [], "capturing subprocess calls that do not name an encoding")
+
+    def test_the_scan_can_actually_see_a_violation(self) -> None:
+        # A scan that matches nothing passes vacuously and reads identically to one
+        # that checked something. This is the control.
+        with tempfile.TemporaryDirectory() as tmp:
+            planted = Path(tmp) / "offender.py"
+            planted.write_text(
+                "import subprocess\nsubprocess.run(['git'], text=True, capture_output=True)\n",
+                encoding="utf-8",
+            )
+            found = [
+                line for line, call in self._calls(planted) if "encoding=" not in call and "CAPTURE_TEXT" not in call
+            ]
+        self.assertEqual(found, [2])
+
+    def test_the_shared_kwargs_say_utf8_and_degrade_rather_than_raise(self) -> None:
+        self.assertEqual(eng_common.CAPTURE_TEXT["encoding"], "utf-8")
+        # "replace" not "strict": one undecodable byte should cost one character, not
+        # the command's entire output.
+        self.assertEqual(eng_common.CAPTURE_TEXT["errors"], "replace")
+
+    def test_git_survives_output_the_platform_codepage_cannot_decode(self) -> None:
+        # End to end through the shared helper, using the exact byte from the crash
+        # report that started this.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code, out, _err = eng_common.git(["init"], cwd=root)
+            if code != 0:
+                self.skipTest("git is not available")
+            eng_common.git(["config", "user.email", "t@example.invalid"], cwd=root)
+            eng_common.git(["config", "user.name", "T"], cwd=root)
+            # A filename carrying a character cp1252 has no mapping for.
+            (root / "café-你好.txt").write_text("x\n", encoding="utf-8")
+            code, out, _err = eng_common.git(["status", "--porcelain"], cwd=root)
+            self.assertEqual(code, 0)
+            self.assertTrue(out.strip(), "git printed an untracked file and we must be able to read it")
 
 
 if __name__ == "__main__":

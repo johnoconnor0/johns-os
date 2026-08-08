@@ -17,7 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from eng_common import emit_json, engineering_root, relpath, write_json, write_text
+from eng_common import CAPTURE_TEXT, emit_json, engineering_root, relpath, write_json, write_text
 
 PLUGIN = Path(__file__).resolve().parents[1]
 
@@ -146,7 +146,7 @@ def build(root: Path) -> dict:
         [sys.executable, "-B", str(PLUGIN / "scripts" / "sync-ledger.py"), "--root", str(root)],
         check=True,
         capture_output=True,
-        text=True,
+        **CAPTURE_TEXT,
     )
     return {
         "root": str(root),
