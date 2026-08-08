@@ -1277,15 +1277,33 @@ class SecretsTests(unittest.TestCase):
         self.assertEqual([item.severity for item in found], ["critical"])
 
     def test_a_real_credential_in_a_test_file_is_kept_but_down_weighted(self) -> None:
-        # Not dropped: a live key committed to a test file is still committed.
-        found = self._scan({"src/api.test.ts": "const key = 'AKIAIOSFODNN7EXAMPLE';"})
+        # Not dropped: a live key committed to a test file is still committed. The
+        # literal here is shaped like a key and says nothing about being fake.
+        found = self._scan({"src/api.test.ts": "const key = 'AKIAQ7ZK3MRPX2WNFJ4D';"})
         self.assertEqual([item.severity for item in found], ["suggestion"])
         self.assertIn("test or example material", found[0].title)
+
+    def test_a_self_declaring_fixture_in_a_test_file_is_dropped(self) -> None:
+        # `AKIAIOSFODNN7EXAMPLE` is AWS's own published example key. In a file that
+        # already declares itself a fixture, a value that also says it is not real is
+        # not evidence - and this repo's own suites are full of them, so keeping them
+        # would trade six false criticals for sixteen false suggestions.
+        self.assertEqual(self._scan({"src/api.test.ts": "const key = 'AKIAIOSFODNN7EXAMPLE';"}), [])
+        self.assertEqual(
+            self._scan({"tests/t.py": 'FAKE_PEM = "-----BEGIN RSA PRIVATE KEY-----"'}),
+            [],
+        )
+
+    def test_the_same_fixture_literal_in_production_source_still_fires(self) -> None:
+        # The narrowing is to test paths only. Production source is never
+        # second-guessed on the shape-specific patterns, where a false negative costs.
+        found = self._scan({"src/deploy.ts": "const key = 'AKIAIOSFODNN7EXAMPLE';"})
+        self.assertEqual([item.severity for item in found], ["critical"])
 
     def test_a_test_filename_outside_a_test_directory_is_recognised(self) -> None:
         # `api.leads.test.ts` sits in `api/src/`, so the old component-only filter
         # never saw it. Four of the six got through exactly here.
-        found = self._scan({"api/src/api.leads.test.ts": "const key = 'AKIAIOSFODNN7EXAMPLE';"})
+        found = self._scan({"api/src/api.leads.test.ts": "const key = 'AKIAQ7ZK3MRPX2WNFJ4D';"})
         self.assertEqual([item.severity for item in found], ["suggestion"])
 
     def test_a_checkout_under_a_path_named_tests_is_still_scanned(self) -> None:

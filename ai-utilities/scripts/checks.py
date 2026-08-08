@@ -135,6 +135,13 @@ _OBVIOUS_DUMMY = re.compile(
     r"process\.env|os\.environ|<[^>]+>|\.\.\."
 )
 
+# Consulted for test paths only, so it can afford to match a marker glued to
+# surrounding characters. AWS's own published example access key - the one this
+# repository's suites use - ends in EXAMPLE with a digit immediately before it, which
+# defeats `\bexample\b`. In production source the strict form above is used instead,
+# where a false negative is what costs.
+_FIXTURE_MARKER = re.compile(r"(?i)example|fake|dummy|placeholder|sample|redacted|not[-_ ]?a[-_ ]?real|test")
+
 _BASE64ISH = re.compile(r"^[A-Za-z0-9+/=_-]+$")
 
 # The quoted value on the right of a `secret: "..."` assignment.
@@ -377,6 +384,20 @@ def run_secrets(ctx: Ctx, family) -> FamilyResult:
                 if not pattern.search(line):
                     continue
                 if rule == "generic-assignment" and not _looks_like_a_real_credential(line):
+                    break
+                # The eight shape-specific patterns are precise and are never
+                # second-guessed in production source, where a false negative is what
+                # costs. Inside a file that already declares itself a fixture, a value
+                # that ALSO says it is not real is not evidence of anything: AWS's
+                # published example access key, and constants named FAKE_PEM. Without
+                # this the scan trades six false criticals for sixteen false
+                # suggestions, which is a smaller version of the same bug.
+                #
+                # Note the literal itself is deliberately not written out anywhere in
+                # this file. Doing so raised two criticals against this scanner's own
+                # source, which is the self-detection problem `_MARKER_DETECTOR` above
+                # exists to solve for the marker scan.
+                if in_test and _FIXTURE_MARKER.search(line):
                     break
                 # Kept rather than dropped, at a severity that says so. Test material
                 # is not where production credentials live, and a scanner that
