@@ -82,8 +82,26 @@ def _reference_findings(ctx: Ctx, family) -> tuple[FamilyResult, set[str]]:
             set(),
         )
     outcome = _run(f'"{sys.executable}" -B "{script}" --root .', ctx.root)
+    if not outcome.get("output"):
+        # Empty output used to parse as `{}`, which made `checked` default True and
+        # `errors` default empty - so a reference checker whose output was lost, or
+        # which never ran, rendered as a clean docs pass. There is no reading of
+        # "no output at all" that is evidence of anything.
+        return (
+            FamilyResult(
+                id=family.id,
+                title=family.title,
+                outcome="errored",
+                reason=(
+                    "the reference checker produced no output: "
+                    + str(outcome.get("error") or ("it timed out" if outcome.get("timed_out") else "reason unknown"))
+                ),
+                commands=[{k: v for k, v in outcome.items() if k != "output"}],
+            ),
+            set(),
+        )
     try:
-        payload = json.loads(outcome.get("output") or "{}")
+        payload = json.loads(outcome["output"])
     except ValueError:
         return (
             FamilyResult(
@@ -146,7 +164,7 @@ def audit(
     allow_untrusted_commands: bool = False,
 ) -> dict:
     stack = resolve_stack(root, prefer)
-    files = collect_files(root)
+    files, scope_warning = collect_files(root)
     resolved_plan = plan_path or find_plan(root)
     plan = (
         parse_plan(resolved_plan, root)
@@ -228,6 +246,8 @@ def audit(
         results=results,
         plan_items=[item.as_dict() for item in plan["items"]],
     )
+    if scope_warning:
+        document["scope_warnings"] = [scope_warning]
     problems = validate_document(document, registered_ids())
     if problems:
         document["validation_errors"] = problems
@@ -268,6 +288,14 @@ def _plan_drift(ctx: Ctx, family, unresolved: set[str]) -> FamilyResult:
 
 
 def main() -> int:
+    # A Windows console defaults to a codepage that cannot encode the replacement
+    # character, and captured output now legitimately contains one whenever a tool
+    # emitted a byte UTF-8 could not decode. Printing a reason string through that
+    # console would raise UnicodeEncodeError and lose the run. Degrade instead.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".")
     parser.add_argument("--plan", default="", help="Path to the plan. Discovered when omitted.")

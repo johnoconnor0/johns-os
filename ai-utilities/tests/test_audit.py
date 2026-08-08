@@ -7,10 +7,12 @@ the validator discovers `*/tests` now, and this file is what it finds here.
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -26,6 +28,17 @@ import render_report  # noqa: E402
 import resolver  # noqa: E402
 import stack_probe  # noqa: E402
 import verify as verify_mod  # noqa: E402
+
+
+def _load_run_audit():
+    """`run-audit.py` is not a legal module name, so import it by path."""
+    spec = importlib.util.spec_from_file_location("run_audit", SCRIPTS / "run-audit.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+run_audit = _load_run_audit()
 
 
 class AuditCommonTests(unittest.TestCase):
@@ -556,6 +569,107 @@ class UntrustedRepositoryTests(unittest.TestCase):
         self.assertNotIn("hunter2", scrubbed)
         self.assertNotIn("AKIAIOSFODNN7EXAMPLE", scrubbed)
         self.assertIn("admin", scrubbed)
+
+
+class CapturedOutputTests(unittest.TestCase):
+    """Output a child process emits must reach the audit, or the audit must say so.
+
+    On Windows `text=True` alone decodes with the ANSI codepage, and cp1252 leaves
+    0x81, 0x8D, 0x8F, 0x90 and 0x9D undefined. One such byte killed the reader
+    thread; `is_alive()` was then false so no TimeoutExpired was raised, the buffer
+    stayed empty, and `subprocess.run` returned `stdout=None` with the real exit
+    code. Every caller wrote `(proc.stdout or "")`, so a total loss of evidence was
+    indistinguishable from a command that printed nothing - and two families
+    reported `passed` on it.
+    """
+
+    # Emits the exact byte from the crash report, plus a real multi-byte character,
+    # straight to the buffer so no encoding on the child's side can launder it.
+    _EMITTER = (
+        "import sys\n"
+        "sys.stdout.buffer.write(b'before\\x90after ')\n"
+        "sys.stdout.buffer.write('caf\\u00e9 \\u2014 \\u4f60\\u597d'.encode())\n"
+        "sys.stdout.buffer.flush()\n"
+    )
+
+    def _emitter_repo(self, tmp: str) -> Path:
+        root = Path(tmp)
+        (root / "emit.py").write_text(self._EMITTER, encoding="utf-8")
+        return root
+
+    def test_an_undecodable_byte_does_not_lose_the_whole_capture(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._emitter_repo(tmp)
+            captured = audit_common.run_command("python emit.py", root)
+            self.assertEqual(captured.exit, 0)
+            self.assertTrue(captured.captured)
+            self.assertTrue(captured.ok)
+            # The undecodable byte degrades to the replacement character. Everything
+            # around it survives, which is the whole point of errors="replace".
+            self.assertIn("before", captured.stdout)
+            self.assertIn("after", captured.stdout)
+            self.assertIn("café", captured.stdout)
+            self.assertIn("你好", captured.stdout)
+
+    def test_a_listing_survives_the_same_byte(self) -> None:
+        # `_lines` feeds collect_files and repo-hygiene. It was the site whose
+        # silent empty return widened the audit's file scope.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._emitter_repo(tmp)
+            self.assertTrue(checks._lines("python emit.py", root))
+
+    def test_a_lost_capture_is_errored_rather_than_a_clean_pass(self) -> None:
+        # The guard, not the decode: force `captured=False` and assert the two
+        # families that used to manufacture a pass out of it no longer can.
+        lost = audit_common.Captured(
+            cmd="git ls-files", exit=0, captured=False, error="the output of this command could not be read"
+        )
+        family = next(f for f in families.REGISTRY if f.id == "repo-hygiene")
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(checks, "_listing", return_value=lost),
+        ):
+            root = Path(tmp)
+            (root / ".git").mkdir()
+            ctx = families.Ctx(root=root, stack={}, plan={"parsed_by": None}, files=[])
+            result = checks.run_repo_hygiene(ctx, family)
+        self.assertEqual(result.outcome, "errored")
+        self.assertTrue(result.reason.strip(), "an errored outcome must state a reason")
+        self.assertIn("could not be read", result.reason)
+
+    def test_a_failed_listing_warns_that_the_file_scope_widened(self) -> None:
+        # The fallback walk does not read .gitignore, so it is a correct answer for
+        # a plain directory and a silently wrong one for a repo whose listing broke.
+        lost = audit_common.Captured(cmd="git ls-files", exit=128, captured=True, stdout="")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.py").write_text("x = 1\n", encoding="utf-8")
+
+            files, warning = checks.collect_files(root)
+            self.assertEqual(warning, "", "a directory that is not a repository is not a warning")
+
+            (root / ".git").mkdir()
+            with mock.patch.object(checks, "_listing", return_value=lost):
+                files, warning = checks.collect_files(root)
+        self.assertTrue(files, "the walk still answers")
+        self.assertIn(".gitignore", warning)
+
+    def test_a_reference_checker_that_printed_nothing_is_not_a_docs_pass(self) -> None:
+        # Empty output parsed as `{}`, so `checked` defaulted True and `errors`
+        # defaulted empty: a lost capture rendered as "markdown documents are
+        # present" with a PASSED verdict.
+        family = next(f for f in families.REGISTRY if f.id == "docs-references")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            planted = root / "engineering-lifecycle" / "scripts"
+            planted.mkdir(parents=True)
+            (planted / "reference-check.py").write_text("", encoding="utf-8")
+            ctx = families.Ctx(root=root, stack={}, plan={"parsed_by": None}, files=[])
+            with mock.patch.object(checks, "_run", return_value={"cmd": "ref", "exit": 0, "output": ""}):
+                result, unresolved = run_audit._reference_findings(ctx, family)
+        self.assertEqual(result.outcome, "errored")
+        self.assertTrue(result.reason.strip())
+        self.assertEqual(unresolved, set())
 
 
 class PackageManagerTests(unittest.TestCase):
