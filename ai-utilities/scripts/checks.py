@@ -26,7 +26,9 @@ quietly collapsed inside a runner.
 
 from __future__ import annotations
 
+import math
 import re
+from collections import Counter
 from pathlib import Path
 
 from audit_common import SECRET_PATTERNS, Captured, relpath, run_command, scan_files, scrub_secrets
@@ -81,8 +83,62 @@ _MARKER_DETECTOR = re.compile(
 # credentials in a repository, and keeping them out of the artifacts this writes.
 _SECRET_PATTERNS = SECRET_PATTERNS
 
-# A placeholder in an example file is the example. Only real source counts.
-_SECRET_SKIP_PARTS = frozenset({"examples", "templates", "fixtures", "tests", "test", "__tests__", "references"})
+# A placeholder in an example file is the example. Directories where a credential-
+# shaped literal is overwhelmingly likely to be a fixture rather than a credential.
+#
+# `e2e` and `spec` are here because they were missing, and their absence is most of
+# why a real run produced six false-positive criticals.
+_SECRET_SKIP_PARTS = frozenset(
+    {
+        "examples",
+        "example",
+        "templates",
+        "fixtures",
+        "__fixtures__",
+        "tests",
+        "test",
+        "__tests__",
+        "testdata",
+        "references",
+        "e2e",
+        "spec",
+        "specs",
+        "mocks",
+        "__mocks__",
+        "stories",
+    }
+)
+
+# Directory components are not enough: `api.leads.test.ts` sits in `api/src/` and is
+# a test file, which is how four of those six criticals got through. A convention
+# every ecosystem shares is worth matching by name.
+_TEST_FILENAME = re.compile(
+    r"(?:\.|_|-)(?:test|spec|stories|fixture|mock)s?\.[^.]+$|^(?:test|conftest)_|_test\.[^.]+$",
+    re.IGNORECASE,
+)
+
+# Literals that state in themselves that they are not real. Five of the six criticals
+# said so in the value: `not-a-real-token`, `SUPER-SECRET-TOKEN`,
+# `a-test-signing-secret-that-is-long-enough`, `test-secret-not-a-real-key`,
+# `not-a-real-value`. A scanner that cannot read its own match is not weighing
+# evidence, and six wrong criticals train the reader to skim the section that a real
+# one will be in.
+_OBVIOUS_DUMMY = re.compile(
+    r"(?i)"
+    r"not[-_ ]?a[-_ ]?real|not[-_ ]?real|"
+    r"\bfake\b|\bdummy\b|\bplaceholder\b|\bredacted\b|\bsample\b|\bexample\b|"
+    r"change[-_ ]?me|replace[-_ ]?me|your[-_ ]?|"
+    r"\bxxx+\b|\bfoo\b|\bbar\b|\bbaz\b|\btodo\b|"
+    r"^test[-_]|[-_]test$|[-_]test[-_]|"
+    r"super[-_ ]?secret|"
+    r"\bsecret\b.*\b(?:token|key|value)\b$|"
+    r"process\.env|os\.environ|<[^>]+>|\.\.\."
+)
+
+_BASE64ISH = re.compile(r"^[A-Za-z0-9+/=_-]+$")
+
+# The quoted value on the right of a `secret: "..."` assignment.
+_QUOTED = re.compile(r"\"([^\"\n]*)\"|'([^'\n]*)'")
 
 _BUILD_ARTIFACTS = ("dist", "build", ".next", "__pycache__", "coverage", "target")
 
@@ -240,13 +296,68 @@ def run_command_family(ctx: Ctx, family, keys: tuple[str, ...], severity: str) -
     return _result(family, findings, commands, ", ".join(f"stack.test_commands.{key}" for key in keys))
 
 
+def _is_test_path(path: Path, root: Path) -> bool:
+    """Whether a path is test or example material rather than production source.
+
+    Compared against the path *relative to the root*, not `path.parts`. `ctx.files`
+    holds absolute paths, so matching components of the absolute path meant a
+    checkout at `C:\\dev\\tests\\myrepo` skipped the entire secrets scan, and any
+    file literally named `test` was skipped wherever it lived.
+    """
+    relative = relpath(path, root)
+    parts = relative.lower().split("/")
+    if set(parts[:-1]) & _SECRET_SKIP_PARTS:
+        return True
+    return bool(_TEST_FILENAME.search(path.name))
+
+
+def _shannon(text: str) -> float:
+    """Bits of entropy per character. English is low, a generated key is not."""
+    if not text:
+        return 0.0
+    counts = Counter(text)
+    length = len(text)
+    return -sum((n / length) * math.log2(n / length) for n in counts.values())
+
+
+def _quoted_values(line: str) -> list[str]:
+    return [match.group(1) or match.group(2) or "" for match in _QUOTED.finditer(line)]
+
+
+def _looks_like_a_real_credential(line: str) -> bool:
+    """Whether a `generic-assignment` match is plausibly a live credential.
+
+    Only consulted for that one rule. The eight shape-specific patterns - `AKIA`,
+    `sk_live_`, `xox[abprs]-` and the rest - are precise enough that second-guessing
+    them would only weaken them, so they are never routed through here.
+    """
+    values = [value for value in _quoted_values(line) if len(value) >= 12]
+    if not values:
+        return True
+    for value in values:
+        if _OBVIOUS_DUMMY.search(value):
+            continue
+        # A dotted or slashed identifier is a resource name, not a value. This is the
+        # `SECRET = "poolslip-report-link-secret"` case: a Secret Manager resource
+        # name passed to `gcloud --secret=`, matching a whole repo of sibling names.
+        if _shannon(value) < 3.5 and _BASE64ISH.match(value) is None:
+            continue
+        # Words separated by hyphens with no digits is how humans name things.
+        if _shannon(value) < 3.5 and value.count("-") >= 2 and not any(c.isdigit() for c in value):
+            continue
+        if _shannon(value) < 3.0:
+            continue
+        return True
+    return False
+
+
 def run_secrets(ctx: Ctx, family) -> FamilyResult:
     findings: list[Finding] = []
+    ceiling = getattr(family, "max_severity", "critical")
     for path in ctx.files:
-        if set(part.lower() for part in path.parts) & _SECRET_SKIP_PARTS:
-            continue
         if path.suffix.lower() not in _SOURCE_SUFFIXES and path.name not in {".env", ".envrc"}:
             continue
+        in_test = _is_test_path(path, ctx.root)
         try:
             lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
         except OSError:
@@ -255,12 +366,21 @@ def run_secrets(ctx: Ctx, family) -> FamilyResult:
             for rule, pattern, label in _SECRET_PATTERNS:
                 if not pattern.search(line):
                     continue
+                if rule == "generic-assignment" and not _looks_like_a_real_credential(line):
+                    break
+                # Kept rather than dropped, at a severity that says so. Test material
+                # is not where production credentials live, and a scanner that
+                # reports six wrong criticals consumes the attention the seventh -
+                # the real one - needs. Dropping it silently would trade one blind
+                # spot for another.
+                severity = "suggestion" if in_test else ceiling
+                where = " (test or example material)" if in_test else ""
                 findings.append(
                     Finding(
                         family=family.id,
                         rule=f"secret/{rule}",
-                        severity="critical",
-                        title=f"Possible {label} in {relpath(path, ctx.root)}",
+                        severity=severity,
+                        title=f"Possible {label} in {relpath(path, ctx.root)}{where}",
                         detail="The matched value is deliberately not reproduced here.",
                         evidence=[Evidence(relpath(path, ctx.root), number, f"<{label} redacted>")],
                         route=_route(family),

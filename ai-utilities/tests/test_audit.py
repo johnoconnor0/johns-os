@@ -969,6 +969,103 @@ class CapturedOutputTests(unittest.TestCase):
         self.assertEqual(unresolved, set())
 
 
+class SecretsTests(unittest.TestCase):
+    """WEB-401: every finding in the secrets family was a false positive.
+
+    Six of the run's seven criticals, all test-file literals, five of which said in
+    the value itself that they were not real. A scanner with a 100% false-positive
+    rate on a repository is worse than no scanner, because it consumes the attention
+    a real finding needs - and the seventh finding on that run was real.
+    """
+
+    # Exactly the six from the issue, at their real paths.
+    FALSE_POSITIVES = (
+        ("api/src/api.leads.test.ts", "      secret: 'not-a-real-token',"),
+        ("api/src/api.leads.test.ts", "      secret: 'SUPER-SECRET-TOKEN',"),
+        ("api/src/api.report.test.ts", "  const s = 'a-test-signing-secret-that-is-long-enough';"),
+        ("api/src/api.test.ts", "  const SECRET = 'test-secret-not-a-real-key';"),
+        ("api/src/report/sending-identity.test.ts", "      secret: 'not-a-real-value',"),
+        ("e2e/E2-report-reaches-recipient.py", 'SECRET = "poolslip-report-link-secret"'),
+    )
+
+    def _scan(self, files: dict[str, str], root_name: str = "repo") -> list:
+        family = next(f for f in families.REGISTRY if f.id == "secrets")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / root_name
+            paths = []
+            for relative, content in files.items():
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content + "\n", encoding="utf-8")
+                paths.append(target)
+            ctx = families.Ctx(root=root, stack={}, plan={"parsed_by": None}, files=paths)
+            return checks.run_secrets(ctx, family).findings
+
+    def test_none_of_the_six_is_reported_as_critical(self) -> None:
+        for relative, line in self.FALSE_POSITIVES:
+            with self.subTest(line=line.strip()):
+                found = self._scan({relative: line})
+                self.assertNotIn(
+                    "critical",
+                    [item.severity for item in found],
+                    f"{line.strip()} must not be a critical finding",
+                )
+
+    def test_a_real_credential_in_production_source_still_fires(self) -> None:
+        # The point of down-weighting rather than deleting the check.
+        found = self._scan({"src/deploy.ts": "const key = 'AKIAIOSFODNN7EXAMPLE';"})
+        self.assertEqual([item.severity for item in found], ["critical"])
+
+    def test_a_high_entropy_assignment_in_production_source_still_fires(self) -> None:
+        found = self._scan({"src/config.ts": "const apiKey = 'xJ8kQ2mZ9pL4vR7tY1wS6nD3cF5gH0bA';"})
+        self.assertEqual([item.severity for item in found], ["critical"])
+
+    def test_a_real_credential_in_a_test_file_is_kept_but_down_weighted(self) -> None:
+        # Not dropped: a live key committed to a test file is still committed.
+        found = self._scan({"src/api.test.ts": "const key = 'AKIAIOSFODNN7EXAMPLE';"})
+        self.assertEqual([item.severity for item in found], ["suggestion"])
+        self.assertIn("test or example material", found[0].title)
+
+    def test_a_test_filename_outside_a_test_directory_is_recognised(self) -> None:
+        # `api.leads.test.ts` sits in `api/src/`, so the old component-only filter
+        # never saw it. Four of the six got through exactly here.
+        found = self._scan({"api/src/api.leads.test.ts": "const key = 'AKIAIOSFODNN7EXAMPLE';"})
+        self.assertEqual([item.severity for item in found], ["suggestion"])
+
+    def test_a_checkout_under_a_path_named_tests_is_still_scanned(self) -> None:
+        # `ctx.files` holds absolute paths, so matching components of the absolute
+        # path meant a repo at `C:\dev\tests\myrepo` skipped the whole scan.
+        found = self._scan({"src/deploy.ts": "const key = 'AKIAIOSFODNN7EXAMPLE';"}, root_name="tests")
+        self.assertEqual([item.severity for item in found], ["critical"])
+
+    def test_a_secret_manager_resource_name_is_not_a_value(self) -> None:
+        # F007, the interesting one: a resource name passed to `gcloud --secret=` to
+        # fetch the real value at runtime, matching a whole repo of sibling names.
+        found = self._scan({"scripts/deploy.py": 'SECRET = "poolslip-report-link-secret"'})
+        self.assertEqual(found, [])
+
+    def test_a_tracked_env_file_is_still_a_finding(self) -> None:
+        found = self._scan({".env": "TOKEN=whatever"})
+        self.assertIn("secret/tracked-env", [item.rule for item in found])
+
+    def test_the_rule_names_did_not_change(self) -> None:
+        # `identity` hashes `rule`, so renaming one re-keys every filed tracker issue
+        # and duplicates it on the next run.
+        self.assertEqual(
+            [rule for rule, _pattern, _label in audit_common.SECRET_PATTERNS],
+            [
+                "aws-access-key",
+                "private-key",
+                "stripe-secret",
+                "slack-token",
+                "github-token",
+                "anthropic-key",
+                "openai-key",
+                "generic-assignment",
+            ],
+        )
+
+
 class PackageManagerTests(unittest.TestCase):
     def test_the_detected_manager_is_the_one_the_commands_use(self) -> None:
         # The manager was resolved and then discarded, so every JS repo got
