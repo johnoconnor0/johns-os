@@ -24,7 +24,16 @@ import json
 import sys
 from pathlib import Path
 
-from audit_common import audit_dir, now_iso, relpath, repo_root, run_id, write_json, write_text
+from audit_common import (
+    audit_dir,
+    now_iso,
+    relpath,
+    repo_root,
+    resolve_lifecycle_file,
+    run_id,
+    write_json,
+    write_text,
+)
 from checks import (
     collect_files,
     run_command_family,
@@ -66,18 +75,28 @@ def _reference_findings(ctx: Ctx, family) -> tuple[FamilyResult, set[str]]:
     """
     from checks import _run
 
-    candidates = [
-        Path(__file__).resolve().parents[2] / "engineering-lifecycle" / "scripts" / "reference-check.py",
-        ctx.root / "engineering-lifecycle" / "scripts" / "reference-check.py",
-    ]
-    script = next((path for path in candidates if path.is_file()), None)
+    script, tried = resolve_lifecycle_file("scripts", "reference-check.py")
+    if script is None:
+        # The audited repository is checked last and separately: it is not part of the
+        # install ladder, and it is a repo nobody here controls.
+        in_repo = ctx.root / "engineering-lifecycle" / "scripts" / "reference-check.py"
+        if in_repo.is_file():
+            script = in_repo
+        else:
+            tried = [*tried, in_repo]
     if script is None:
         return (
             FamilyResult(
                 id=family.id,
                 title=family.title,
                 outcome="not-checked",
-                reason="the reference checker ships with engineering-lifecycle, which is not installed alongside this plugin",
+                # Says what it looked for rather than asserting an installation fact
+                # it never checked. The previous wording claimed the plugin was not
+                # installed, on machines where it was.
+                reason=(
+                    "could not locate the reference checker, which ships with "
+                    "engineering-lifecycle. Tried: " + "; ".join(f"`{path}`" for path in tried)
+                ),
             ),
             set(),
         )

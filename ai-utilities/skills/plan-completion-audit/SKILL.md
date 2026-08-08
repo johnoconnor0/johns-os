@@ -116,11 +116,17 @@ The rendered report is a fold over what ran. There is no template to fill in.
 ### 5. File the findings, if a tracker is configured
 
 ```bash
-python "${CLAUDE_PLUGIN_ROOT}/../engineering-lifecycle/bin/eng-life" tracker plan
+python "${CLAUDE_PLUGIN_ROOT}/scripts/eng-life.py" tracker plan
 ```
 
+That shim resolves `engineering-lifecycle` wherever it is installed. The path this
+step used to name, `${CLAUDE_PLUGIN_ROOT}/../engineering-lifecycle/bin/eng-life`,
+only exists in a source checkout - installed plugins live in separate versioned
+cache directories, so it resolved to a path inside `ai-utilities`.
+
 When no tracker is configured this reports `configured: false` and the audit is
-complete without it. Findings carry a stable `identity` that excludes the line
+complete without it. Exit 3 means `engineering-lifecycle` itself could not be found,
+and the message names the paths tried; the two are different outcomes. Findings carry a stable `identity` that excludes the line
 number, so re-running the audit after unrelated edits matches existing issues
 instead of creating duplicates.
 

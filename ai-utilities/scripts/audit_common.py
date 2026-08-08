@@ -235,6 +235,54 @@ def plugin_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _version_key(name: str) -> tuple[int, ...]:
+    """`0.10.4` sorts above `0.9.0`, which string ordering gets backwards."""
+    parts: list[int] = []
+    for chunk in name.split("."):
+        digits = "".join(char for char in chunk if char.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts)
+
+
+def lifecycle_candidates(*relative: str) -> list[Path]:
+    """Where a file inside engineering-lifecycle could be, best first.
+
+    Two layouts, and only the first one ever worked. In this repository the two
+    plugins are siblings, so `<plugin>/../engineering-lifecycle/...` resolves. Once
+    installed they are not: a plugin runs from
+    `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`, so the sibling probe
+    resolved to `cache/<marketplace>/ai-utilities/engineering-lifecycle/...` - inside
+    ai-utilities itself, and missing the version segment as well.
+
+    That is why `docs-references` reported "engineering-lifecycle is not installed
+    alongside this plugin" on a machine with ten versions of it installed, and why
+    the `imported` rung of the stack ladder could never fire off a real install.
+    """
+    here = plugin_root()
+    found: list[Path] = [here.parent.joinpath("engineering-lifecycle", *relative)]
+    # The installed layout, newest version first.
+    marketplace = here.parent.parent / "engineering-lifecycle"
+    if marketplace.is_dir():
+        versions = sorted(
+            (child for child in marketplace.iterdir() if child.is_dir()),
+            key=lambda child: _version_key(child.name),
+            reverse=True,
+        )
+        found.extend(version.joinpath(*relative) for version in versions)
+    return found
+
+
+def resolve_lifecycle_file(*relative: str) -> tuple[Path | None, list[Path]]:
+    """The first candidate that exists, and every path tried.
+
+    The paths are returned so a failure can say what it looked for. Asserting that a
+    plugin is not installed, when all that happened is one lookup missing, is a claim
+    the tool never checked.
+    """
+    tried = lifecycle_candidates(*relative)
+    return next((path for path in tried if path.exists()), None), tried
+
+
 def read_json(path: Path, default: Any = None) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))

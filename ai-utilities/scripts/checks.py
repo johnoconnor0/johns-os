@@ -485,12 +485,16 @@ def run_dead_code(ctx: Ctx, family) -> FamilyResult:
     import graph per language, and the shell version's `grep -rl "$BASENAME"` stood
     in for one badly enough to false-positive on any common filename.
     """
+    # `_dead_code_language` now gates on the same condition, so reaching this means
+    # the registry and the runner disagree. Kept as a backstop, and deliberately
+    # `errored` rather than `not-checked`: a mismatch between a family's own two
+    # predicates is a bug in this file, not a fact about the repository.
     if not ctx.has("backend", "Python"):
         return FamilyResult(
             id=family.id,
             title=family.title,
-            outcome="not-checked",
-            reason="only the Python arm of this family is implemented",
+            outcome="errored",
+            reason="reached the Python dead-code runner with no Python detected; the family gate and its runner disagree",
         )
     modules = {path.stem: path for path in ctx.files if path.suffix == ".py" and path.stem != "__init__"}
     referenced: set[str] = set()

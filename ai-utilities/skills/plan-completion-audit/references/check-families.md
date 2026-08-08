@@ -57,7 +57,7 @@ decides either one, so the distinction cannot be quietly collapsed inside a chec
 | `secrets` | Always | critical |
 | `dependency-audit` | A package manager was detected, and its auditor is on PATH | critical |
 | `repo-hygiene` | It is a git repository | warning |
-| `dead-code` | A Node or Python tree was detected | suggestion |
+| `dead-code` | Python sources were detected | suggestion |
 | `data-layer` | A database or migration sources were detected | critical |
 | `interface-alignment` | Both a frontend and a backend or database were detected | warning |
 | `docs-references` | Markdown is present | warning |
@@ -81,6 +81,15 @@ other:
 
 The answer records which rung produced it, so a wrong guess is visible in the report
 rather than silently deciding which half of the audit ran.
+
+Rungs 2 and 3, and the `docs-references` reference checker, look for
+`engineering-lifecycle` in two places: as a sibling directory, which is how this
+repository's own checkout is laid out, and under
+`~/.claude/plugins/cache/<marketplace>/engineering-lifecycle/<version>/`, which is
+how a real install is laid out. Only the first used to be tried, so on an installed
+plugin the lookup resolved *inside* `ai-utilities` and skipped the version segment.
+When neither resolves, the report names the paths it tried rather than asserting the
+other plugin is not installed - which it cannot know.
 
 ## Adding a family
 

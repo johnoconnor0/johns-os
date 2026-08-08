@@ -969,6 +969,129 @@ class CapturedOutputTests(unittest.TestCase):
         self.assertEqual(unresolved, set())
 
 
+class LifecycleResolutionTests(unittest.TestCase):
+    """WEB-404: `docs-references` skipped itself on a claim that was not true.
+
+    It reported "engineering-lifecycle is not installed alongside this plugin" on a
+    machine with ten versions of it installed. The probe used
+    `<plugin>/../engineering-lifecycle/...`, which resolves only in this repository's
+    own checkout. Installed, a plugin runs from
+    `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`, so `..` pointed
+    inside ai-utilities and skipped the version segment entirely.
+    """
+
+    def _fake_install(self, tmp: str, versions: tuple[str, ...]) -> Path:
+        cache = Path(tmp) / "cache" / "johns-os"
+        (cache / "ai-utilities" / "0.2.1" / "scripts").mkdir(parents=True)
+        for version in versions:
+            target = cache / "engineering-lifecycle" / version / "scripts"
+            target.mkdir(parents=True)
+            (target / "reference-check.py").write_text("", encoding="utf-8")
+        return cache
+
+    def test_the_source_checkout_layout_still_resolves(self) -> None:
+        found, _tried = audit_common.resolve_lifecycle_file("scripts", "reference-check.py")
+        self.assertIsNotNone(found, "this repository has engineering-lifecycle as a sibling")
+        self.assertTrue(found.is_file())
+
+    def test_the_installed_layout_resolves_and_prefers_the_newest_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = self._fake_install(tmp, ("0.4.0", "0.9.0", "0.10.0", "0.10.4"))
+            with mock.patch.object(audit_common, "plugin_root", return_value=cache / "ai-utilities" / "0.2.1"):
+                found, tried = audit_common.resolve_lifecycle_file("scripts", "reference-check.py")
+        self.assertIsNotNone(found)
+        # `0.10.4` beats `0.9.0`, which string ordering gets backwards.
+        self.assertEqual(found.parent.parent.name, "0.10.4")
+        # The first path tried is the one that used to be the only path tried.
+        self.assertIn("ai-utilities", str(tried[0]))
+
+    def test_versions_sort_numerically_not_lexically(self) -> None:
+        self.assertGreater(audit_common._version_key("0.10.4"), audit_common._version_key("0.9.0"))
+        self.assertGreater(audit_common._version_key("1.0.0"), audit_common._version_key("0.99.99"))
+
+    def test_a_genuine_absence_names_the_paths_tried(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "cache" / "johns-os" / "ai-utilities" / "0.2.1"
+            root.mkdir(parents=True)
+            with mock.patch.object(audit_common, "plugin_root", return_value=root):
+                found, tried = audit_common.resolve_lifecycle_file("scripts", "reference-check.py")
+        self.assertIsNone(found)
+        self.assertTrue(tried, "a failure must be able to say what it looked for")
+
+    def test_the_docs_family_reason_does_not_assert_an_installation_fact(self) -> None:
+        family = next(f for f in families.REGISTRY if f.id == "docs-references")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = families.Ctx(root=root, stack={}, plan={"parsed_by": None}, files=[])
+            with mock.patch.object(run_audit, "resolve_lifecycle_file", return_value=(None, [Path("a"), Path("b")])):
+                result, _unresolved = run_audit._reference_findings(ctx, family)
+        self.assertEqual(result.outcome, "not-checked")
+        self.assertIn("could not locate", result.reason)
+        self.assertIn("Tried:", result.reason)
+        self.assertNotIn("is not installed", result.reason)
+
+    def test_the_stack_ladder_uses_the_same_resolution(self) -> None:
+        # The `imported` rung had the identical defect, so it could never fire off a
+        # real install either.
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "cache" / "johns-os"
+            (cache / "ai-utilities" / "0.2.1" / "scripts").mkdir(parents=True)
+            planted = cache / "engineering-lifecycle" / "0.10.4" / "scripts"
+            planted.mkdir(parents=True)
+            (planted / "stack_detection.py").write_text("", encoding="utf-8")
+            (planted / "eng_common.py").write_text("", encoding="utf-8")
+            with mock.patch.object(audit_common, "plugin_root", return_value=cache / "ai-utilities" / "0.2.1"):
+                self.assertEqual(stack_probe._sibling_detector(Path(".")), planted)
+
+    def test_the_audited_repository_is_still_never_a_detector_source(self) -> None:
+        # The security property from WEB-382 must survive this change: install
+        # locations only, never a directory inside the repo under audit.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            planted = root / "engineering-lifecycle" / "scripts"
+            planted.mkdir(parents=True)
+            (planted / "stack_detection.py").write_text("raise SystemExit('never')\n", encoding="utf-8")
+            (planted / "eng_common.py").write_text("", encoding="utf-8")
+            self.assertNotEqual(stack_probe._sibling_detector(root), planted)
+
+
+class DeadCodeGatingTests(unittest.TestCase):
+    """WEB-404, second half: the family was filed under the wrong outcome.
+
+    `applies_when` admitted any Node tree, the runner implemented only Python, so a
+    TypeScript repository passed the relevance gate and got `not-checked` - "applies
+    here but could not run" - when the truth was `not-applicable`. The registry keeps
+    two predicates so exactly that distinction cannot collapse.
+    """
+
+    def _ctx(self, **stack) -> families.Ctx:
+        base = {"frameworks": [], "backend": [], "database": [], "testing": [], "test_commands": {}}
+        return families.Ctx(root=Path("."), stack={**base, **stack}, plan={"parsed_by": None}, files=[])
+
+    def test_a_typescript_repo_is_not_applicable_rather_than_not_checked(self) -> None:
+        family = families.BY_ID["dead-code"]
+        relevant, why = family.applies_when(self._ctx(frameworks=["Astro", "React"]))
+        self.assertFalse(relevant)
+        self.assertIn("only implemented for Python", why)
+
+    def test_a_python_repo_still_applies(self) -> None:
+        family = families.BY_ID["dead-code"]
+        relevant, why = family.applies_when(self._ctx(backend=["Python"]))
+        self.assertTrue(relevant)
+        self.assertIn("Python", why)
+
+    def test_the_gate_and_the_runner_agree(self) -> None:
+        # The invariant the bug violated. If these two ever disagree again, the runner
+        # now reports `errored` - a bug in the registry, not a fact about the repo.
+        family = families.BY_ID["dead-code"]
+        for stack in ({"frameworks": ["React"]}, {"backend": ["Python"]}, {"backend": ["Go"]}, {}):
+            with self.subTest(stack=stack):
+                ctx = self._ctx(**stack)
+                relevant, _why = family.applies_when(ctx)
+                if relevant:
+                    self.assertNotEqual(checks.run_dead_code(ctx, family).outcome, "errored")
+
+
 class SecretsTests(unittest.TestCase):
     """WEB-401: every finding in the secrets family was a false positive.
 

@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from audit_common import plugin_root, read_json
+from audit_common import lifecycle_candidates, read_json
 
 STACK_JSON = Path(".project") / ".engineering" / "context" / "stack.json"
 
@@ -98,10 +98,16 @@ def _sibling_detector(root: Path) -> Path | None:
 
     `root` is unused now. The parameter stays because `resolve_stack` dispatches
     every rung with the same signature.
+
+    The lookup goes through `lifecycle_candidates` because the bare sibling path it
+    used before only resolves in this repository's own checkout - off a real install
+    it pointed inside ai-utilities and skipped the version directory, so this rung
+    could never fire. Note that the candidates are install locations only; the
+    audited repository is deliberately not among them.
     """
-    directory = plugin_root().parent / "engineering-lifecycle" / "scripts"
-    if (directory / "stack_detection.py").is_file() and (directory / "eng_common.py").is_file():
-        return directory
+    for directory in lifecycle_candidates("scripts"):
+        if (directory / "stack_detection.py").is_file() and (directory / "eng_common.py").is_file():
+            return directory
     return None
 
 
