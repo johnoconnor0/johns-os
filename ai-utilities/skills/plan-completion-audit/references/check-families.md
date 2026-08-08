@@ -57,7 +57,7 @@ decides either one, so the distinction cannot be quietly collapsed inside a chec
 | `secrets` | Always | critical |
 | `dependency-audit` | A package manager was detected, and its auditor is on PATH | critical |
 | `repo-hygiene` | It is a git repository | warning |
-| `dead-code` | A Node or Python tree was detected | suggestion |
+| `dead-code` | Python sources were detected | suggestion |
 | `data-layer` | A database or migration sources were detected | critical |
 | `interface-alignment` | Both a frontend and a backend or database were detected | warning |
 | `docs-references` | Markdown is present | warning |
@@ -67,6 +67,28 @@ Three of these are **model-driven**: `plan-inventory`, `data-layer` and
 `interface-alignment` need judgement the script cannot supply, so it reports them
 `not-checked` with that as the reason and the skill fills them in. Being listed
 explicitly is what stops them looking like a silent pass.
+
+## The command trust gate
+
+`static-analysis`, `tests` and `build` do not run a command just because the stack
+declares one. Where the command *came from* decides:
+
+| Provenance | Trusted | Why |
+| --- | --- | --- |
+| Derived here from file presence (`imported`, `vendored`) | yes | This tool chose the string |
+| Read from the audited repo's `stack.json` (`workspace`) | no | That repository chose the string |
+
+The second case reports `not-checked`, quotes the exact strings it refused, and names
+`--allow-untrusted-commands`. This plugin is designed to be pointed at repositories
+nobody here controls, and a JSON file that looks inert should not get to name an
+executable and its arguments. `command_argv` additionally refuses anything needing a
+shell, so pipes, redirection and `&&` are never interpreted.
+
+The cost is real and worth stating: **the default run produces no test, lint or build
+evidence at all**, and a completion audit that ran no tests cannot say whether the
+work functions. The report says so in one sentence near the top rather than leaving a
+reader to infer it from three `not-checked` rows. Read the quoted commands, then
+decide about the flag before the run.
 
 ## Where the stack comes from
 
@@ -81,6 +103,15 @@ other:
 
 The answer records which rung produced it, so a wrong guess is visible in the report
 rather than silently deciding which half of the audit ran.
+
+Rungs 2 and 3, and the `docs-references` reference checker, look for
+`engineering-lifecycle` in two places: as a sibling directory, which is how this
+repository's own checkout is laid out, and under
+`~/.claude/plugins/cache/<marketplace>/engineering-lifecycle/<version>/`, which is
+how a real install is laid out. Only the first used to be tried, so on an installed
+plugin the lookup resolved *inside* `ai-utilities` and skipped the version segment.
+When neither resolves, the report names the paths it tried rather than asserting the
+other plugin is not installed - which it cannot know.
 
 ## Adding a family
 

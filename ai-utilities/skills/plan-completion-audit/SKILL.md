@@ -60,6 +60,31 @@ records an explicit outcome plus a reason for every family in the registry.
 audit with no inventory is a code review wearing a verdict, which is worse than no
 audit. Do not proceed on a discovered README.
 
+#### Decide about `--allow-untrusted-commands` before you run, not after
+
+When the audited repository declares its own commands in
+`.project/.engineering/context/stack.json`, `static-analysis`, `tests` and `build`
+report `not-checked` and name the strings they refused to run. That refusal is
+deliberate: executing command strings a repository hands you is how an audit becomes
+an attack, and a JSON file that looks inert gets to name the executable and its
+arguments.
+
+The consequence is that the default run produces **no test, lint or build evidence**,
+and a completion audit with no test evidence cannot say whether any of it works. The
+flag only appeared in the output, after the run, so the choice was discovered rather
+than made:
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/scripts/run-audit.py" --root . --plan <path> --allow-untrusted-commands
+```
+
+Read the commands first — they are quoted verbatim in each family's `reason` — and
+pass the flag only on a repository whose `stack.json` you are willing to execute.
+Commands the probe *derived* from file presence are trusted without it, so this
+matters only when `stack.detector` is `workspace`. The report states plainly at the
+top when it contains no test evidence; do not present such a run as a verdict on
+whether the work functions.
+
 ### 2. Read `findings.json`
 
 Everything below works from that file. Note in particular:
@@ -67,6 +92,10 @@ Everything below works from that file. Note in particular:
 - `plan_items[]` - the inventory, each with `status` and `mentions`.
 - `families[]` - every registered family with `outcome` and `reason`.
 - `findings[]` - what the mechanical checks found, with `identity` and `route`.
+- `plan.coverage` - how much of the plan the extractor accounted for.
+  `confident: false` means sections stating work produced no items, they are named in
+  `unparsed_sections`, and no completion percentage will be reported. Check whether
+  the plan is written in a form no extractor read before trusting the inventory.
 - `stack.detector` - which rung answered. If it is `vendored`, the detection is a
   fallback and worth a sanity check before trusting the gating.
 
@@ -96,16 +125,28 @@ SQLite the database is a file.
 **`interface-alignment`** - only when both sides were detected. Every call the
 frontend makes must name something the backend actually exposes, and vice versa.
 
+Also assess what the mechanical checks raised. A finding you have examined and judged
+needs no action gets a `status` and a `status_reason` in `findings[]`:
+
+| `status` | Means |
+| --- | --- |
+| `open` | Real, outstanding. The default |
+| `false-positive` | The check matched something that is not the thing it detects |
+| `accepted-risk` | Real, and a deliberate decision not to act |
+| `fixed` | Already addressed since the scan ran |
+
+Anything other than `open` **must** carry a `status_reason`; validation rejects it
+otherwise, for the same reason a `not-applicable` family must say why. Dismissed
+findings leave the severity counts and the prioritised actions and appear in their own
+section with the reason, so the work of checking them is visible instead of lost.
+
 ### 4. Record what you assessed
 
-Write your statuses back so the report reflects them:
+Edit `findings.json` in place, then re-render. Two commands, in this order:
 
-```bash
-python "${CLAUDE_PLUGIN_ROOT}/scripts/run-audit.py" --root . --plan <path> --stamp <same-stamp>
-```
-
-Then update `plan_items[].status`, set the `plan-inventory` family outcome, and
-re-render:
+1. Write your conclusions into the file: `plan_items[].status` and `.reason`, the
+   `plan-inventory` family `outcome`, and `findings[].status` / `.status_reason`.
+2. Re-render:
 
 ```bash
 python "${CLAUDE_PLUGIN_ROOT}/scripts/render_report.py" <dir>/findings.json --out <dir>/report.md
@@ -113,14 +154,41 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/render_report.py" <dir>/findings.json --ou
 
 The rendered report is a fold over what ran. There is no template to fill in.
 
+**Do not re-run `run-audit.py` to save your assessment.** It regenerates
+`findings.json` from scratch and the write truncates, so a re-run after editing
+destroys exactly the work you meant to keep. This step used to say to re-run with
+`--stamp` and *then* hand-edit; that ordering only ever worked one way round and
+nothing enforced it.
+
+`--stamp` overrides the run id so a second run reuses one output directory instead of
+creating a sibling. It is for tests and for resuming a run that was interrupted before
+any assessment existed - its own `--help` says "For tests." It is not part of this
+step.
+
+To check a hand-edited file against the vocabularies without rendering:
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/scripts/render_report.py" <dir>/findings.json --check
+```
+
+It exits non-zero and names each problem. A normal render also validates: it still
+writes the report, but exits non-zero and the report says at the top that the document
+did not validate.
+
 ### 5. File the findings, if a tracker is configured
 
 ```bash
-python "${CLAUDE_PLUGIN_ROOT}/../engineering-lifecycle/bin/eng-life" tracker plan
+python "${CLAUDE_PLUGIN_ROOT}/scripts/eng-life.py" tracker plan
 ```
 
+That shim resolves `engineering-lifecycle` wherever it is installed. The path this
+step used to name, `${CLAUDE_PLUGIN_ROOT}/../engineering-lifecycle/bin/eng-life`,
+only exists in a source checkout - installed plugins live in separate versioned
+cache directories, so it resolved to a path inside `ai-utilities`.
+
 When no tracker is configured this reports `configured: false` and the audit is
-complete without it. Findings carry a stable `identity` that excludes the line
+complete without it. Exit 3 means `engineering-lifecycle` itself could not be found,
+and the message names the paths tried; the two are different outcomes. Findings carry a stable `identity` that excludes the line
 number, so re-running the audit after unrelated edits matches existing issues
 instead of creating duplicates.
 
@@ -143,7 +211,12 @@ instead of creating duplicates.
 - **Do not mark a family passed that did not run.** The five outcomes exist so that
   never has to happen; `findings.py` rejects a document that tries.
 - **Do not invent a plan inventory.** If no plan parsed, stop and ask.
-- **Do not report a completion percentage you did not establish.**
+- **Do not report a completion percentage you did not establish.** Nor one over an
+  inventory the extractor did not fully account for - check `plan.coverage.confident`.
+- **Do not dismiss a finding without a `status_reason`.** Validation rejects it, for
+  the same reason a `not-applicable` family must say why.
+- **Do not re-run `run-audit.py` after recording an assessment.** The write truncates,
+  so it destroys the assessment.
 - Absence of code for a planned feature is a finding, not a pass.
 
 ## Reference

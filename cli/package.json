@@ -1,6 +1,6 @@
 {
   "name": "johns-os",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Install and manage the johns-os Claude Code plugin marketplace: engineering-lifecycle, business-development, ai-utilities.",
   "bin": {
     "johns-os": "index.js"
