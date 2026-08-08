@@ -23,7 +23,14 @@ from typing import Any
 
 from audit_common import AUDIT_DIR, read_json, relpath, repo_root
 
-SEVERITIES = ("critical", "warning", "suggestion")
+# Imported, not redeclared. Both of these were copies: `SEVERITIES` existed here and
+# in `render_report` as well as in `findings`, and the schema string below was
+# written out as a literal. Three copies of a vocabulary drift silently, and the
+# schema literal is worse than that - bumping `findings.SCHEMA` would leave this
+# converter stamping documents with the old version, and `validate_document` compares
+# schema by exact equality, so every converted report would fail validation for a
+# reason none of them names.
+from findings import SCHEMA, SEVERITIES
 
 # `path/to/file.ext:42`, or without the line.
 _LOCATION = re.compile(r"`([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)(?::(\d+))?`")
@@ -112,7 +119,7 @@ def from_markdown(path: Path) -> dict[str, Any]:
             }
         )
     return {
-        "schema": "plan-completion-audit/findings@1",
+        "schema": SCHEMA,
         "source": "markdown-fallback",
         "source_path": path.as_posix(),
         "run_id": path.stem,

@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import re
 import sys
 import tempfile
 import unittest
@@ -425,6 +426,62 @@ class FindingsTests(unittest.TestCase):
         self.assertEqual(document["totals"]["critical"], 1)
         self.assertEqual(document["totals"]["findings_open"], 1)
         self.assertEqual(document["totals"]["findings_dismissed"], 2)
+
+
+class SingleSourceOfTruthTests(unittest.TestCase):
+    """One declaration per vocabulary, enforced rather than agreed.
+
+    `SEVERITIES` was written out three times - `findings`, `resolver`, and
+    `render_report` under a second name - and the schema string a fourth time as a
+    literal in `resolver`'s markdown converter. None of it was wrong on the day it
+    was written, which is the point: a copy is a defect that has not happened yet.
+
+    The schema copy was the dangerous one. `validate_document` compares schema by
+    exact equality, so bumping `findings.SCHEMA` would have left the converter
+    stamping every legacy report with the old version and failing validation for a
+    reason none of them names.
+    """
+
+    LITERAL = re.compile(r"""^\s*_?[A-Z][A-Z_]*\s*=\s*\(\s*["']critical["']""", re.M)
+
+    def _scripts(self):
+        return sorted(SCRIPTS.glob("*.py"))
+
+    def test_the_severity_vocabulary_is_declared_once(self) -> None:
+        declared = [path.name for path in self._scripts() if self.LITERAL.search(path.read_text(encoding="utf-8"))]
+        self.assertEqual(declared, ["findings.py"], "SEVERITIES must be declared only in findings.py")
+
+    def test_the_scan_can_actually_see_a_second_declaration(self) -> None:
+        # The control. A regex that matches nothing passes vacuously.
+        self.assertTrue(self.LITERAL.search('SEVERITIES = ("critical", "warning")\n'))
+        self.assertTrue(self.LITERAL.search('_SEVERITY_ORDER = ("critical", "warning")\n'))
+
+    def test_the_schema_string_is_never_written_out_as_a_literal(self) -> None:
+        offenders = [
+            f"{path.name}:{text[: match.start()].count(chr(10)) + 1}"
+            for path in self._scripts()
+            if path.name != "findings.py"
+            for text in [path.read_text(encoding="utf-8")]
+            for match in re.finditer(re.escape(findings_mod.SCHEMA), text)
+        ]
+        self.assertEqual(offenders, [], "import findings.SCHEMA instead of repeating it")
+
+    def test_every_consumer_agrees_with_findings(self) -> None:
+        self.assertIs(resolver.SEVERITIES, findings_mod.SEVERITIES)
+        self.assertIs(render_report.SEVERITIES, findings_mod.SEVERITIES)
+        self.assertIs(render_report.DISMISSED_STATUSES, findings_mod.DISMISSED_STATUSES)
+
+    def test_a_converted_markdown_report_carries_the_current_schema(self) -> None:
+        # The failure the literal would have caused, pinned end to end.
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "2026-01-01_000000.md"
+            report.write_text(
+                "# Audit\n\n| ID | Severity | Location | Finding |\n| --- | --- | --- | --- |\n"
+                "| F001 | critical | `src/a.py:1` | Something |\n",
+                encoding="utf-8",
+            )
+            document = resolver.load(report)
+        self.assertEqual(document["schema"], findings_mod.SCHEMA)
 
 
 class FamilyRegistryTests(unittest.TestCase):
