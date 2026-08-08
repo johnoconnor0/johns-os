@@ -31,6 +31,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from audit_common import DEFAULT_COMMAND_TIMEOUT
+
 # (relevant or runnable, reason)
 Verdict = tuple[bool, str]
 
@@ -46,6 +48,11 @@ class Ctx:
     # Explicit opt-in to running command strings the audited repository chose.
     # See `commands_are_repo_supplied`.
     allow_untrusted_commands: bool = False
+    # Seconds one check command may take. Carried on the context rather than left to
+    # each runner's default, because the right budget is a property of the repository
+    # being audited - a suite that takes eight minutes is not a hung command - and
+    # only the caller knows it.
+    timeout: int = DEFAULT_COMMAND_TIMEOUT
 
     @property
     def commands(self) -> dict[str, str]:

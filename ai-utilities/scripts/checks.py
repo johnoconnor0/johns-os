@@ -31,7 +31,16 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from audit_common import SECRET_PATTERNS, Captured, relpath, run_command, scan_files, scrub_secrets
+from audit_common import (
+    DEFAULT_COMMAND_TIMEOUT,
+    DEFAULT_LISTING_TIMEOUT,
+    SECRET_PATTERNS,
+    Captured,
+    relpath,
+    run_command,
+    scan_files,
+    scrub_secrets,
+)
 from families import Ctx
 from findings import Evidence, FamilyResult, Finding
 
@@ -150,7 +159,7 @@ _QUOTED = re.compile(r"\"([^\"\n]*)\"|'([^'\n]*)'")
 _BUILD_ARTIFACTS = ("dist", "build", ".next", "__pycache__", "coverage", "target")
 
 
-def _listing(command: str, root: Path, timeout: int = 60) -> Captured:
+def _listing(command: str, root: Path, timeout: int = DEFAULT_LISTING_TIMEOUT) -> Captured:
     """Full stdout of a listing command, undecided about what its failure means.
 
     Deliberately not `_run`: that truncates output to the last 8000 characters,
@@ -165,7 +174,7 @@ def _listing(command: str, root: Path, timeout: int = 60) -> Captured:
     return run_command(command, root, timeout=timeout)
 
 
-def _lines(command: str, root: Path, timeout: int = 60) -> list[str]:
+def _lines(command: str, root: Path, timeout: int = DEFAULT_LISTING_TIMEOUT) -> list[str]:
     """Lines of a listing command's stdout, empty when it did not succeed."""
     captured = _listing(command, root, timeout=timeout)
     if not captured.ok:
@@ -173,7 +182,7 @@ def _lines(command: str, root: Path, timeout: int = 60) -> list[str]:
     return [line for line in captured.stdout.splitlines() if line.strip()]
 
 
-def _run(command: str, root: Path, timeout: int = 300) -> dict:
+def _run(command: str, root: Path, timeout: int = DEFAULT_COMMAND_TIMEOUT) -> dict:
     """Run one check command as an argv list, never through a shell.
 
     `shell=True` here used to hand a string that can come from the audited
@@ -277,7 +286,7 @@ def run_command_family(ctx: Ctx, family, keys: tuple[str, ...], severity: str) -
         command = ctx.commands.get(key)
         if not command:
             continue
-        outcome = _run(command, ctx.root)
+        outcome = _run(command, ctx.root, timeout=ctx.timeout)
         commands.append({k: v for k, v in outcome.items() if k != "output"})
         if outcome.get("timed_out"):
             return FamilyResult(
@@ -454,7 +463,7 @@ def run_dependency_audit(ctx: Ctx, family) -> FamilyResult:
             outcome="not-checked",
             reason=f"no dependency auditor known for {manager!r}",
         )
-    outcome = _run(command, ctx.root)
+    outcome = _run(command, ctx.root, timeout=ctx.timeout)
     if outcome.get("timed_out") or outcome.get("captured") is False:
         return FamilyResult(
             id=family.id,

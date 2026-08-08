@@ -428,6 +428,63 @@ class FindingsTests(unittest.TestCase):
         self.assertEqual(document["totals"]["findings_dismissed"], 2)
 
 
+class CommandTimeoutTests(unittest.TestCase):
+    """The budget for a check command belongs to the repository, not to this script.
+
+    `_run` was fixed at 300 seconds with no way to say otherwise from the command
+    line, though `verify.py` had `--timeout` all along. A suite that takes eight
+    minutes is not a hung command, and on such a repository the `tests` family
+    reported `errored` on every run with nothing the operator could do about it.
+    """
+
+    def _ctx(self, timeout: int | None = None, **stack) -> families.Ctx:
+        base = {"detector": "vendored", "test_commands": {}, "package_manager": "npm"}
+        kwargs = {} if timeout is None else {"timeout": timeout}
+        return families.Ctx(root=Path("."), stack={**base, **stack}, plan={"parsed_by": None}, files=[], **kwargs)
+
+    def test_the_default_is_unchanged_when_the_flag_is_not_passed(self) -> None:
+        self.assertEqual(self._ctx().timeout, audit_common.DEFAULT_COMMAND_TIMEOUT)
+        self.assertEqual(audit_common.DEFAULT_COMMAND_TIMEOUT, 300)
+
+    def test_the_context_budget_reaches_the_subprocess(self) -> None:
+        # The plumbing is the whole feature, so it is asserted rather than assumed:
+        # a flag that is parsed and then dropped looks identical to one that works.
+        seen: list[int] = []
+
+        def spy(command, root, timeout=None):
+            seen.append(timeout)
+            return {"cmd": command, "exit": 0, "output": "ok"}
+
+        ctx = self._ctx(timeout=1800, test_commands={"unit": "python -c pass"})
+        with mock.patch.object(checks, "_run", side_effect=spy):
+            checks.run_command_family(ctx, families.BY_ID["tests"], ("unit",), "critical")
+            checks.run_dependency_audit(ctx, families.BY_ID["dependency-audit"])
+        self.assertEqual(seen, [1800, 1800])
+
+    def test_a_listing_keeps_its_own_smaller_budget(self) -> None:
+        # `--timeout 1800` must not also mean "wait half an hour for a file list".
+        self.assertEqual(audit_common.DEFAULT_LISTING_TIMEOUT, 60)
+        self.assertLess(audit_common.DEFAULT_LISTING_TIMEOUT, audit_common.DEFAULT_COMMAND_TIMEOUT)
+
+    def test_a_raised_budget_lets_a_slow_command_finish(self) -> None:
+        # End to end through the real subprocess: the same command times out under a
+        # budget below its runtime and succeeds above it.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "slow.py").write_text("import time\ntime.sleep(2)\n", encoding="utf-8")
+            self.assertTrue(audit_common.run_command("python slow.py", root, timeout=1).timed_out)
+            self.assertTrue(audit_common.run_command("python slow.py", root, timeout=30).ok)
+
+    def test_the_cli_rejects_a_budget_that_cannot_run_anything(self) -> None:
+        with (
+            mock.patch.object(sys, "argv", ["run-audit.py", "--timeout", "0"]),
+            contextlib.redirect_stderr(io.StringIO()) as err,
+            self.assertRaises(SystemExit),
+        ):
+            run_audit.main()
+        self.assertIn("--timeout", err.getvalue())
+
+
 class SingleSourceOfTruthTests(unittest.TestCase):
     """One declaration per vocabulary, enforced rather than agreed.
 
