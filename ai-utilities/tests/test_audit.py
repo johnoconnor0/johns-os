@@ -621,6 +621,77 @@ class RenderTests(unittest.TestCase):
         document["plan"]["coverage"] = {"confident": True, "unparsed_sections": []}
         self.assertIn("0 of 2 plan items complete (0%)", render_report.render(document))
 
+    def _with_families(self, extra: list[dict]) -> dict:
+        document = self._document("not-checked", "assessed by the skill")
+        document["families"].extend(extra)
+        return document
+
+    def test_a_run_with_no_test_evidence_says_so_in_one_sentence(self) -> None:
+        # WEB-403: three scattered `not-checked` rows do not add up to this sentence
+        # for anybody skimming a verdict table.
+        document = self._with_families(
+            [
+                {
+                    "id": name,
+                    "title": name,
+                    "outcome": "not-checked",
+                    "reason": "came from the repo's own stack.json",
+                    "applies_because": "",
+                    "commands": [],
+                    "finding_ids": [],
+                }
+                for name in ("tests", "static-analysis", "build")
+            ]
+        )
+        text = render_report.render(document)
+        self.assertIn("This audit contains no test, lint or typecheck, build evidence.", text)
+
+    def test_a_run_that_did_test_makes_no_such_claim(self) -> None:
+        document = self._with_families(
+            [
+                {
+                    "id": "tests",
+                    "title": "Test suite",
+                    "outcome": "passed",
+                    "reason": "",
+                    "applies_because": "",
+                    "commands": [],
+                    "finding_ids": [],
+                }
+            ]
+        )
+        self.assertNotIn("no test", render_report.render(document))
+
+    def test_a_repo_with_no_test_command_is_not_reported_as_missing_evidence(self) -> None:
+        # `not-applicable` is a different claim from `not-checked`, and conflating them
+        # is the distinction this whole registry exists to keep.
+        document = self._with_families(
+            [
+                {
+                    "id": "tests",
+                    "title": "Test suite",
+                    "outcome": "not-applicable",
+                    "reason": "the detected stack declares no unit command",
+                    "applies_because": "",
+                    "commands": [],
+                    "finding_ids": [],
+                }
+            ]
+        )
+        self.assertNotIn("no test", render_report.render(document))
+
+    def test_a_scope_warning_reaches_the_report(self) -> None:
+        document = self._document("not-checked", "assessed by the skill")
+        document["scope_warnings"] = ["file scope fell back to a directory walk"]
+        self.assertIn("Scope warning", render_report.render(document))
+
+    def test_validation_errors_are_no_longer_invisible(self) -> None:
+        # They were written into findings.json and rendered nowhere, so a document
+        # that failed its own validation still produced a clean-looking report.
+        document = self._document("not-checked", "assessed by the skill")
+        document["validation_errors"] = ["secrets: unknown outcome 'ok'"]
+        self.assertIn("failed 1 validation check(s)", render_report.render(document))
+
 
 class ResolverTests(unittest.TestCase):
     def _run_dir(self, root: Path, stamp: str, findings: list[dict]) -> Path:

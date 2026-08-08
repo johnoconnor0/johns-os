@@ -141,6 +141,42 @@ def _is_dismissed(finding: dict[str, Any]) -> bool:
     return finding.get("status", "open") in _DISMISSED_STATUSES
 
 
+def _evidence_caveats(document: dict[str, Any]) -> list[str]:
+    """What this audit does not know, said once and near the top.
+
+    Three separate `not-checked` rows in a verdict table do not add up to "there is no
+    test evidence here" for anybody skimming for a verdict, and a completion audit
+    that ran no tests cannot say whether the work functions. Saying it plainly is the
+    difference between a reader knowing that and having to derive it.
+    """
+    by_id = {family["id"]: family for family in document["families"]}
+    verdict = {"passed", "failed"}
+    missing = [
+        label
+        for family_id, label in (("tests", "test"), ("static-analysis", "lint or typecheck"), ("build", "build"))
+        if family_id in by_id and by_id[family_id].get("outcome") not in verdict | {"not-applicable"}
+    ]
+    lines: list[str] = []
+    if missing:
+        lines += [
+            f"> **This audit contains no {', '.join(missing)} evidence.** "
+            "Those families did not run - see *Not run* below for why. Nothing here "
+            "establishes whether the implemented work functions.",
+            "",
+        ]
+    for warning in document.get("scope_warnings", []) or []:
+        lines += [f"> **Scope warning.** {warning}", ""]
+    if document.get("validation_errors"):
+        # Previously written into findings.json and never rendered, so a document that
+        # failed its own validation still produced a clean-looking report.
+        lines += [
+            f"> **This document failed {len(document['validation_errors'])} validation check(s).** "
+            "See `validation_errors` in `findings.json`.",
+            "",
+        ]
+    return lines
+
+
 def render(document: dict[str, Any]) -> str:
     findings = {item["id"]: item for item in document["findings"]}
     # Counted here rather than read from `totals`, because this document is meant to
@@ -160,6 +196,7 @@ def render(document: dict[str, Any]) -> str:
         "",
         "---",
         "",
+        *_evidence_caveats(document),
         "## Completion",
         "",
         *_plan_summary(document),

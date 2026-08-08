@@ -60,6 +60,31 @@ records an explicit outcome plus a reason for every family in the registry.
 audit with no inventory is a code review wearing a verdict, which is worse than no
 audit. Do not proceed on a discovered README.
 
+#### Decide about `--allow-untrusted-commands` before you run, not after
+
+When the audited repository declares its own commands in
+`.project/.engineering/context/stack.json`, `static-analysis`, `tests` and `build`
+report `not-checked` and name the strings they refused to run. That refusal is
+deliberate: executing command strings a repository hands you is how an audit becomes
+an attack, and a JSON file that looks inert gets to name the executable and its
+arguments.
+
+The consequence is that the default run produces **no test, lint or build evidence**,
+and a completion audit with no test evidence cannot say whether any of it works. The
+flag only appeared in the output, after the run, so the choice was discovered rather
+than made:
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/scripts/run-audit.py" --root . --plan <path> --allow-untrusted-commands
+```
+
+Read the commands first — they are quoted verbatim in each family's `reason` — and
+pass the flag only on a repository whose `stack.json` you are willing to execute.
+Commands the probe *derived* from file presence are trusted without it, so this
+matters only when `stack.detector` is `workspace`. The report states plainly at the
+top when it contains no test evidence; do not present such a run as a verdict on
+whether the work functions.
+
 ### 2. Read `findings.json`
 
 Everything below works from that file. Note in particular:
@@ -67,6 +92,10 @@ Everything below works from that file. Note in particular:
 - `plan_items[]` - the inventory, each with `status` and `mentions`.
 - `families[]` - every registered family with `outcome` and `reason`.
 - `findings[]` - what the mechanical checks found, with `identity` and `route`.
+- `plan.coverage` - how much of the plan the extractor accounted for.
+  `confident: false` means sections stating work produced no items, they are named in
+  `unparsed_sections`, and no completion percentage will be reported. Check whether
+  the plan is written in a form no extractor read before trusting the inventory.
 - `stack.detector` - which rung answered. If it is `vendored`, the detection is a
   fallback and worth a sanity check before trusting the gating.
 

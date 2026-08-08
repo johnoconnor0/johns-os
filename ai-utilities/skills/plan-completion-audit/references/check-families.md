@@ -68,6 +68,28 @@ Three of these are **model-driven**: `plan-inventory`, `data-layer` and
 `not-checked` with that as the reason and the skill fills them in. Being listed
 explicitly is what stops them looking like a silent pass.
 
+## The command trust gate
+
+`static-analysis`, `tests` and `build` do not run a command just because the stack
+declares one. Where the command *came from* decides:
+
+| Provenance | Trusted | Why |
+| --- | --- | --- |
+| Derived here from file presence (`imported`, `vendored`) | yes | This tool chose the string |
+| Read from the audited repo's `stack.json` (`workspace`) | no | That repository chose the string |
+
+The second case reports `not-checked`, quotes the exact strings it refused, and names
+`--allow-untrusted-commands`. This plugin is designed to be pointed at repositories
+nobody here controls, and a JSON file that looks inert should not get to name an
+executable and its arguments. `command_argv` additionally refuses anything needing a
+shell, so pipes, redirection and `&&` are never interpreted.
+
+The cost is real and worth stating: **the default run produces no test, lint or build
+evidence at all**, and a completion audit that ran no tests cannot say whether the
+work functions. The report says so in one sentence near the top rather than leaving a
+reader to infer it from three `not-checked` rows. Read the quoted commands, then
+decide about the flag before the run.
+
 ## Where the stack comes from
 
 `stack_probe.py`, through a three-rung ladder, because this plugin and
