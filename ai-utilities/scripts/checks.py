@@ -280,6 +280,16 @@ def run_command_family(ctx: Ctx, family, keys: tuple[str, ...], severity: str) -
                 reason=f"`{command}` did not finish within the timeout",
                 commands=commands,
             )
+        if outcome.get("captured") is False:
+            # This is the tests family among others, so an exit code believed without
+            # the output that explains it is the most expensive false pass available.
+            return FamilyResult(
+                id=family.id,
+                title=family.title,
+                outcome="errored",
+                reason=f"`{command}` ran but its output could not be read, so its result cannot be trusted",
+                commands=commands,
+            )
         if outcome.get("exit"):
             findings.append(
                 Finding(
@@ -424,6 +434,18 @@ def run_dependency_audit(ctx: Ctx, family) -> FamilyResult:
             reason=f"no dependency auditor known for {manager!r}",
         )
     outcome = _run(command, ctx.root)
+    if outcome.get("timed_out") or outcome.get("captured") is False:
+        return FamilyResult(
+            id=family.id,
+            title=family.title,
+            outcome="errored",
+            reason=(
+                f"`{command}` did not finish within the timeout"
+                if outcome.get("timed_out")
+                else f"`{command}` ran but its output could not be read"
+            ),
+            commands=[{k: v for k, v in outcome.items() if k != "output"}],
+        )
     findings: list[Finding] = []
     if outcome.get("exit"):
         findings.append(

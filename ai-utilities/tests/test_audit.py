@@ -1068,6 +1068,22 @@ class CapturedOutputTests(unittest.TestCase):
         self.assertTrue(files, "the walk still answers")
         self.assertIn(".gitignore", warning)
 
+    def test_no_command_family_treats_a_lost_capture_as_a_result(self) -> None:
+        # Swept rather than fixed one at a time: every runner that reads `_run`'s exit
+        # code has to refuse to believe it when the output that explains it was lost.
+        # `tests` is the one that matters most - a green suite nobody read is the most
+        # expensive false pass this tool can produce.
+        lost = {"cmd": "pnpm test", "exit": 0, "captured": False, "error": "output could not be read", "output": ""}
+        stack = {"detector": "vendored", "test_commands": {"unit": "pnpm test"}, "package_manager": "npm"}
+        ctx = families.Ctx(root=Path("."), stack=stack, plan={"parsed_by": None}, files=[])
+        with mock.patch.object(checks, "_run", return_value=lost):
+            tests = checks.run_command_family(ctx, families.BY_ID["tests"], ("unit",), "critical")
+            deps = checks.run_dependency_audit(ctx, families.BY_ID["dependency-audit"])
+        for result in (tests, deps):
+            with self.subTest(family=result.id):
+                self.assertEqual(result.outcome, "errored")
+                self.assertTrue(result.reason.strip())
+
     def test_a_reference_checker_that_printed_nothing_is_not_a_docs_pass(self) -> None:
         # Empty output parsed as `{}`, so `checked` defaulted True and `errors`
         # defaulted empty: a lost capture rendered as "markdown documents are
