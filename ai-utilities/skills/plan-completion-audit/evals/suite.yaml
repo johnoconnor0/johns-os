@@ -50,6 +50,20 @@ test_cases:
       - "Findings cite a file and, where one exists, a line"
     timeout_seconds: 240
 
+  - id: functional-table-plan
+    kind: functional
+    description: "reads a plan stated in markdown tables, and says what it did not account for"
+    user_input: "Audit ai-utilities/tests/fixtures/table-plan-repo against its PLAN.md"
+    expected_outputs:
+      - kind: file_created
+        path_glob: ".project/audits/plan-completion-audit/*/findings.json"
+    judge_criteria:
+      - "The inventory holds the five numbered table rows, extracted by the `table` extractor"
+      - "The staging checklist in Part 9 is NOT the inventory: it is an ordered list that would have won before a table extractor existed"
+      - "The report names the section that states work but produced no plan items, rather than passing over it silently"
+      - "No completion percentage is reported while `plan.coverage.confident` is false"
+    timeout_seconds: 240
+
   - id: edge-no-plan
     kind: edge-case
     description: "stops and asks rather than auditing against an invented inventory"

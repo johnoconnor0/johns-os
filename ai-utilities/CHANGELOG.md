@@ -1,5 +1,79 @@
 # Changelog
 
+## 0.3.0 - 2026-08-08
+
+Seven defects recorded against `plan-completion-audit` after a single real run, which
+produced a report that looked authoritative and was wrong. Read together they are one
+failure mode: the audit lost information silently and then rendered a confident verdict
+over the gap.
+
+### Added
+
+- **A markdown-table extractor, and parse coverage.** A plan stating fifteen work items
+  in two tables parsed as six, because no extractor read tables and the only structure
+  any of them could see was an unrelated six-step staging checklist — so the report
+  announced "4 of 6 plan items complete (67%)" against a real denominator of
+  twenty-one. Tables now compete in the tier that picks the finest reading of the
+  declared structure. Separately, and more generally: every extractor now runs and its
+  count is kept, the result names sections that state work but produced no items, and
+  the renderer withholds the percentage when the extractor did not account for the
+  plan. A partial parse was previously indistinguishable from a complete one.
+- **A vocabulary for `findings[].status`.** `open`, `false-positive`, `accepted-risk`,
+  `fixed`, with a `status_reason` required for anything that is not `open`. It was a
+  free string that nothing validated and the renderer never read, so a run that
+  examined six critical findings and dismissed all six rendered identically to one that
+  had examined none — still six criticals in the header, and the work of checking them
+  lost. Dismissed findings now leave the counts and appear in their own section.
+- `render_report.py --check` validates a hand-edited `findings.json` without rendering.
+- `scripts/eng-life.py`, which resolves `engineering-lifecycle` wherever it is
+  installed rather than relying on a path only a source checkout has.
+
+### Fixed
+
+- **Child process output is decoded as UTF-8.** Three subprocess sites passed
+  `text=True` with no `encoding=`, so on Windows output decoded as cp1252, which leaves
+  0x90 undefined. The `UnicodeDecodeError` killed the reader thread `Popen.communicate`
+  uses when `timeout=` is set; `is_alive()` was then false so no `TimeoutExpired` was
+  raised, and `subprocess.run` returned `stdout=None` beside a returncode of 0. Every
+  caller wrote `(proc.stdout or "")`, collapsing "printed nothing" into "we could not
+  read it", and two families reported `passed` on evidence they never read.
+- **The secrets scanner no longer fires on test literals.** Every finding in that
+  family on the failing run was a false positive — six of its seven criticals, five of
+  which said in the literal that they were not real. The path filter matched components
+  of the *absolute* path, so a checkout under a directory named `tests` skipped the
+  scan entirely while `api.leads.test.ts` in `api/src/` was treated as production
+  source. Test-path matches are now down-weighted rather than dropped, and the loosest
+  rule weighs an obvious-dummy denylist and Shannon entropy before raising.
+- **`engineering-lifecycle` is resolved by install layout.** The probe used a sibling
+  path that only resolves in a source checkout; installed, it pointed inside
+  `ai-utilities` and skipped the version directory. `docs-references` therefore
+  reported the plugin "not installed" on a machine with ten versions of it, and the
+  `imported` rung of the stack ladder could never fire. A genuine absence now names the
+  paths tried rather than asserting a fact it never checked.
+- **`dead-code` reports `not-applicable` on a repository with no Python.** Its
+  relevance gate admitted any Node tree while the runner implemented only Python, so a
+  TypeScript repository got `not-checked` — "applies here but could not run" — for
+  something that does not apply.
+- **The `--stamp` write-back step was destructive as documented.** It said to re-run
+  the audit and *then* hand-edit the results; the write truncates, so following that
+  order destroys the assessment. The step is now edit-then-render, and `--stamp` is
+  documented as what it is.
+- `FamilyResult.validate` had never run outside the test suite, and `SEVERITIES` was
+  never validated anywhere — an unknown severity sorted last through a fallback and
+  vanished from the counts. Both are enforced now.
+- `validation_errors` and the file-scope warning are rendered instead of being written
+  to `findings.json` and never shown.
+
+### Changed
+
+- `--allow-untrusted-commands` is documented in `SKILL.md` and `check-families.md`,
+  with the tradeoff, so the choice is made before the run rather than discovered in the
+  output afterwards. **The gate itself is unchanged.** The report now says in one
+  sentence when it contains no test, lint or build evidence; three scattered
+  `not-checked` rows did not add up to that for a reader skimming a verdict table.
+- `ordered-list` no longer matches inside fenced code blocks, where a worked example
+  was eligible to become the inventory.
+
 ## 0.2.1 - 2026-08-07
 
 ### Fixed
