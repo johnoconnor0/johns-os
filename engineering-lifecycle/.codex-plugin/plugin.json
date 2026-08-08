@@ -1,6 +1,6 @@
 {
   "name": "engineering-lifecycle",
-  "version": "0.10.4",
+  "version": "0.10.5",
   "description": "Move software products through a structured engineering lifecycle from discovery to maintenance, with deterministic local artifacts.",
   "author": {
     "name": "John O'Connor",

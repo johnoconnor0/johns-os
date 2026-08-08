@@ -1,6 +1,6 @@
 {
   "name": "ai-utilities",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Utility skills for building and vetting Claude Code extensions (skill-creator, skill-review) and for closing the plan-to-implementation loop: plan-completion-audit derives its checks from the plan and the detected stack, and audit-resolver executes the findings behind per-batch gates.",
   "author": {
     "name": "John O'Connor",

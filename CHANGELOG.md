@@ -8,6 +8,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-09
+
+Ships `engineering-lifecycle` 0.10.5 and `ai-utilities` 0.3.1, which close the three
+items 0.3.1 recorded as out of scope. `business-development` (0.2.0) is unchanged.
+
+### Fixed
+
+- **The missing-`encoding=` defect is now closed in both plugins.** 0.3.1 fixed it in
+  `ai-utilities` and named `engineering-lifecycle` as still carrying it; seven call
+  sites there are fixed now, behind a scan test that fails on any capturing
+  `subprocess` call which does not name an encoding. Full detail in each plugin's
+  changelog.
+
+  Worth recording at this level because it is a property of the platform rather than
+  of either plugin: on Windows, `subprocess.run(..., text=True)` without `encoding=`
+  decodes with the ANSI codepage, and combined with `timeout=` a decode failure is
+  swallowed by the reader thread and surfaces as `stdout=None` beside a zero exit
+  code. Any new script in this repository that captures child output needs the
+  kwarg. Both plugins now enforce that with a test rather than a convention.
+
+### Changed
+
+- `ai-utilities` consolidates duplicated vocabularies and gains `--timeout` on
+  `run-audit.py`.
+
 ## [0.3.1] - 2026-08-08
 
 Ships `ai-utilities` 0.3.0, plus the repository tooling changes that had accumulated

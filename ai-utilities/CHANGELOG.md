@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.3.1 - 2026-08-09
+
+The three items 0.3.0 recorded as out of scope, closed.
+
+### Added
+
+- **`run-audit.py --timeout`**, seconds one check command may take, default 300.
+  `_run` was fixed at that figure with no way to say otherwise, though `verify.py`
+  has had the flag all along. The right budget is a property of the repository being
+  audited: a suite that legitimately takes eight minutes is not a hung command, but
+  on such a repository the `tests` family reported `errored` on every run with
+  nothing the operator could do about it. The budget is carried on `Ctx`, so it
+  reaches the static-analysis, tests, build, dependency-audit and reference-checker
+  commands alike.
+
+  Listings keep a separate, smaller budget. `git ls-files` returning inside a minute
+  is a property of git rather than of the project, so tying the two together would
+  let `--timeout 1800` also mean "wait half an hour for a file list".
+
+### Changed
+
+- **One declaration per vocabulary.** `SEVERITIES` was written out three times — in
+  `findings`, in `resolver`, and in `render_report` under the second name
+  `_SEVERITY_ORDER`. The tuple also fixes the sort order, so adding a severity meant
+  finding all three copies or watching the new one sort last through the `99`
+  fallback and drop out of the counts entirely.
+- **`resolver` imports `findings.SCHEMA` instead of repeating it.** The literal was
+  the more dangerous copy: `validate_document` compares schema by exact equality, so
+  bumping `SCHEMA` would have left the markdown converter stamping every legacy
+  report with the old version, each then failing validation for a reason none of them
+  names.
+
+  Neither copy was wrong on the day it was written, which is the point — a copy is a
+  defect that has not happened yet. `SingleSourceOfTruthTests` now enforces both,
+  with its own control so the scan cannot pass by matching nothing.
+
 ## 0.3.0 - 2026-08-08
 
 Seven defects recorded against `plan-completion-audit` after a single real run, which
