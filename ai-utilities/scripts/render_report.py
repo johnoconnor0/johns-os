@@ -56,10 +56,15 @@ def _plan_summary(document: dict[str, Any]) -> list[str]:
 
     inventory = next((f for f in document["families"] if f["id"] == "plan-inventory"), {})
     assessed = inventory.get("outcome") in {"passed", "failed"}
+    coverage = plan.get("coverage") or {}
+    unparsed = coverage.get("unparsed_sections") or []
+    # Two different unknowns, and a percentage needs both answered. `assessed` asks
+    # whether anything judged the items; `confident` asks whether the items are the
+    # plan. The second was missing, so a six-item misparse of a twenty-one-item plan
+    # rendered "4 of 6 complete (67%)" - a real numerator over a wrong denominator,
+    # which is worse than no number because it reads as a measurement.
+    confident = coverage.get("confident", True)
     if not assessed:
-        # Printing "0 of 19 complete (0%)" when nothing assessed completion is the
-        # precise failure this rebuild exists to end - a number that reads as a
-        # measurement and is actually an absence of one.
         lines = [
             f"**{len(items)} plan items were extracted from `{plan['path']}` "
             f"by the `{plan['parsed_by']}` extractor. None have been assessed yet.**",
@@ -68,12 +73,32 @@ def _plan_summary(document: dict[str, Any]) -> list[str]:
             "> The counts below are the extractor's starting state, not a verdict.",
             "",
         ]
+    elif not confident:
+        lines = [
+            f"**{complete} of {len(items)} extracted plan items are complete. "
+            "No percentage is given: the extractor did not account for the whole plan.**",
+            "",
+            f"> Parsed from `{plan['path']}` by the `{plan['parsed_by']}` extractor, covering "
+            f"{coverage.get('sections_parsed', 0)} of {coverage.get('candidate_sections', 0)} "
+            "sections that look like they state work.",
+            "> A percentage over an incomplete inventory would be a measurement of the wrong thing.",
+            "",
+        ]
     else:
         lines = [
             f"**{complete} of {len(items)} plan items complete ({round(complete / total * 100)}%).** "
             f"Parsed from `{plan['path']}` by the `{plan['parsed_by']}` extractor.",
             "",
         ]
+    if unparsed:
+        lines.append(
+            f"> **{len(unparsed)} section(s) state work that produced no plan items** and are "
+            "unaudited by this run: "
+            + ", ".join(f"`{heading}`" for heading in unparsed[:8])
+            + ("..." if len(unparsed) > 8 else "")
+            + ". Check whether the plan is written in a form the extractor did not read."
+        )
+        lines.append("")
     if counts:
         lines.append("| Status | Count |")
         lines.append("| --- | ---: |")

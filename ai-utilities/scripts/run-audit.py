@@ -169,7 +169,7 @@ def audit(
     plan = (
         parse_plan(resolved_plan, root)
         if resolved_plan and resolved_plan.is_file()
-        else {"path": None, "parsed_by": None, "item_count": 0, "items": []}
+        else {"path": None, "parsed_by": None, "item_count": 0, "items": [], "coverage": {}}
     )
     ctx = Ctx(
         root=root,
@@ -241,7 +241,14 @@ def audit(
         run_id=stamp,
         generated_at=now_iso(),
         root=root.as_posix(),
-        plan={"path": plan["path"], "parsed_by": plan["parsed_by"], "item_count": plan["item_count"]},
+        plan={
+            "path": plan["path"],
+            "parsed_by": plan["parsed_by"],
+            "item_count": plan["item_count"],
+            # Carried into the report so a partial parse cannot present itself as a
+            # complete one. Stripping it here is what made the gap invisible.
+            "coverage": plan.get("coverage", {}),
+        },
         stack=stack,
         results=results,
         plan_items=[item.as_dict() for item in plan["items"]],

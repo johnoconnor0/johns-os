@@ -178,6 +178,122 @@ class PlanParseTests(unittest.TestCase):
         self.assertEqual(result["items"][0].status, "unverifiable")
         self.assertEqual(result["items"][1].status, "not-started")
 
+    # --- markdown tables -------------------------------------------------------
+
+    def test_a_numbered_table_is_read_as_an_inventory(self) -> None:
+        text = (
+            "# P\n\n## Build order\n\n"
+            "| # | Task | Issue |\n| --- | --- | --- |\n"
+            "| 1 | Add the table | WEB-101 |\n| 2 | Wire the gateway | WEB-102 |\n"
+        )
+        result = self._parse(text)
+        self.assertEqual(result["parsed_by"], "table")
+        self.assertEqual([item.id for item in result["items"]], ["1", "2"])
+        self.assertEqual([item.title for item in result["items"]], ["Add the table", "Wire the gateway"])
+
+    def test_a_table_of_issue_keys_is_read_too(self) -> None:
+        text = (
+            "# P\n\n## Work\n\n"
+            "| Key | Deliverable |\n| --- | --- |\n"
+            "| WEB-101 | Add the table |\n| WEB-102 | Wire the gateway |\n"
+        )
+        result = self._parse(text)
+        self.assertEqual(result["parsed_by"], "table")
+        self.assertEqual([item.id for item in result["items"]], ["WEB-101", "WEB-102"])
+
+    def test_a_comparison_table_is_not_mistaken_for_a_plan(self) -> None:
+        # The reason the extractor requires numbered rows. A table is a common way to
+        # write something that is not an inventory, and reading one as a plan would
+        # trade this bug for a worse one.
+        text = (
+            "# P\n\n## Options\n\n"
+            "| Option | Pros | Cons |\n| --- | --- | --- |\n"
+            "| Postgres | mature | heavier |\n| SQLite | simple | single writer |\n"
+            "\n## Steps\n\n1. First thing\n2. Second thing\n"
+        )
+        result = self._parse(text)
+        self.assertEqual(result["parsed_by"], "ordered-list")
+
+    def test_a_table_plan_outranks_an_unrelated_ordered_list(self) -> None:
+        """WEB-399, reproduced.
+
+        The plan stated fifteen items in two tables and also contained a six-step
+        staging checklist. `ordered-list` found the checklist, nothing else matched,
+        and the report announced "4 of 6 plan items complete (67%)" over a real
+        denominator of twenty-one.
+        """
+        result = plan_parse.parse_plan(FIXTURES / "table-plan-repo" / "PLAN.md", FIXTURES / "table-plan-repo")
+        self.assertEqual(result["parsed_by"], "table")
+        self.assertEqual([item.id for item in result["items"]], ["1", "2", "3", "4", "5"])
+        # The staging checklist is not in the inventory.
+        self.assertNotIn("Freeze the release branch", [item.title for item in result["items"]])
+        # And the table rows keep the rest of the row, so the issue key is reachable.
+        self.assertIn("WEB-101", result["items"][0].body)
+
+    def test_a_numbered_list_inside_a_code_fence_is_not_an_inventory(self) -> None:
+        text = "# P\n\nExample:\n\n```text\n1. first\n2. second\n3. third\n```\n"
+        self.assertIsNone(self._parse(text)["parsed_by"])
+
+    # --- parse coverage --------------------------------------------------------
+
+    def test_coverage_records_every_extractor_not_just_the_winner(self) -> None:
+        text = (
+            "# P\n\n## Build order\n\n"
+            "| # | Task |\n| --- | --- |\n| 1 | A |\n| 2 | B |\n| 3 | C |\n"
+            "\n## Steps\n\n1. one\n2. two\n"
+        )
+        counts = self._parse(text)["coverage"]["extractor_counts"]
+        self.assertEqual(counts["table"], 3)
+        # The loser's count is kept, which is what makes a partial parse visible.
+        self.assertEqual(counts["ordered-list"], 2)
+
+    def test_a_section_stating_work_that_produced_no_items_is_reported(self) -> None:
+        # The signal that was missing entirely. "Parsed 6 items from 1 of 4 candidate
+        # sections" would have made the WEB-399 misparse self-evident.
+        text = (
+            "# P\n\n## Build order\n\n"
+            "| # | Task |\n| --- | --- |\n| 1 | A |\n| 2 | B |\n"
+            "\n## Staging\n\n1. freeze\n2. snapshot\n"
+        )
+        coverage = self._parse(text)["coverage"]
+        self.assertFalse(coverage["confident"])
+        self.assertEqual(coverage["unparsed_sections"], ["Staging"])
+        self.assertEqual(coverage["candidate_sections"], 2)
+        self.assertEqual(coverage["sections_parsed"], 1)
+
+    def test_a_plan_the_extractor_fully_accounted_for_is_confident(self) -> None:
+        text = "# P\n\n## Work\n\n| # | Task |\n| --- | --- |\n| 1 | A |\n| 2 | B |\n"
+        coverage = self._parse(text)["coverage"]
+        self.assertTrue(coverage["confident"])
+        self.assertEqual(coverage["unparsed_sections"], [])
+
+    def test_one_stray_numbered_line_is_noted_but_does_not_withdraw_the_percentage(self) -> None:
+        # A warning that fires on every document is one nobody reads, and most real
+        # plans contain a numbered line somewhere that is not an inventory item.
+        text = (
+            "# P\n\n## Work\n\n| # | Task |\n| --- | --- |\n| 1 | A |\n| 2 | B |\n"
+            "\n## Notes\n\n1. one caveat worth recording\n"
+        )
+        coverage = self._parse(text)["coverage"]
+        self.assertEqual(coverage["unparsed_sections"], ["Notes"])
+        self.assertEqual(coverage["unaccounted_rows"], 1)
+        self.assertTrue(coverage["confident"], "one row cannot move a denominator")
+
+    def test_enough_unaccounted_work_does_withdraw_the_percentage(self) -> None:
+        text = (
+            "# P\n\n## Work\n\n| # | Task |\n| --- | --- |\n| 1 | A |\n| 2 | B |\n"
+            "\n## Staging\n\n1. freeze\n2. snapshot\n3. deploy\n"
+        )
+        coverage = self._parse(text)["coverage"]
+        self.assertEqual(coverage["unaccounted_rows"], 3)
+        self.assertFalse(coverage["confident"])
+
+    def test_the_existing_fixture_still_parses_as_it_did(self) -> None:
+        # Guards against the new tier stealing a plan the heading extractor owns.
+        result = plan_parse.parse_plan(FIXTURES / "tiny-python-repo" / "PLAN.md", FIXTURES / "tiny-python-repo")
+        self.assertEqual(result["parsed_by"], "numbered-headings")
+        self.assertEqual([item.id for item in result["items"]], ["1.1", "1.2", "2.1"])
+
 
 class FindingsTests(unittest.TestCase):
     def _finding(self, line: int, title: str = "Unused import `json`") -> findings_mod.Finding:
@@ -480,6 +596,30 @@ class RenderTests(unittest.TestCase):
         document = self._document("failed")
         del document["plan_items"][0]["status"]
         self.assertIn("Plan Completion Audit", render_report.render(document))
+
+    def test_no_percentage_when_the_extractor_did_not_account_for_the_plan(self) -> None:
+        # WEB-399's actual harm: a real numerator over a wrong denominator. The items
+        # WERE assessed, so the existing `assessed` gate passes and cannot help here.
+        document = self._document("failed")
+        document["plan"]["coverage"] = {
+            "confident": False,
+            "candidate_sections": 4,
+            "sections_parsed": 1,
+            "unparsed_sections": ["Batch 1", "Batch 2", "Part 3"],
+            "unaccounted_rows": 15,
+            "extractor_counts": {"ordered-list": 6, "table": 15},
+        }
+        text = render_report.render(document)
+        self.assertNotIn("(0%)", text)
+        self.assertIn("No percentage is given", text)
+        self.assertIn("1 of 4", text)
+        self.assertIn("3 section(s) state work that produced no plan items", text)
+        self.assertIn("`Batch 1`", text)
+
+    def test_a_percentage_returns_once_coverage_is_confident(self) -> None:
+        document = self._document("failed")
+        document["plan"]["coverage"] = {"confident": True, "unparsed_sections": []}
+        self.assertIn("0 of 2 plan items complete (0%)", render_report.render(document))
 
 
 class ResolverTests(unittest.TestCase):
