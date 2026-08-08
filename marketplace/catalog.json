@@ -2,8 +2,8 @@
   "id": "johns-os",
   "name": "johns-os",
   "description": "Local plugin marketplace for John's OS.",
-  "version": "0.3.0",
-  "updated_at": "2026-08-07T00:00:00Z",
+  "version": "0.3.1",
+  "updated_at": "2026-08-08T00:00:00Z",
   "plugins": [
     {
       "id": "engineering-lifecycle",
