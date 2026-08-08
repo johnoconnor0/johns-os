@@ -24,7 +24,16 @@ import json
 import sys
 from pathlib import Path
 
-from audit_common import audit_dir, now_iso, relpath, repo_root, run_id, write_json, write_text
+from audit_common import (
+    audit_dir,
+    now_iso,
+    relpath,
+    repo_root,
+    resolve_lifecycle_file,
+    run_id,
+    write_json,
+    write_text,
+)
 from checks import (
     collect_files,
     run_command_family,
@@ -66,24 +75,52 @@ def _reference_findings(ctx: Ctx, family) -> tuple[FamilyResult, set[str]]:
     """
     from checks import _run
 
-    candidates = [
-        Path(__file__).resolve().parents[2] / "engineering-lifecycle" / "scripts" / "reference-check.py",
-        ctx.root / "engineering-lifecycle" / "scripts" / "reference-check.py",
-    ]
-    script = next((path for path in candidates if path.is_file()), None)
+    script, tried = resolve_lifecycle_file("scripts", "reference-check.py")
+    if script is None:
+        # The audited repository is checked last and separately: it is not part of the
+        # install ladder, and it is a repo nobody here controls.
+        in_repo = ctx.root / "engineering-lifecycle" / "scripts" / "reference-check.py"
+        if in_repo.is_file():
+            script = in_repo
+        else:
+            tried = [*tried, in_repo]
     if script is None:
         return (
             FamilyResult(
                 id=family.id,
                 title=family.title,
                 outcome="not-checked",
-                reason="the reference checker ships with engineering-lifecycle, which is not installed alongside this plugin",
+                # Says what it looked for rather than asserting an installation fact
+                # it never checked. The previous wording claimed the plugin was not
+                # installed, on machines where it was.
+                reason=(
+                    "could not locate the reference checker, which ships with "
+                    "engineering-lifecycle. Tried: " + "; ".join(f"`{path}`" for path in tried)
+                ),
             ),
             set(),
         )
     outcome = _run(f'"{sys.executable}" -B "{script}" --root .', ctx.root)
+    if not outcome.get("output"):
+        # Empty output used to parse as `{}`, which made `checked` default True and
+        # `errors` default empty - so a reference checker whose output was lost, or
+        # which never ran, rendered as a clean docs pass. There is no reading of
+        # "no output at all" that is evidence of anything.
+        return (
+            FamilyResult(
+                id=family.id,
+                title=family.title,
+                outcome="errored",
+                reason=(
+                    "the reference checker produced no output: "
+                    + str(outcome.get("error") or ("it timed out" if outcome.get("timed_out") else "reason unknown"))
+                ),
+                commands=[{k: v for k, v in outcome.items() if k != "output"}],
+            ),
+            set(),
+        )
     try:
-        payload = json.loads(outcome.get("output") or "{}")
+        payload = json.loads(outcome["output"])
     except ValueError:
         return (
             FamilyResult(
@@ -146,12 +183,12 @@ def audit(
     allow_untrusted_commands: bool = False,
 ) -> dict:
     stack = resolve_stack(root, prefer)
-    files = collect_files(root)
+    files, scope_warning = collect_files(root)
     resolved_plan = plan_path or find_plan(root)
     plan = (
         parse_plan(resolved_plan, root)
         if resolved_plan and resolved_plan.is_file()
-        else {"path": None, "parsed_by": None, "item_count": 0, "items": []}
+        else {"path": None, "parsed_by": None, "item_count": 0, "items": [], "coverage": {}}
     )
     ctx = Ctx(
         root=root,
@@ -223,12 +260,25 @@ def audit(
         run_id=stamp,
         generated_at=now_iso(),
         root=root.as_posix(),
-        plan={"path": plan["path"], "parsed_by": plan["parsed_by"], "item_count": plan["item_count"]},
+        plan={
+            "path": plan["path"],
+            "parsed_by": plan["parsed_by"],
+            "item_count": plan["item_count"],
+            # Carried into the report so a partial parse cannot present itself as a
+            # complete one. Stripping it here is what made the gap invisible.
+            "coverage": plan.get("coverage", {}),
+        },
         stack=stack,
         results=results,
         plan_items=[item.as_dict() for item in plan["items"]],
     )
-    problems = validate_document(document, registered_ids())
+    if scope_warning:
+        document["scope_warnings"] = [scope_warning]
+    # `FamilyResult.validate` had never run outside the test suite, so its four
+    # invariants - including "failed with no findings" and "passed with findings" -
+    # had never been checked against a real run.
+    problems = [problem for result in results for problem in result.validate()]
+    problems += validate_document(document, registered_ids())
     if problems:
         document["validation_errors"] = problems
     return document
@@ -268,6 +318,14 @@ def _plan_drift(ctx: Ctx, family, unresolved: set[str]) -> FamilyResult:
 
 
 def main() -> int:
+    # A Windows console defaults to a codepage that cannot encode the replacement
+    # character, and captured output now legitimately contains one whenever a tool
+    # emitted a byte UTF-8 could not decode. Printing a reason string through that
+    # console would raise UnicodeEncodeError and lose the run. Degrade instead.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".")
     parser.add_argument("--plan", default="", help="Path to the plan. Discovered when omitted.")

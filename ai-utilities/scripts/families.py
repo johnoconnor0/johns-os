@@ -166,9 +166,18 @@ def _plan_parsed(ctx: Ctx) -> Verdict:
 
 
 def _dead_code_language(ctx: Ctx) -> Verdict:
-    if ctx.frontend or ctx.has("backend", "Python"):
-        return True, "a Node or Python tree was detected"
-    return False, "dead-code analysis is only implemented for Node and Python"
+    """Only Python, because only the Python arm exists.
+
+    This used to admit any Node tree as well, and the runner then refused everything
+    but Python - so on a TypeScript repository the family passed the relevance gate
+    and reported `not-checked`, which says "this applies here but could not run" when
+    the truth is "this does not apply here". The registry keeps two predicates
+    precisely so those two do not collapse into each other, and a promise the runner
+    cannot keep is the one way the gate can still tell the wrong story.
+    """
+    if ctx.has("backend", "Python"):
+        return True, "Python sources were detected"
+    return False, "dead-code analysis is only implemented for Python, and no Python was detected"
 
 
 def _markdown_present(ctx: Ctx) -> Verdict:

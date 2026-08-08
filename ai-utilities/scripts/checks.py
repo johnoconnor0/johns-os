@@ -26,11 +26,12 @@ quietly collapsed inside a runner.
 
 from __future__ import annotations
 
+import math
 import re
-import subprocess
+from collections import Counter
 from pathlib import Path
 
-from audit_common import SECRET_PATTERNS, command_argv, relpath, scan_files, scrub_secrets
+from audit_common import SECRET_PATTERNS, Captured, relpath, run_command, scan_files, scrub_secrets
 from families import Ctx
 from findings import Evidence, FamilyResult, Finding
 
@@ -82,30 +83,94 @@ _MARKER_DETECTOR = re.compile(
 # credentials in a repository, and keeping them out of the artifacts this writes.
 _SECRET_PATTERNS = SECRET_PATTERNS
 
-# A placeholder in an example file is the example. Only real source counts.
-_SECRET_SKIP_PARTS = frozenset({"examples", "templates", "fixtures", "tests", "test", "__tests__", "references"})
+# A placeholder in an example file is the example. Directories where a credential-
+# shaped literal is overwhelmingly likely to be a fixture rather than a credential.
+#
+# `e2e` and `spec` are here because they were missing, and their absence is most of
+# why a real run produced six false-positive criticals.
+_SECRET_SKIP_PARTS = frozenset(
+    {
+        "examples",
+        "example",
+        "templates",
+        "fixtures",
+        "__fixtures__",
+        "tests",
+        "test",
+        "__tests__",
+        "testdata",
+        "references",
+        "e2e",
+        "spec",
+        "specs",
+        "mocks",
+        "__mocks__",
+        "stories",
+    }
+)
+
+# Directory components are not enough: `api.leads.test.ts` sits in `api/src/` and is
+# a test file, which is how four of those six criticals got through. A convention
+# every ecosystem shares is worth matching by name.
+_TEST_FILENAME = re.compile(
+    r"(?:\.|_|-)(?:test|spec|stories|fixture|mock)s?\.[^.]+$|^(?:test|conftest)_|_test\.[^.]+$",
+    re.IGNORECASE,
+)
+
+# Literals that state in themselves that they are not real. Five of the six criticals
+# said so in the value: `not-a-real-token`, `SUPER-SECRET-TOKEN`,
+# `a-test-signing-secret-that-is-long-enough`, `test-secret-not-a-real-key`,
+# `not-a-real-value`. A scanner that cannot read its own match is not weighing
+# evidence, and six wrong criticals train the reader to skim the section that a real
+# one will be in.
+_OBVIOUS_DUMMY = re.compile(
+    r"(?i)"
+    r"not[-_ ]?a[-_ ]?real|not[-_ ]?real|"
+    r"\bfake\b|\bdummy\b|\bplaceholder\b|\bredacted\b|\bsample\b|\bexample\b|"
+    r"change[-_ ]?me|replace[-_ ]?me|your[-_ ]?|"
+    r"\bxxx+\b|\bfoo\b|\bbar\b|\bbaz\b|\btodo\b|"
+    r"^test[-_]|[-_]test$|[-_]test[-_]|"
+    r"super[-_ ]?secret|"
+    r"\bsecret\b.*\b(?:token|key|value)\b$|"
+    r"process\.env|os\.environ|<[^>]+>|\.\.\."
+)
+
+# Consulted for test paths only, so it can afford to match a marker glued to
+# surrounding characters. AWS's own published example access key - the one this
+# repository's suites use - ends in EXAMPLE with a digit immediately before it, which
+# defeats `\bexample\b`. In production source the strict form above is used instead,
+# where a false negative is what costs.
+_FIXTURE_MARKER = re.compile(r"(?i)example|fake|dummy|placeholder|sample|redacted|not[-_ ]?a[-_ ]?real|test")
+
+_BASE64ISH = re.compile(r"^[A-Za-z0-9+/=_-]+$")
+
+# The quoted value on the right of a `secret: "..."` assignment.
+_QUOTED = re.compile(r"\"([^\"\n]*)\"|'([^'\n]*)'")
 
 _BUILD_ARTIFACTS = ("dist", "build", ".next", "__pycache__", "coverage", "target")
 
 
-def _lines(command: str, root: Path, timeout: int = 60) -> list[str]:
-    """Full stdout of a listing command, split into lines.
+def _listing(command: str, root: Path, timeout: int = 60) -> Captured:
+    """Full stdout of a listing command, undecided about what its failure means.
 
     Deliberately not `_run`: that truncates output to the last 8000 characters,
     which is right for a failing build's diagnostics and catastrophic for a file
     listing - it silently cut this repository's tracked files from several hundred
     to 117, and every scan downstream inherited the wrong file set.
+
+    Returns the `Captured` rather than lines, because "this is not a git repo" and
+    "git ls-files ran and we could not read it" need different answers from the
+    caller and an empty list cannot tell them apart.
     """
-    argv = command_argv(command)
-    if argv is None:
+    return run_command(command, root, timeout=timeout)
+
+
+def _lines(command: str, root: Path, timeout: int = 60) -> list[str]:
+    """Lines of a listing command's stdout, empty when it did not succeed."""
+    captured = _listing(command, root, timeout=timeout)
+    if not captured.ok:
         return []
-    try:
-        proc = subprocess.run(argv, cwd=root, text=True, capture_output=True, timeout=timeout, check=False)
-    except (subprocess.TimeoutExpired, OSError):
-        return []
-    if proc.returncode != 0:
-        return []
-    return [line for line in (proc.stdout or "").splitlines() if line.strip()]
+    return [line for line in captured.stdout.splitlines() if line.strip()]
 
 
 def _run(command: str, root: Path, timeout: int = 300) -> dict:
@@ -116,25 +181,29 @@ def _run(command: str, root: Path, timeout: int = 300) -> dict:
     declared checks is the point of this tool; letting a data file choose the
     shell syntax around them is not.
     """
-    argv = command_argv(command)
-    if argv is None:
-        return {
-            "cmd": command,
-            "exit": None,
-            "error": "needs a shell, or its executable is not on PATH",
-            "output": "",
-        }
-    try:
-        proc = subprocess.run(argv, cwd=root, text=True, capture_output=True, timeout=timeout, check=False)
-    except subprocess.TimeoutExpired:
+    captured = run_command(command, root, timeout=timeout)
+    if captured.error and captured.exit is None:
+        return {"cmd": command, "exit": None, "error": captured.error, "output": ""}
+    if captured.timed_out:
         return {"cmd": command, "exit": None, "timed_out": True, "output": ""}
-    except OSError as exc:
-        return {"cmd": command, "exit": None, "error": str(exc), "output": ""}
+    if not captured.captured:
+        return {"cmd": command, "exit": captured.exit, "captured": False, "error": captured.error, "output": ""}
     # Scrubbed here rather than at each use: this output is persisted verbatim
     # into findings.json and report.md, and a failing build routinely prints a
     # token or a DSN.
-    output = scrub_secrets((proc.stdout or "") + (proc.stderr or ""))
-    return {"cmd": command, "exit": proc.returncode, "output": output[-8000:]}
+    output = scrub_secrets(captured.combined)
+    return {"cmd": command, "exit": captured.exit, "output": output[-8000:]}
+
+
+def _capture_failure_reason(captured: Captured) -> str:
+    """Why a command produced no usable output, in words a reader can act on."""
+    if captured.timed_out:
+        return f"`{captured.cmd}` timed out"
+    if not captured.captured:
+        return f"`{captured.cmd}` ran but its output could not be read: {captured.error}"
+    if captured.error:
+        return f"`{captured.cmd}` could not run: {captured.error}"
+    return f"`{captured.cmd}` exited {captured.exit}"
 
 
 def _result(family, findings: list[Finding], commands: list[dict], applies_because: str = "") -> FamilyResult:
@@ -218,6 +287,16 @@ def run_command_family(ctx: Ctx, family, keys: tuple[str, ...], severity: str) -
                 reason=f"`{command}` did not finish within the timeout",
                 commands=commands,
             )
+        if outcome.get("captured") is False:
+            # This is the tests family among others, so an exit code believed without
+            # the output that explains it is the most expensive false pass available.
+            return FamilyResult(
+                id=family.id,
+                title=family.title,
+                outcome="errored",
+                reason=f"`{command}` ran but its output could not be read, so its result cannot be trusted",
+                commands=commands,
+            )
         if outcome.get("exit"):
             findings.append(
                 Finding(
@@ -234,13 +313,68 @@ def run_command_family(ctx: Ctx, family, keys: tuple[str, ...], severity: str) -
     return _result(family, findings, commands, ", ".join(f"stack.test_commands.{key}" for key in keys))
 
 
+def _is_test_path(path: Path, root: Path) -> bool:
+    """Whether a path is test or example material rather than production source.
+
+    Compared against the path *relative to the root*, not `path.parts`. `ctx.files`
+    holds absolute paths, so matching components of the absolute path meant a
+    checkout at `C:\\dev\\tests\\myrepo` skipped the entire secrets scan, and any
+    file literally named `test` was skipped wherever it lived.
+    """
+    relative = relpath(path, root)
+    parts = relative.lower().split("/")
+    if set(parts[:-1]) & _SECRET_SKIP_PARTS:
+        return True
+    return bool(_TEST_FILENAME.search(path.name))
+
+
+def _shannon(text: str) -> float:
+    """Bits of entropy per character. English is low, a generated key is not."""
+    if not text:
+        return 0.0
+    counts = Counter(text)
+    length = len(text)
+    return -sum((n / length) * math.log2(n / length) for n in counts.values())
+
+
+def _quoted_values(line: str) -> list[str]:
+    return [match.group(1) or match.group(2) or "" for match in _QUOTED.finditer(line)]
+
+
+def _looks_like_a_real_credential(line: str) -> bool:
+    """Whether a `generic-assignment` match is plausibly a live credential.
+
+    Only consulted for that one rule. The eight shape-specific patterns - `AKIA`,
+    `sk_live_`, `xox[abprs]-` and the rest - are precise enough that second-guessing
+    them would only weaken them, so they are never routed through here.
+    """
+    values = [value for value in _quoted_values(line) if len(value) >= 12]
+    if not values:
+        return True
+    for value in values:
+        if _OBVIOUS_DUMMY.search(value):
+            continue
+        # A dotted or slashed identifier is a resource name, not a value. This is the
+        # `SECRET = "poolslip-report-link-secret"` case: a Secret Manager resource
+        # name passed to `gcloud --secret=`, matching a whole repo of sibling names.
+        if _shannon(value) < 3.5 and _BASE64ISH.match(value) is None:
+            continue
+        # Words separated by hyphens with no digits is how humans name things.
+        if _shannon(value) < 3.5 and value.count("-") >= 2 and not any(c.isdigit() for c in value):
+            continue
+        if _shannon(value) < 3.0:
+            continue
+        return True
+    return False
+
+
 def run_secrets(ctx: Ctx, family) -> FamilyResult:
     findings: list[Finding] = []
+    ceiling = getattr(family, "max_severity", "critical")
     for path in ctx.files:
-        if set(part.lower() for part in path.parts) & _SECRET_SKIP_PARTS:
-            continue
         if path.suffix.lower() not in _SOURCE_SUFFIXES and path.name not in {".env", ".envrc"}:
             continue
+        in_test = _is_test_path(path, ctx.root)
         try:
             lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
         except OSError:
@@ -249,12 +383,35 @@ def run_secrets(ctx: Ctx, family) -> FamilyResult:
             for rule, pattern, label in _SECRET_PATTERNS:
                 if not pattern.search(line):
                     continue
+                if rule == "generic-assignment" and not _looks_like_a_real_credential(line):
+                    break
+                # The eight shape-specific patterns are precise and are never
+                # second-guessed in production source, where a false negative is what
+                # costs. Inside a file that already declares itself a fixture, a value
+                # that ALSO says it is not real is not evidence of anything: AWS's
+                # published example access key, and constants named FAKE_PEM. Without
+                # this the scan trades six false criticals for sixteen false
+                # suggestions, which is a smaller version of the same bug.
+                #
+                # Note the literal itself is deliberately not written out anywhere in
+                # this file. Doing so raised two criticals against this scanner's own
+                # source, which is the self-detection problem `_MARKER_DETECTOR` above
+                # exists to solve for the marker scan.
+                if in_test and _FIXTURE_MARKER.search(line):
+                    break
+                # Kept rather than dropped, at a severity that says so. Test material
+                # is not where production credentials live, and a scanner that
+                # reports six wrong criticals consumes the attention the seventh -
+                # the real one - needs. Dropping it silently would trade one blind
+                # spot for another.
+                severity = "suggestion" if in_test else ceiling
+                where = " (test or example material)" if in_test else ""
                 findings.append(
                     Finding(
                         family=family.id,
                         rule=f"secret/{rule}",
-                        severity="critical",
-                        title=f"Possible {label} in {relpath(path, ctx.root)}",
+                        severity=severity,
+                        title=f"Possible {label} in {relpath(path, ctx.root)}{where}",
                         detail="The matched value is deliberately not reproduced here.",
                         evidence=[Evidence(relpath(path, ctx.root), number, f"<{label} redacted>")],
                         route=_route(family),
@@ -298,6 +455,18 @@ def run_dependency_audit(ctx: Ctx, family) -> FamilyResult:
             reason=f"no dependency auditor known for {manager!r}",
         )
     outcome = _run(command, ctx.root)
+    if outcome.get("timed_out") or outcome.get("captured") is False:
+        return FamilyResult(
+            id=family.id,
+            title=family.title,
+            outcome="errored",
+            reason=(
+                f"`{command}` did not finish within the timeout"
+                if outcome.get("timed_out")
+                else f"`{command}` ran but its output could not be read"
+            ),
+            commands=[{k: v for k, v in outcome.items() if k != "output"}],
+        )
     findings: list[Finding] = []
     if outcome.get("exit"):
         findings.append(
@@ -319,7 +488,21 @@ def run_dependency_audit(ctx: Ctx, family) -> FamilyResult:
 
 def run_repo_hygiene(ctx: Ctx, family) -> FamilyResult:
     findings: list[Finding] = []
-    paths = _lines("git ls-files", ctx.root)
+    listing = _listing("git ls-files", ctx.root)
+    if not listing.ok:
+        # This family is gated on `.git` existing, so a failure here is the listing
+        # itself failing rather than "not a git repository". Reporting `passed` on a
+        # file list nobody read is the exact shape of wrongness this audit exists to
+        # avoid, and it did so with `files: 0` right there in the evidence.
+        return FamilyResult(
+            id=family.id,
+            title=family.title,
+            outcome="errored",
+            reason=_capture_failure_reason(listing),
+            applies_because="git repository",
+            commands=[listing.as_command_record()],
+        )
+    paths = [line for line in listing.stdout.splitlines() if line.strip()]
     for line in paths:
         first = line.split("/", 1)[0]
         if first in _BUILD_ARTIFACTS or "/__pycache__/" in line or line.endswith(".pyc"):
@@ -345,12 +528,16 @@ def run_dead_code(ctx: Ctx, family) -> FamilyResult:
     import graph per language, and the shell version's `grep -rl "$BASENAME"` stood
     in for one badly enough to false-positive on any common filename.
     """
+    # `_dead_code_language` now gates on the same condition, so reaching this means
+    # the registry and the runner disagree. Kept as a backstop, and deliberately
+    # `errored` rather than `not-checked`: a mismatch between a family's own two
+    # predicates is a bug in this file, not a fact about the repository.
     if not ctx.has("backend", "Python"):
         return FamilyResult(
             id=family.id,
             title=family.title,
-            outcome="not-checked",
-            reason="only the Python arm of this family is implemented",
+            outcome="errored",
+            reason="reached the Python dead-code runner with no Python detected; the family gate and its runner disagree",
         )
     modules = {path.stem: path for path in ctx.files if path.suffix == ".py" and path.stem != "__init__"}
     referenced: set[str] = set()
@@ -381,7 +568,7 @@ def run_dead_code(ctx: Ctx, family) -> FamilyResult:
     return _result(family, findings, [], "Python sources detected")
 
 
-def collect_files(root: Path) -> list[Path]:
+def collect_files(root: Path) -> tuple[list[Path], str]:
     """Files git tracks, or a bounded walk when this is not a repository.
 
     Tracked-only is the right set and not just the faster one: it honours the
@@ -389,8 +576,24 @@ def collect_files(root: Path) -> list[Path]:
     it. On this repository that is what keeps `_unreleased/` - deliberately excluded
     from ruff, pre-commit, yamllint and every marketplace manifest - out of the audit
     as well, with no special case for it anywhere in here.
+
+    Returns the files and a warning, empty when the set is the intended one. The
+    walk is a correct answer for a directory that is not a repository and a wrong
+    one when `git ls-files` was there and failed: the fallback does not read
+    `.gitignore`, so every downstream scan silently widens to files the project
+    excluded. Which of the two happened is not visible in the file list, so it is
+    returned alongside it.
     """
-    tracked = [root / line for line in _lines("git ls-files", root)]
-    if tracked:
-        return [path for path in tracked if path.is_file()]
-    return scan_files(root)
+    is_repo = (root / ".git").exists()
+    listing = _listing("git ls-files", root)
+    if listing.ok:
+        tracked = [root / line for line in listing.stdout.splitlines() if line.strip()]
+        if tracked:
+            return [path for path in tracked if path.is_file()], ""
+    if not is_repo:
+        return scan_files(root), ""
+    return scan_files(root), (
+        f"file scope fell back to a directory walk because {_capture_failure_reason(listing)}. "
+        "That walk does not honour .gitignore, so this audit may have read files the "
+        "project excludes."
+    )

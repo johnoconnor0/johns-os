@@ -21,6 +21,8 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -127,6 +129,89 @@ def command_argv(command: str) -> list[str] | None:
     return [resolved, *argv[1:]]
 
 
+@dataclass
+class Captured:
+    """One command's result, including whether its output was actually read.
+
+    `captured` is the field that matters. Every consumer of this used to write
+    `(proc.stdout or "")`, which collapses two different facts into one string:
+    "the command printed nothing" and "we failed to read what it printed". The
+    second is an audit that lost evidence, and it was rendering as a clean pass.
+    """
+
+    cmd: str
+    exit: int | None = None
+    stdout: str = ""
+    stderr: str = ""
+    captured: bool = True
+    timed_out: bool = False
+    error: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.exit == 0 and self.captured and not self.timed_out and not self.error
+
+    @property
+    def combined(self) -> str:
+        return self.stdout + self.stderr
+
+    def as_command_record(self, output: str = "", limit: int = 8000) -> dict[str, Any]:
+        """The `commands[]` entry a FamilyResult carries for this run."""
+        record: dict[str, Any] = {"cmd": self.cmd, "exit": self.exit}
+        if output:
+            record["output"] = output[-limit:]
+        if self.timed_out:
+            record["timed_out"] = True
+        if self.error:
+            record["error"] = self.error
+        if not self.captured:
+            record["captured"] = False
+        return record
+
+
+def run_command(command: str, root: Path, timeout: int = 300) -> Captured:
+    """Run one command as an argv list, never through a shell, decoded as UTF-8.
+
+    The explicit `encoding`/`errors` is load-bearing on Windows. `text=True` alone
+    decodes child output with `locale.getencoding()`, which is cp1252 here, and
+    cp1252 leaves 0x81, 0x8D, 0x8F, 0x90 and 0x9D undefined - so one byte of UTF-8
+    in a tool's output raises UnicodeDecodeError. Because these calls pass
+    `timeout=`, they route through `Popen.communicate`, which on Windows reads in
+    threads: the exception killed the reader thread, `is_alive()` was then false so
+    no TimeoutExpired was raised, the buffer stayed empty, and `subprocess.run`
+    returned `stdout=None` alongside the real exit code. Nothing raised, and an
+    audit that had read none of its evidence reported success.
+    """
+    argv = command_argv(command)
+    if argv is None:
+        return Captured(cmd=command, error="needs a shell, or its executable is not on PATH")
+    try:
+        proc = subprocess.run(  # noqa: S603 - argv list, no shell, resolved executable
+            argv,
+            cwd=root,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except subprocess.TimeoutExpired:
+        return Captured(cmd=command, timed_out=True)
+    except OSError as exc:
+        return Captured(cmd=command, error=str(exc))
+    # `errors="replace"` means the decode above cannot raise, so this should now be
+    # unreachable. It stays because the failure it detects was silent for the whole
+    # life of this script, and a guard that never fires is cheaper than that was.
+    if proc.stdout is None or proc.stderr is None:
+        return Captured(
+            cmd=command,
+            exit=proc.returncode,
+            captured=False,
+            error="the output of this command could not be read",
+        )
+    return Captured(cmd=command, exit=proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
+
+
 def now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
 
@@ -148,6 +233,54 @@ def repo_root(start: Path | None = None) -> Path:
 
 def plugin_root() -> Path:
     return Path(__file__).resolve().parents[1]
+
+
+def _version_key(name: str) -> tuple[int, ...]:
+    """`0.10.4` sorts above `0.9.0`, which string ordering gets backwards."""
+    parts: list[int] = []
+    for chunk in name.split("."):
+        digits = "".join(char for char in chunk if char.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts)
+
+
+def lifecycle_candidates(*relative: str) -> list[Path]:
+    """Where a file inside engineering-lifecycle could be, best first.
+
+    Two layouts, and only the first one ever worked. In this repository the two
+    plugins are siblings, so `<plugin>/../engineering-lifecycle/...` resolves. Once
+    installed they are not: a plugin runs from
+    `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`, so the sibling probe
+    resolved to `cache/<marketplace>/ai-utilities/engineering-lifecycle/...` - inside
+    ai-utilities itself, and missing the version segment as well.
+
+    That is why `docs-references` reported "engineering-lifecycle is not installed
+    alongside this plugin" on a machine with ten versions of it installed, and why
+    the `imported` rung of the stack ladder could never fire off a real install.
+    """
+    here = plugin_root()
+    found: list[Path] = [here.parent.joinpath("engineering-lifecycle", *relative)]
+    # The installed layout, newest version first.
+    marketplace = here.parent.parent / "engineering-lifecycle"
+    if marketplace.is_dir():
+        versions = sorted(
+            (child for child in marketplace.iterdir() if child.is_dir()),
+            key=lambda child: _version_key(child.name),
+            reverse=True,
+        )
+        found.extend(version.joinpath(*relative) for version in versions)
+    return found
+
+
+def resolve_lifecycle_file(*relative: str) -> tuple[Path | None, list[Path]]:
+    """The first candidate that exists, and every path tried.
+
+    The paths are returned so a failure can say what it looked for. Asserting that a
+    plugin is not installed, when all that happened is one lookup missing, is a claim
+    the tool never checked.
+    """
+    tried = lifecycle_candidates(*relative)
+    return next((path for path in tried if path.exists()), None), tried
 
 
 def read_json(path: Path, default: Any = None) -> Any:

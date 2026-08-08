@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-08
+
+Ships `ai-utilities` 0.3.0, plus the repository tooling changes that had accumulated
+unreleased since 0.3.0. `engineering-lifecycle` (0.10.4) and `business-development`
+(0.2.0) are unchanged in this release and keep their versions.
+
 ### Added
 
 - **Documentation references are checked against reality, and a dead one fails the build.** `validate-repo.py` and a `pre-commit` hook now run `engineering-lifecycle/scripts/reference-check.py`, which resolves every plugin, skill, agent, command and marketplace name written in prose against the set that exists. It was built after an audit found this marketplace's own tooling routing work to four plugins it does not ship and telling the reader to install them from somewhere else. Only the closed-namespace classes block; path references are advisory, because the difference in precision between the two was measured rather than assumed.
@@ -32,6 +38,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - Removed empty `interface.privacyPolicyURL` and `interface.termsOfServiceURL` from all three plugins' Codex manifests. Codex rejects those keys when provided but blank, so an empty string is strictly worse than omitting the key. `johns-os-marketplace.py validate` now enforces this across every plugin in the catalogue rather than leaving it to each plugin's own validator.
+- **`ai-utilities` 0.3.0 closes seven defects recorded against `plan-completion-audit`,** all from one real run that produced a report which looked authoritative and was wrong. They share a failure mode worth naming here because it is not specific to that skill: the tool lost information silently and then rendered a confident verdict over the gap. A plan stated in markdown tables parsed as six items from an unrelated list and reported "67% complete" against a denominator of twenty-one; a cp1252 decode killed a subprocess reader thread so `subprocess.run` returned `stdout=None` beside a returncode of 0, and two check families reported `passed` on evidence they never read; a secrets scanner produced six false criticals and no true one; and a cross-plugin path lookup that only resolves in a source checkout made a family report the other plugin "not installed" on a machine with ten versions of it. Full detail in [`ai-utilities/CHANGELOG.md`](ai-utilities/CHANGELOG.md).
+
+  Two of those have a bearing beyond `ai-utilities`. `subprocess.run(..., text=True)` with no `encoding=` is a live defect on Windows anywhere in this repository, and `engineering-lifecycle/scripts/eng_common.py` and five of its hook scripts still carry it. And resolving a sibling plugin by relative path works in this checkout and fails once installed, because plugins run from separate versioned directories under `~/.claude/plugins/cache/`.
 
 ## [0.3.0] - 2026-07-16
 

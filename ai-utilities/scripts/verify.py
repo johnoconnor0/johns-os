@@ -37,12 +37,11 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-import subprocess
 from pathlib import Path
 from typing import Any
 
-from audit_common import command_argv as _argv
 from audit_common import repo_root
+from audit_common import run_command as _run_command
 from audit_common import scrub_secrets as _scrub
 from stack_probe import resolve_stack
 
@@ -146,30 +145,28 @@ def verify(
 
     results = []
     for command in chosen["commands"]:
-        argv = _argv(command)
-        if argv is None:
+        captured = _run_command(command, root, timeout=timeout)
+        if captured.timed_out:
+            results.append({"cmd": command, "exit": None, "status": "timeout", "output": ""})
+            continue
+        if captured.exit is None:
             results.append(
                 {
                     "cmd": command,
                     "exit": None,
-                    "status": "skipped",
+                    "status": "skipped" if "needs a shell" in captured.error else "error",
                     "output": "",
-                    "reason": "needs a shell, or its executable is not on PATH",
+                    "reason": captured.error,
                 }
             )
             continue
-        try:
-            proc = subprocess.run(  # noqa: S603 - argv list, no shell, resolved executable
-                argv, cwd=root, text=True, capture_output=True, check=False, timeout=timeout
-            )
-        except subprocess.TimeoutExpired:
-            results.append({"cmd": command, "exit": None, "status": "timeout", "output": ""})
+        if not captured.captured:
+            # A command whose output was lost is not a command that passed, whatever
+            # its exit code says.
+            results.append({"cmd": command, "exit": captured.exit, "status": "error", "output": captured.error})
             continue
-        except OSError as exc:
-            results.append({"cmd": command, "exit": None, "status": "error", "output": str(exc)})
-            continue
-        output = _scrub(((proc.stdout or "") + (proc.stderr or ""))[-4000:])
-        results.append({"cmd": command, "exit": proc.returncode, "status": "ran", "output": output})
+        output = _scrub(captured.combined[-4000:])
+        results.append({"cmd": command, "exit": captured.exit, "status": "ran", "output": output})
 
     failed = [item for item in results if item.get("status") == "ran" and item["exit"] != 0]
     inconclusive = [item for item in results if item.get("status") in {"timeout", "error"}]
