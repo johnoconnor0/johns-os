@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from eng_common import engineering_root, repo_root
+from eng_common import CAPTURE_TEXT, engineering_root, repo_root
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "validate-artifact.py"
 
@@ -28,7 +28,7 @@ def main() -> int:
     if not artifacts:
         return 0
     proc = subprocess.run(
-        [sys.executable, "-B", str(SCRIPT), *artifacts], cwd=root, text=True, capture_output=True, check=False
+        [sys.executable, "-B", str(SCRIPT), *artifacts], cwd=root, capture_output=True, check=False, **CAPTURE_TEXT
     )
     if proc.stdout.strip():
         print(proc.stdout.strip())

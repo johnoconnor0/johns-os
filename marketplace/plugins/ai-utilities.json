@@ -4,7 +4,7 @@
   "summary": "Author and vet Claude Code extensions (skill-creator, skill-review) and close the plan-to-implementation loop (plan-completion-audit, audit-resolver).",
   "status": "local",
   "category": "Developer Tools",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "homepage": "https://weblifter.com.au",
   "path": "ai-utilities",
   "manifest": "ai-utilities/.codex-plugin/plugin.json",

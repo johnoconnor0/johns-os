@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from eng_common import repo_root, workspace_exists, write_hygiene_part
+from eng_common import CAPTURE_TEXT, repo_root, workspace_exists, write_hygiene_part
 
 # Inspect the working directory's .gitignore / untracked files, but write the
 # report into the repo-root workspace so .project stays at the repo root.
@@ -35,7 +35,7 @@ def gitignore_lines() -> set[str]:
 
 
 def untracked() -> list[str]:
-    proc = subprocess.run(["git", "status", "--porcelain"], cwd=CWD, text=True, capture_output=True, check=False)
+    proc = subprocess.run(["git", "status", "--porcelain"], cwd=CWD, capture_output=True, check=False, **CAPTURE_TEXT)
     if proc.returncode != 0:
         return []
     return [line[3:] for line in proc.stdout.splitlines() if line.startswith("?? ")]

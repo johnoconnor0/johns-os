@@ -169,7 +169,19 @@ class Captured:
         return record
 
 
-def run_command(command: str, root: Path, timeout: int = 300) -> Captured:
+# Wall-clock budget for one check command. Five minutes suits a lint or a small
+# suite and is far too short for a large one - a repository whose tests take eight
+# minutes had its `tests` family reported `errored` on every run, with no way to say
+# so from the command line. `--timeout` overrides it.
+DEFAULT_COMMAND_TIMEOUT = 300
+
+# Listings are a different budget deliberately. `git ls-files` returning in under a
+# minute is a property of git rather than of the project, so tying it to the check
+# budget would let `--timeout 1800` also mean "wait half an hour for a file list".
+DEFAULT_LISTING_TIMEOUT = 60
+
+
+def run_command(command: str, root: Path, timeout: int = DEFAULT_COMMAND_TIMEOUT) -> Captured:
     """Run one command as an argv list, never through a shell, decoded as UTF-8.
 
     The explicit `encoding`/`errors` is load-bearing on Windows. `text=True` alone

@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import re
 import sys
 import tempfile
 import unittest
@@ -425,6 +426,119 @@ class FindingsTests(unittest.TestCase):
         self.assertEqual(document["totals"]["critical"], 1)
         self.assertEqual(document["totals"]["findings_open"], 1)
         self.assertEqual(document["totals"]["findings_dismissed"], 2)
+
+
+class CommandTimeoutTests(unittest.TestCase):
+    """The budget for a check command belongs to the repository, not to this script.
+
+    `_run` was fixed at 300 seconds with no way to say otherwise from the command
+    line, though `verify.py` had `--timeout` all along. A suite that takes eight
+    minutes is not a hung command, and on such a repository the `tests` family
+    reported `errored` on every run with nothing the operator could do about it.
+    """
+
+    def _ctx(self, timeout: int | None = None, **stack) -> families.Ctx:
+        base = {"detector": "vendored", "test_commands": {}, "package_manager": "npm"}
+        kwargs = {} if timeout is None else {"timeout": timeout}
+        return families.Ctx(root=Path("."), stack={**base, **stack}, plan={"parsed_by": None}, files=[], **kwargs)
+
+    def test_the_default_is_unchanged_when_the_flag_is_not_passed(self) -> None:
+        self.assertEqual(self._ctx().timeout, audit_common.DEFAULT_COMMAND_TIMEOUT)
+        self.assertEqual(audit_common.DEFAULT_COMMAND_TIMEOUT, 300)
+
+    def test_the_context_budget_reaches_the_subprocess(self) -> None:
+        # The plumbing is the whole feature, so it is asserted rather than assumed:
+        # a flag that is parsed and then dropped looks identical to one that works.
+        seen: list[int] = []
+
+        def spy(command, root, timeout=None):
+            seen.append(timeout)
+            return {"cmd": command, "exit": 0, "output": "ok"}
+
+        ctx = self._ctx(timeout=1800, test_commands={"unit": "python -c pass"})
+        with mock.patch.object(checks, "_run", side_effect=spy):
+            checks.run_command_family(ctx, families.BY_ID["tests"], ("unit",), "critical")
+            checks.run_dependency_audit(ctx, families.BY_ID["dependency-audit"])
+        self.assertEqual(seen, [1800, 1800])
+
+    def test_a_listing_keeps_its_own_smaller_budget(self) -> None:
+        # `--timeout 1800` must not also mean "wait half an hour for a file list".
+        self.assertEqual(audit_common.DEFAULT_LISTING_TIMEOUT, 60)
+        self.assertLess(audit_common.DEFAULT_LISTING_TIMEOUT, audit_common.DEFAULT_COMMAND_TIMEOUT)
+
+    def test_a_raised_budget_lets_a_slow_command_finish(self) -> None:
+        # End to end through the real subprocess: the same command times out under a
+        # budget below its runtime and succeeds above it.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "slow.py").write_text("import time\ntime.sleep(2)\n", encoding="utf-8")
+            self.assertTrue(audit_common.run_command("python slow.py", root, timeout=1).timed_out)
+            self.assertTrue(audit_common.run_command("python slow.py", root, timeout=30).ok)
+
+    def test_the_cli_rejects_a_budget_that_cannot_run_anything(self) -> None:
+        with (
+            mock.patch.object(sys, "argv", ["run-audit.py", "--timeout", "0"]),
+            contextlib.redirect_stderr(io.StringIO()) as err,
+            self.assertRaises(SystemExit),
+        ):
+            run_audit.main()
+        self.assertIn("--timeout", err.getvalue())
+
+
+class SingleSourceOfTruthTests(unittest.TestCase):
+    """One declaration per vocabulary, enforced rather than agreed.
+
+    `SEVERITIES` was written out three times - `findings`, `resolver`, and
+    `render_report` under a second name - and the schema string a fourth time as a
+    literal in `resolver`'s markdown converter. None of it was wrong on the day it
+    was written, which is the point: a copy is a defect that has not happened yet.
+
+    The schema copy was the dangerous one. `validate_document` compares schema by
+    exact equality, so bumping `findings.SCHEMA` would have left the converter
+    stamping every legacy report with the old version and failing validation for a
+    reason none of them names.
+    """
+
+    LITERAL = re.compile(r"""^\s*_?[A-Z][A-Z_]*\s*=\s*\(\s*["']critical["']""", re.M)
+
+    def _scripts(self):
+        return sorted(SCRIPTS.glob("*.py"))
+
+    def test_the_severity_vocabulary_is_declared_once(self) -> None:
+        declared = [path.name for path in self._scripts() if self.LITERAL.search(path.read_text(encoding="utf-8"))]
+        self.assertEqual(declared, ["findings.py"], "SEVERITIES must be declared only in findings.py")
+
+    def test_the_scan_can_actually_see_a_second_declaration(self) -> None:
+        # The control. A regex that matches nothing passes vacuously.
+        self.assertTrue(self.LITERAL.search('SEVERITIES = ("critical", "warning")\n'))
+        self.assertTrue(self.LITERAL.search('_SEVERITY_ORDER = ("critical", "warning")\n'))
+
+    def test_the_schema_string_is_never_written_out_as_a_literal(self) -> None:
+        offenders = [
+            f"{path.name}:{text[: match.start()].count(chr(10)) + 1}"
+            for path in self._scripts()
+            if path.name != "findings.py"
+            for text in [path.read_text(encoding="utf-8")]
+            for match in re.finditer(re.escape(findings_mod.SCHEMA), text)
+        ]
+        self.assertEqual(offenders, [], "import findings.SCHEMA instead of repeating it")
+
+    def test_every_consumer_agrees_with_findings(self) -> None:
+        self.assertIs(resolver.SEVERITIES, findings_mod.SEVERITIES)
+        self.assertIs(render_report.SEVERITIES, findings_mod.SEVERITIES)
+        self.assertIs(render_report.DISMISSED_STATUSES, findings_mod.DISMISSED_STATUSES)
+
+    def test_a_converted_markdown_report_carries_the_current_schema(self) -> None:
+        # The failure the literal would have caused, pinned end to end.
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "2026-01-01_000000.md"
+            report.write_text(
+                "# Audit\n\n| ID | Severity | Location | Finding |\n| --- | --- | --- | --- |\n"
+                "| F001 | critical | `src/a.py:1` | Something |\n",
+                encoding="utf-8",
+            )
+            document = resolver.load(report)
+        self.assertEqual(document["schema"], findings_mod.SCHEMA)
 
 
 class FamilyRegistryTests(unittest.TestCase):

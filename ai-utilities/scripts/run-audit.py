@@ -25,6 +25,7 @@ import sys
 from pathlib import Path
 
 from audit_common import (
+    DEFAULT_COMMAND_TIMEOUT,
     audit_dir,
     now_iso,
     relpath,
@@ -100,7 +101,7 @@ def _reference_findings(ctx: Ctx, family) -> tuple[FamilyResult, set[str]]:
             ),
             set(),
         )
-    outcome = _run(f'"{sys.executable}" -B "{script}" --root .', ctx.root)
+    outcome = _run(f'"{sys.executable}" -B "{script}" --root .', ctx.root, timeout=ctx.timeout)
     if not outcome.get("output"):
         # Empty output used to parse as `{}`, which made `checked` default True and
         # `errors` default empty - so a reference checker whose output was lost, or
@@ -181,6 +182,7 @@ def audit(
     stamp: str,
     prefer: str = "",
     allow_untrusted_commands: bool = False,
+    timeout: int = DEFAULT_COMMAND_TIMEOUT,
 ) -> dict:
     stack = resolve_stack(root, prefer)
     files, scope_warning = collect_files(root)
@@ -196,6 +198,7 @@ def audit(
         plan=plan,
         files=files,
         allow_untrusted_commands=allow_untrusted_commands,
+        timeout=timeout,
     )
 
     results: list[FamilyResult] = []
@@ -338,7 +341,18 @@ def main() -> int:
         action="store_true",
         help="Run check commands taken verbatim from the audited repository's own stack.json",
     )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_COMMAND_TIMEOUT,
+        help=(
+            f"Seconds one check command may take (default {DEFAULT_COMMAND_TIMEOUT}). "
+            "A suite slower than this is reported `errored`, not failed."
+        ),
+    )
     args = parser.parse_args()
+    if args.timeout < 1:
+        parser.error("--timeout must be at least 1 second")
 
     # An explicit --root is taken literally. Passing it through repo_root walks up to
     # the nearest .git or plugin manifest, which silently audits the parent project
@@ -350,7 +364,7 @@ def main() -> int:
     if plan_path and not plan_path.is_absolute():
         plan_path = root / plan_path
 
-    document = audit(root, plan_path, stamp, args.prefer, args.allow_untrusted_commands)
+    document = audit(root, plan_path, stamp, args.prefer, args.allow_untrusted_commands, args.timeout)
     if args.print:
         print(json.dumps(document, indent=2, sort_keys=True))
         return 1 if document.get("validation_errors") else 0

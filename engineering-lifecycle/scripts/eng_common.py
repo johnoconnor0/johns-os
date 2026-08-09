@@ -516,13 +516,33 @@ def append_jsonl(path: Path, data: dict[str, Any]) -> None:
         f.write(json.dumps(data, sort_keys=True) + "\n")
 
 
+# How every capturing subprocess call in this plugin must decode its child's output.
+#
+# `text=True` on its own decodes with `locale.getencoding()`, which is cp1252 on a
+# default Windows install, and cp1252 leaves 0x81, 0x8D, 0x8F, 0x90 and 0x9D
+# undefined. One byte of UTF-8 from a child - a stray em-dash in a commit message, a
+# non-ASCII branch name, a dependency printing a box-drawing character - raises
+# UnicodeDecodeError.
+#
+# Where the call also passes `timeout=`, that exception is raised inside the reader
+# thread `Popen.communicate` uses on Windows. The thread dies, `is_alive()` is then
+# false so no TimeoutExpired is raised, and `subprocess.run` returns `stdout=None`
+# beside the real exit code. Nothing propagates. The same defect in `ai-utilities`
+# made two audit families report `passed` on evidence they had never read; here it
+# would let a hook see no `git status` output and conclude the tree is clean.
+#
+# `errors="replace"` rather than `"strict"`: a byte we cannot decode should cost one
+# character, not the command's entire output.
+CAPTURE_TEXT: dict[str, Any] = {"encoding": "utf-8", "errors": "replace"}
+
+
 def git(args: list[str], cwd: Path | None = None) -> tuple[int, str, str]:
     proc = subprocess.run(
         ["git", *args],
         cwd=str(cwd or repo_root()),
-        text=True,
         capture_output=True,
         check=False,
+        **CAPTURE_TEXT,
     )
     return proc.returncode, proc.stdout, proc.stderr
 

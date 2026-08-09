@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.10.5 - 2026-08-09
+
+### Fixed
+
+- **Child process output is decoded as UTF-8, not the platform codepage.** Seven
+  capturing `subprocess` call sites passed `text=True` with no `encoding=`:
+  `eng_common.git` (which four of the others reach through), all four hook scripts,
+  `council.py`'s command adapter, and `build-dashboard-fixture.py`. `text=True` alone
+  decodes with `locale.getencoding()` — cp1252 on a default Windows install, which
+  leaves 0x81, 0x8D, 0x8F, 0x90 and 0x9D undefined — so one byte of UTF-8 from a
+  child raises `UnicodeDecodeError`. An em-dash in a commit message or a non-ASCII
+  filename is enough.
+
+  Where the call also passes `timeout=`, that exception is raised inside the reader
+  thread `Popen.communicate` uses on Windows. The thread dies, `is_alive()` is then
+  false so no `TimeoutExpired` is raised, and `subprocess.run` returns `stdout=None`
+  beside the real exit code — nothing propagates. The same defect in `ai-utilities`
+  made two audit families report `passed` on evidence they had never read; here the
+  consequence is a hook seeing no `git status` output and concluding the tree is
+  clean.
+
+  The durable half of the fix is a test, not the seven edits. `ChildOutputDecoding
+  Tests` parses every capturing call under `scripts/`, `hooks/scripts/` and `bin/`
+  and fails on any that does not name an encoding, because the way this recurs is a
+  *new* call site being added without the kwarg — which no per-site test can catch.
+  It carries its own control, so the scan cannot pass by matching nothing.
+
+  Test files are deliberately untouched: same shape, different consequence (a
+  confusing test failure rather than a silently wrong answer).
+
 ## 0.10.4 - 2026-08-08
 
 The last four recorded defects. **No `@unittest.expectedFailure` remains anywhere

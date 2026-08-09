@@ -18,8 +18,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# `findings` owns every vocabulary in this document. SEVERITIES used to be redeclared
+# here under a second name and again in `resolver`: three copies of one tuple that
+# also fixes the sort order, so adding a severity meant finding all three or watching
+# the new one sort last and drop out of the counts.
 from families import registered_ids
-from findings import DISMISSED_STATUSES, validate_document
+from findings import DISMISSED_STATUSES, SEVERITIES, validate_document
 
 _OUTCOME_LABEL = {
     "passed": "PASSED",
@@ -28,12 +32,6 @@ _OUTCOME_LABEL = {
     "not-checked": "NOT CHECKED",
     "errored": "ERRORED",
 }
-
-_SEVERITY_ORDER = ("critical", "warning", "suggestion")
-
-# Kept in step with findings.DISMISSED_STATUSES. Imported rather than copied, so a
-# status added there cannot silently keep counting as live work here.
-_DISMISSED_STATUSES = DISMISSED_STATUSES
 
 
 def _plan_summary(document: dict[str, Any]) -> list[str]:
@@ -140,7 +138,7 @@ def _stack_summary(stack: dict[str, Any]) -> list[str]:
 
 
 def _is_dismissed(finding: dict[str, Any]) -> bool:
-    return finding.get("status", "open") in _DISMISSED_STATUSES
+    return finding.get("status", "open") in DISMISSED_STATUSES
 
 
 def _evidence_caveats(document: dict[str, Any]) -> list[str]:
@@ -188,7 +186,7 @@ def render(document: dict[str, Any]) -> str:
     # examined and dismissed with evidence.
     live = [item for item in document["findings"] if not _is_dismissed(item)]
     dismissed = [item for item in document["findings"] if _is_dismissed(item)]
-    totals = {severity: sum(1 for item in live if item["severity"] == severity) for severity in _SEVERITY_ORDER}
+    totals = {severity: sum(1 for item in live if item["severity"] == severity) for severity in SEVERITIES}
     lines: list[str] = [
         "# Plan Completion Audit",
         "",
@@ -340,7 +338,7 @@ def _action_list(document: dict[str, Any], findings: dict[str, Any]) -> list[str
         lines.append(f"**{len(unverifiable)} plan item(s) could not be verified either way.**")
         lines.append("")
     any_findings = False
-    for severity in _SEVERITY_ORDER:
+    for severity in SEVERITIES:
         group = [item for item in findings.values() if item["severity"] == severity and not _is_dismissed(item)]
         if not group:
             continue

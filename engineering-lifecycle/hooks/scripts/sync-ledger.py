@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from eng_common import engineering_root, repo_root, workspace_exists
+from eng_common import CAPTURE_TEXT, engineering_root, repo_root, workspace_exists
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "sync-ledger.py"
 
@@ -58,7 +58,7 @@ def main() -> int:
     if stop_mode and not workspace_is_dirty(repo_root()):
         return 0
 
-    proc = subprocess.run([sys.executable, "-B", str(SCRIPT)], text=True, capture_output=True, check=False)
+    proc = subprocess.run([sys.executable, "-B", str(SCRIPT)], capture_output=True, check=False, **CAPTURE_TEXT)
     if stop_mode:
         # Silent on *stdout* - that is the rule, and the reason is the standby loop
         # in the docstring above. It was never a reason to discard stderr as well,

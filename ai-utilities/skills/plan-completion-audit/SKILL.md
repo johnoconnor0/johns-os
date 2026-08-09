@@ -80,6 +80,11 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/run-audit.py" --root . --plan <path> --all
 
 Read the commands first — they are quoted verbatim in each family's `reason` — and
 pass the flag only on a repository whose `stack.json` you are willing to execute.
+
+`--timeout` sets how long one check command may take, in seconds, default 300. Raise
+it when a suite is legitimately slower than that: a command that overruns is reported
+`errored`, which is honest but is not the same as a failure, and on a repository whose
+tests take eight minutes every run would say so.
 Commands the probe *derived* from file presence are trusted without it, so this
 matters only when `stack.detector` is `workspace`. The report states plainly at the
 top when it contains no test evidence; do not present such a run as a verdict on
