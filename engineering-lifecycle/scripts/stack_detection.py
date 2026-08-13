@@ -12,6 +12,7 @@ can be traced to its cause rather than argued about.
 from __future__ import annotations
 
 import re
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -333,6 +334,52 @@ def _python_dependencies(root: Path) -> set[str]:
     return names
 
 
+def _declared_commands(root: Path) -> dict[str, str]:
+    """Commands the repository states for itself. These beat anything derived.
+
+    A Node repo can already correct a wrong guess: the branch below reads
+    package.json scripts by NAME, so naming a script `lint` is how a repo tells
+    the detector what its lint actually is. Nothing equivalent existed anywhere
+    else. The Python branch infers from dependency presence alone, so a repo
+    whose real checks are a pre-commit run and a bespoke validator had no way to
+    say so, and no way to correct a derivation that was too narrow.
+
+    Too narrow is the failure that matters, because it is silent. This
+    repository derived `python -m unittest discover -s tests`, which runs the
+    root suite - 90 tests. It also has `engineering-lifecycle/tests` (277) and
+    `ai-utilities/tests` (113), and a completion audit reading the derived
+    command ran 90 of 480 and reported the test suite as passing. `validate-repo.py`
+    already discovers all three, precisely because a hardcoded list once meant
+    `ai-utilities` could add a suite that CI never ran.
+
+    Keys are the same four the rest of this module uses: `unit`, `lint`,
+    `typecheck`, `build`. Declared in pyproject.toml:
+
+        [tool.engineering-lifecycle.commands]
+        unit = "python scripts/validate-repo.py"
+        lint = "pre-commit run --all-files"
+
+    Anything unparseable is ignored rather than raised: a malformed table should
+    cost the repository its override, not its stack detection.
+    """
+    path = root / "pyproject.toml"
+    if not path.is_file():
+        return {}
+    try:
+        with path.open("rb") as handle:
+            data = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
+    table = data.get("tool", {})
+    for key in ("engineering-lifecycle", "commands"):
+        table = table.get(key, {}) if isinstance(table, dict) else {}
+    if not isinstance(table, dict):
+        return {}
+
+    return {str(label): value.strip() for label, value in table.items() if isinstance(value, str) and value.strip()}
+
+
 def _resolve_test_commands(root: Path, package_manager: str | None) -> dict[str, str]:
     """Only emit commands that actually exist.
 
@@ -340,6 +387,9 @@ def _resolve_test_commands(root: Path, package_manager: str | None) -> dict[str,
     package manager alone, so it advertised scripts that were never defined, and
     told this repo to run pytest when it runs unittest and does not depend on
     pytest.
+
+    Derivation is a guess, so a repository's own declaration overrides it. See
+    `_declared_commands`.
     """
     commands: dict[str, str] = {}
     if package_manager in {"pnpm", "yarn", "npm", "bun"}:
@@ -349,9 +399,8 @@ def _resolve_test_commands(root: Path, package_manager: str | None) -> dict[str,
         for label, script in (("unit", "test"), ("lint", "lint"), ("typecheck", "typecheck"), ("build", "build")):
             if script in scripts:
                 commands[label] = f"{runner} {script}"
-        return commands
 
-    if package_manager == "python":
+    elif package_manager == "python":
         deps = _python_dependencies(root)
         if "pytest" in deps or "[tool.pytest" in _safe_read(root / "pyproject.toml"):
             commands["unit"] = "python -m pytest"
@@ -361,6 +410,9 @@ def _resolve_test_commands(root: Path, package_manager: str | None) -> dict[str,
             commands["lint"] = "python -m ruff check ."
         if "mypy" in deps:
             commands["typecheck"] = "python -m mypy ."
+
+    # Last, so a declaration wins over every derivation above regardless of stack.
+    commands.update(_declared_commands(root))
     return commands
 
 

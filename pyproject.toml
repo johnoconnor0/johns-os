@@ -13,3 +13,25 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "B", "SIM"]
 quote-style = "double"
 indent-style = "space"
 line-ending = "lf"
+
+# Commands this repository states for itself, overriding what stack detection
+# infers. Consumed by engineering-lifecycle's stack_detection, and through
+# .project/.engineering/context/stack.json by anything that reads it — notably
+# the plan-completion audit, which runs these and reports the result as the
+# repository's verdict.
+#
+# `unit` is declared because the derived command was too narrow, and silently.
+# Detection produced `python -m unittest discover -s tests`, which runs the root
+# suite: 90 tests. This repository also has engineering-lifecycle/tests (277) and
+# ai-utilities/tests (113). An audit ran 90 of 480 and reported the test suite as
+# passing. validate-repo.py already discovers all three — it finds test suites
+# rather than listing them, precisely because a hardcoded list once meant
+# ai-utilities could add a suite CI never ran — so it is what the audit should run.
+#
+# `lint` is deliberately NOT declared as `pre-commit run --all-files`, though that
+# is what CI runs. Several of those hooks are fixers: ruff-format rewrites files
+# and reports failure when it does. A check that mutates the tree it is auditing
+# is not a check, and it would leave the working tree dirty for whatever runs
+# next. The derived `python -m ruff check .` is check-only and stays.
+[tool.engineering-lifecycle.commands]
+unit = "python scripts/validate-repo.py"
