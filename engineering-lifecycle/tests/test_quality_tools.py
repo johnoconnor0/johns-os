@@ -3054,6 +3054,58 @@ class BoundedScanTests(unittest.TestCase):
             self.assertEqual(commands["unit"], "python -m unittest discover -s tests")
             self.assertEqual(commands["lint"], "python -m ruff check .")
 
+    def test_declared_commands_override_what_detection_infers(self) -> None:
+        # Derivation is a guess, and the guess that hurts is the one that is too
+        # NARROW, because it is silent. A missing command reports not-applicable
+        # and is visible. A command covering a fifth of the suite reports PASSED:
+        # this repository derived `unittest discover -s tests` (90 tests) while
+        # also holding engineering-lifecycle/tests (277) and ai-utilities/tests
+        # (113), and a completion audit ran 90 of 480 and called it a pass.
+        #
+        # A Node repo could always correct a bad guess by naming a package.json
+        # script. Nothing else could, until this.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "py"
+            (root / "tests").mkdir(parents=True)
+            (root / "requirements-dev.txt").write_text("ruff==0.16.0\n", encoding="utf-8")
+            (root / "pyproject.toml").write_text(
+                "[tool.ruff]\n"
+                '\n[tool.engineering-lifecycle.commands]\nunit = "python scripts/validate-repo.py"\n',
+                encoding="utf-8",
+            )
+            commands = quality_tools.detect_stack(root)["test_commands"]
+
+            # The declaration replaces the derivation for the key it names ...
+            self.assertEqual(commands["unit"], "python scripts/validate-repo.py")
+            self.assertNotEqual(commands["unit"], "python -m unittest discover -s tests")
+            # ... and leaves every other derived key alone.
+            self.assertEqual(commands["lint"], "python -m ruff check .")
+
+    def test_declared_commands_survive_a_malformed_table(self) -> None:
+        # A bad table should cost a repository its override, not its stack
+        # detection. Raising here would break SessionStart for every consumer of
+        # a repo with one stray character in its pyproject.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "py"
+            (root / "tests").mkdir(parents=True)
+            (root / "pyproject.toml").write_text("[tool.engineering-lifecycle.commands\n", encoding="utf-8")
+            commands = quality_tools.detect_stack(root)["test_commands"]
+            self.assertEqual(commands["unit"], "python -m unittest discover -s tests")
+
+        # Non-string and empty values are ignored rather than emitted as commands
+        # that would fail to execute.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "py"
+            (root / "tests").mkdir(parents=True)
+            (root / "pyproject.toml").write_text(
+                '[tool.engineering-lifecycle.commands]\nunit = 7\nlint = "   "\nbuild = "make all"\n',
+                encoding="utf-8",
+            )
+            commands = quality_tools.detect_stack(root)["test_commands"]
+            self.assertEqual(commands["unit"], "python -m unittest discover -s tests")
+            self.assertNotIn("lint", commands)
+            self.assertEqual(commands["build"], "make all")
+
     def test_workspace_globs_read_pnpm_and_package_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

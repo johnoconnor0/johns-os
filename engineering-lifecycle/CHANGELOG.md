@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.11.0 - 2026-08-13
+
+### Added
+
+- **A repository can now declare the commands stack detection cannot infer.**
+  `_resolve_test_commands` derived commands two ways and only one of them could be
+  corrected. The Node branch reads `package.json` scripts by NAME, so naming a
+  script `lint` is how a repo tells the detector what its lint actually is. The
+  Python branch infers from dependency presence alone — `ruff` means lint, `pytest`
+  means unit — so a repository whose real checks are a bespoke validator had no way
+  to say so, and no way to widen a derivation that was too narrow.
+
+  Too narrow is the failure that matters, because it is the silent one. A missing
+  command reports `not-applicable`, which is visible. A command covering a fifth of
+  the suite reports **PASSED**. This repository derived
+  `python -m unittest discover -s tests` — the root suite, 90 tests — while also
+  holding `engineering-lifecycle/tests` (277) and `ai-utilities/tests` (113). A
+  plan-completion audit ran 90 of 480 and reported the test suite as passing.
+  `scripts/validate-repo.py` had discovered all three for months, because a
+  hardcoded list once meant `ai-utilities` could add a suite CI never ran; nothing
+  could tell the detector that.
+
+  `[tool.engineering-lifecycle.commands]` in `pyproject.toml` now overrides the
+  derivation. Applied last and for every package manager rather than only Python, so
+  a Node repo whose `test` script is narrower than its real suite has the same
+  escape hatch. Keys are the existing four: `unit`, `lint`, `typecheck`, `build`.
+
+  A malformed table is ignored rather than raised — it should cost a repository its
+  override, not its stack detection, and this runs on SessionStart. Non-string and
+  blank values are dropped rather than emitted as commands that would fail to
+  execute.
+
+  The durable half is `test_declared_commands_override_what_detection_infers` and
+  `test_declared_commands_survive_a_malformed_table`, both verified to fail when the
+  override is removed.
+
 ## 0.10.5 - 2026-08-09
 
 ### Fixed
